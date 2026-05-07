@@ -1,0 +1,204 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+@theme static {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-serif: 'Cinzel', 'IM Fell English', Georgia, serif;
+  --font-script: 'IM Fell English', Georgia, serif;
+
+  /* Pergament-Palette */
+  --color-parchment-50:  #fbf6e8;
+  --color-parchment-100: #f4ebcc;
+  --color-parchment-200: #ecdfae;
+  --color-parchment-300: #e2cf88;
+  --color-parchment-400: #cbb469;
+  --color-parchment-500: #a98e44;
+  --color-parchment-600: #856b30;
+  --color-parchment-700: #604c20;
+  --color-parchment-800: #3e3115;
+  --color-parchment-900: #221a0a;
+
+  /* Tinten-Skala — nautisches Blau (von hell zu Marineblau) */
+  --color-ink-50:  #e8eef7;
+  --color-ink-100: #c9d6e8;
+  --color-ink-200: #8fa9c9;
+  --color-ink-300: #4d75a5;
+  --color-ink-400: #234976;
+  --color-ink-500: #0f2a52;
+  --color-ink-600: #081c3a;
+  --color-ink-700: #04122a;
+
+  /* System-Akzente — werden via CSS-Variable pro Theme umgeschaltet */
+  --color-accent: #9b1c1c;
+  --color-accent-soft: #f9d6c4;
+}
+
+/* Globaler Pergament-Hintergrund */
+:root {
+  --bg-paper: #f4ebcc;
+  --bg-paper-deep: #e2cf88;
+  --paper-grain: radial-gradient(
+      ellipse at 30% 20%,
+      rgba(255,255,255,0.7) 0%,
+      rgba(255,255,255,0) 60%
+    ),
+    radial-gradient(
+      ellipse at 70% 80%,
+      rgba(96,76,32,0.18) 0%,
+      rgba(96,76,32,0) 55%
+    ),
+    repeating-linear-gradient(
+      45deg,
+      rgba(96,76,32,0.04) 0 2px,
+      transparent 2px 6px
+    );
+}
+
+body {
+  background: var(--bg-paper);
+  background-image: var(--paper-grain);
+  background-attachment: fixed;
+  color: var(--color-ink-500);
+  font-family: var(--font-sans);
+}
+
+/* System-Theme-Hooks */
+[data-system="dnd5e"], [data-system="dnd2024"] {
+  --color-accent: #9b1c1c;
+  --color-accent-soft: #f4d6c8;
+}
+[data-system="dsa5"] {
+  --color-accent: #1e3a8a;
+  --color-accent-soft: #cfd8f4;
+}
+[data-system="dsa41"] {
+  --color-accent: #312e81;
+  --color-accent-soft: #d4d2f0;
+}
+[data-system="htbah"] {
+  --color-accent: #047857;
+  --color-accent-soft: #c8e8d8;
+}
+
+.font-serif, h1, h2, h3, .heading {
+  font-family: var(--font-serif);
+  letter-spacing: 0.02em;
+}
+
+/* "Pergament-Karte" — Karten-Stil */
+.parchment-card {
+  background: linear-gradient(180deg, #fbf6e8 0%, #ecdfae 100%);
+  border: 1px solid color-mix(in srgb, var(--color-parchment-700) 40%, transparent);
+  border-radius: 0.75rem;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.6) inset,
+    0 -1px 0 rgba(96,76,32,0.15) inset,
+    0 8px 18px -10px rgba(34,26,10,0.45);
+  position: relative;
+}
+.parchment-card::before {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border: 1px dashed color-mix(in srgb, var(--color-parchment-700) 30%, transparent);
+  border-radius: 0.5rem;
+  pointer-events: none;
+}
+
+.accent-rule {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-accent), transparent);
+  opacity: 0.6;
+}
+
+/* Eingaben in Pergament-Optik */
+.parchment-input {
+  background: rgba(255,255,255,0.4);
+  border: 1px solid color-mix(in srgb, var(--color-parchment-700) 40%, transparent);
+  color: var(--color-ink-500);
+}
+.parchment-input:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.stat-block {
+  background: rgba(255,255,255,0.55);
+  border: 1px solid color-mix(in srgb, var(--color-parchment-700) 35%, transparent);
+  border-radius: 0.5rem;
+}
+
+/* Print-Stil grob vorbereitet */
+@media print {
+  body { background: white; }
+  .no-print { display: none !important; }
+}
+
+/*
+ * Nuxt UI v3 Theme-Override: Die Komponenten von @nuxt/ui nutzen interne
+ * CSS-Variablen (--ui-bg, --ui-text, --ui-border, ...). Wir überschreiben
+ * sie unabhängig vom Color-Mode mit Pergament-Werten und nautischer Tinte.
+ */
+html, html.dark, html.light, html[data-color-mode] {
+  color-scheme: light;
+}
+
+:root, :root.dark, :root.light, html, html.dark, html.light {
+  /* Hintergründe */
+  --ui-bg: var(--bg-paper);
+  --ui-bg-muted: rgba(255, 255, 255, 0.35);
+  --ui-bg-elevated: rgba(255, 255, 255, 0.6);
+  --ui-bg-accented: rgba(255, 255, 255, 0.78);
+  --ui-bg-inverted: var(--color-ink-500);
+
+  /* Texte */
+  --ui-text: var(--color-ink-500);
+  --ui-text-muted: var(--color-ink-400);
+  --ui-text-toned: var(--color-ink-400);
+  --ui-text-dimmed: var(--color-ink-300);
+  --ui-text-highlighted: var(--color-ink-700);
+  --ui-text-inverted: #ffffff;
+
+  /* Ränder */
+  --ui-border: color-mix(in srgb, var(--color-parchment-700) 40%, transparent);
+  --ui-border-muted: color-mix(in srgb, var(--color-parchment-700) 22%, transparent);
+  --ui-border-accented: color-mix(in srgb, var(--color-parchment-700) 55%, transparent);
+  --ui-border-inverted: var(--color-ink-500);
+
+  /* Primary = nautisches Akzent-Blau für Buttons & Fokus */
+  --ui-primary: var(--color-ink-500);
+  --ui-secondary: var(--color-accent);
+  --ui-radius: 0.5rem;
+}
+
+html, body {
+  color: var(--color-ink-500);
+  background-color: var(--bg-paper);
+}
+
+/* Native Inputs (falls ohne UInput-Wrapper genutzt) */
+input, textarea, select {
+  color: var(--color-ink-500);
+  background-color: rgba(255, 255, 255, 0.6);
+  border-color: color-mix(in srgb, var(--color-parchment-700) 40%, transparent);
+}
+input::placeholder, textarea::placeholder {
+  color: color-mix(in srgb, var(--color-ink-500) 45%, transparent);
+}
+input:focus, textarea:focus, select:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+  border-color: var(--color-accent);
+}
+
+/* Sicherstellen, dass Form-Labels die Tintenfarbe haben */
+label {
+  color: var(--color-ink-500);
+  font-weight: 500;
+}
+
+/* Tailwind-Util-Overrides für unsere ink-Skala */
+.text-ink-300 { color: var(--color-ink-300) !important; }
+.text-ink-400 { color: var(--color-ink-400) !important; }
+.text-ink-500 { color: var(--color-ink-500) !important; }
+.text-ink-700 { color: var(--color-ink-700) !important; }
