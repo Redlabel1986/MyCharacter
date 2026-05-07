@@ -14,12 +14,12 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^0.10.4",
     "@nuxt/ui": "^3.0.0",
     "@nuxtjs/google-fonts": "^3.2.0",
     "drizzle-orm": "^0.36.0",
     "nuxt": "^3.14.0",
     "nuxt-auth-utils": "^0.5.10",
-    "postgres": "^3.4.9",
     "vue": "^3.5.0",
     "vue-router": "^4.4.0",
     "zod": "^3.23.0"

@@ -1,10 +1,10 @@
-import postgres from 'postgres'
-import { drizzle } from 'drizzle-orm/postgres-js'
+import { neon, type NeonQueryFunction } from '@neondatabase/serverless'
+import { drizzle } from 'drizzle-orm/neon-http'
 import { sql } from 'drizzle-orm'
 import * as schema from '../database/schema'
 
 let _db: ReturnType<typeof drizzle> | null = null
-let _client: postgres.Sql | null = null
+let _client: NeonQueryFunction<false, false> | null = null
 let _initPromise: Promise<void> | null = null
 
 export const ADMIN_EMAIL = 'jasongehrts@gmail.com'
@@ -21,7 +21,7 @@ export function useDb() {
     )
   }
 
-  _client = postgres(url, { max: 1, prepare: false })
+  _client = neon(url)
   _db = drizzle(_client, { schema })
 
   if (!_initPromise) {
@@ -51,7 +51,6 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `)
-  // Idempotent: ergänzt role-Spalte falls die Tabelle schon ohne sie existiert
   await db.execute(sql`
     ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'player'
   `)
@@ -81,7 +80,6 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_character_access_dm ON character_access(dm_user_id)
   `)
-  // Jason wird automatisch zum Admin gemacht, falls er existiert
   await db.execute(sql`
     UPDATE users SET role = 'admin' WHERE email = ${ADMIN_EMAIL} AND role <> 'admin'
   `)

@@ -1,5 +1,5 @@
 import { and, eq, or } from 'drizzle-orm'
-import type { drizzle } from 'drizzle-orm/postgres-js'
+import type { drizzle } from 'drizzle-orm/neon-http'
 import { characters, characterAccess } from '../database/schema'
 import type { UserRole } from '../database/schema'
 
