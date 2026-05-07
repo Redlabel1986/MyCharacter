@@ -4,10 +4,17 @@ import { useDb } from '~~/server/utils/db'
 import { characters } from '~~/server/database/schema'
 import { loadAccessibleCharacter } from '~~/server/utils/character-access'
 
+// portraitUrl: entweder absolute URL (Vercel Blob) oder lokaler Dev-Pfad
+// unter /uploads/. Andere Strings werden abgelehnt (Schutz vor javascript:-URIs).
+const portraitUrlSchema = z.union([
+  z.string().url(),
+  z.string().regex(/^\/uploads\/[A-Za-z0-9_\-/.]+$/),
+])
+
 const bodySchema = z.object({
   name: z.string().min(1).max(120).optional(),
   data: z.record(z.unknown()).optional(),
-  portraitUrl: z.string().url().nullable().optional(),
+  portraitUrl: portraitUrlSchema.nullable().optional(),
 })
 
 export default defineEventHandler(async (event) => {

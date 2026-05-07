@@ -34,3 +34,6 @@ data/
 *.sqlite
 *.sqlite-journal
 *.db
+
+# Lokale Datei-Uploads (Dev-Fallback fuer Portrait-Upload ohne Vercel-Blob-Token)
+public/uploads/

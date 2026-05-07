@@ -9,14 +9,21 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: string | null): void }>()
 const fileInput = ref<HTMLInputElement | null>(null)
 const uploading = ref(false)
 const error = ref<string | null>(null)
+const imageError = ref<string | null>(null)
 
 const pick = () => fileInput.value?.click()
+
+const onImgError = () => {
+  imageError.value = `Bild konnte nicht geladen werden. URL: ${props.modelValue ?? '(leer)'}`
+}
+const onImgLoad = () => { imageError.value = null }
 
 const onChange = async (e: Event) => {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
   error.value = null
+  imageError.value = null
   uploading.value = true
   try {
     const form = new FormData()
@@ -25,14 +32,23 @@ const onChange = async (e: Event) => {
       method: 'POST',
       body: form,
     })
+    if (!result?.url) {
+      throw new Error('Server lieferte keine URL zurueck.')
+    }
+    console.log('[portrait] upload-result url=', result.url)
     emit('update:modelValue', result.url)
     // Direkt persistieren — Owner sieht den Stand sofort
     await $fetch(`/api/characters/${props.characterId}`, {
       method: 'PUT',
       body: { portraitUrl: result.url },
     })
+    console.log('[portrait] persisted url=', result.url)
   } catch (e: unknown) {
-    error.value = (e as { statusMessage?: string }).statusMessage ?? 'Upload fehlgeschlagen.'
+    console.error('[portrait] upload error', e)
+    error.value =
+      (e as { statusMessage?: string; message?: string }).statusMessage ??
+      (e as { message?: string }).message ??
+      'Upload fehlgeschlagen.'
   } finally {
     uploading.value = false
     if (input) input.value = ''
@@ -59,11 +75,14 @@ const remove = async () => {
         :src="modelValue"
         alt="Portrait"
         class="w-full h-full object-cover"
+        @error="onImgError"
+        @load="onImgLoad"
       >
       <span v-else class="text-ink-300 text-xs text-center px-2">
         Kein Portrait
       </span>
     </div>
+    <UAlert v-if="imageError" color="warning" :title="imageError" class="w-full" />
 
     <div v-if="!readonly" class="flex flex-col gap-2 w-full">
       <input
