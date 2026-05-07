@@ -48,34 +48,65 @@ export default defineEventHandler(async (event) => {
   //    Wichtig: bei AcroForm-PDFs (z.B. offizielle HtbaH-Boegen) sind die
   //    ausgefuellten Werte NICHT im Static-Text — nur in den Form-Field-
   //    Annotations. Wir muessen beides extrahieren und Claude geben.
+  //    getFieldObjects() liefert die kanonische, vom Renderer gelieferte
+  //    Werte-Liste (inkl. dropdown/listbox); page.getAnnotations() ist
+  //    Fallback fuer PDFs ohne /AcroForm-Sandbox-Daten.
   let pdfText: string
   let formFieldsText: string
   let formFieldCount: number
+  let extractionSource: 'getFieldObjects' | 'annotations' | 'none' = 'none'
   try {
     const pdf = await getDocumentProxy(new Uint8Array(filePart.data))
     const { text } = await extractText(pdf, { mergePages: true })
     pdfText = (Array.isArray(text) ? text.join('\n\n') : text).trim()
 
-    // Form-Felder pro Page sammeln
     const fields: Array<{ name: string; value: string }> = []
-    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-      const page = await pdf.getPage(pageNum)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const annotations = (await page.getAnnotations()) as Array<Record<string, any>>
-      for (const annot of annotations) {
-        if (annot.subtype !== 'Widget') continue
-        const name = String(annot.fieldName ?? annot.id ?? '').trim()
-        if (!name) continue
-        // Wert: bei Text fieldValue, bei Checkbox/Radio buttonValue, bei Dropdown V/fieldValue
-        const rawValue = annot.fieldValue ?? annot.buttonValue ?? annot.V ?? ''
+
+    // Primaer: getFieldObjects (kanonische PDF.js Methode)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fieldObjects = (await pdf.getFieldObjects()) as Record<string, any[]> | null
+    if (fieldObjects) {
+      for (const [name, arr] of Object.entries(fieldObjects)) {
+        const f = Array.isArray(arr) ? arr[0] : arr
+        if (!f) continue
+        const rawValue = f.value
+        if (rawValue === undefined || rawValue === null) continue
         const value = Array.isArray(rawValue) ? rawValue.join(', ') : String(rawValue)
         const trimmed = value.trim()
         if (!trimmed || trimmed === 'Off' || trimmed === '/Off') continue
         fields.push({ name, value: trimmed })
       }
+      if (fields.length > 0) extractionSource = 'getFieldObjects'
     }
+
+    // Fallback: per-page Widget-Annotations
+    if (fields.length === 0) {
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const annotations = (await page.getAnnotations()) as Array<Record<string, any>>
+        for (const annot of annotations) {
+          if (annot.subtype !== 'Widget') continue
+          const name = String(annot.fieldName ?? annot.id ?? '').trim()
+          if (!name) continue
+          const rawValue = annot.fieldValue ?? annot.buttonValue ?? annot.V ?? ''
+          const value = Array.isArray(rawValue) ? rawValue.join(', ') : String(rawValue)
+          const trimmed = value.trim()
+          if (!trimmed || trimmed === 'Off' || trimmed === '/Off') continue
+          fields.push({ name, value: trimmed })
+        }
+      }
+      if (fields.length > 0) extractionSource = 'annotations'
+    }
+
     formFieldCount = fields.length
     formFieldsText = fields.map((f) => `  ${f.name}: ${f.value}`).join('\n')
+    console.log(
+      '[import] extraction-source=%s text-len=%d form-fields=%d',
+      extractionSource,
+      pdfText.length,
+      formFieldCount,
+    )
   } catch (err) {
     console.error('PDF parse error:', err)
     throw createError({ statusCode: 422, statusMessage: 'Konnte PDF nicht lesen.' })
@@ -286,12 +317,14 @@ BEACHTE: skills hat 7 Eintraege, weil der PDF 7 ausgefuellte Skill-Zeilen hat. N
 
   // Diagnose-Info zur Anzeige im Frontend (zeigt was tatsaechlich extrahiert wurde)
   const stats = summarizeData(parsed.system, mergedData)
+  const diagnostic = `${formFieldCount} Form-Felder (${extractionSource}) · ${pdfText.length} Zeichen Text`
 
   return {
     character: inserted[0],
     confidence: parsed.confidence ?? 'medium',
     notes: parsed.notes ?? '',
     stats,
+    diagnostic,
   }
 })
 

@@ -8,7 +8,7 @@ const file = ref<File | null>(null)
 const dragOver = ref(false)
 const loading = ref(false)
 const error = ref<string | null>(null)
-const status = ref<{ confidence: string; notes: string; stats: string } | null>(null)
+const status = ref<{ confidence: string; notes: string; stats: string; diagnostic: string } | null>(null)
 
 const fileInput = ref<HTMLInputElement | null>(null)
 
@@ -55,6 +55,7 @@ const submit = async () => {
       confidence: string
       notes: string
       stats: string
+      diagnostic: string
     }>('/api/import/character', {
       method: 'POST',
       body: form,
@@ -63,6 +64,7 @@ const submit = async () => {
       confidence: result.confidence,
       notes: result.notes,
       stats: result.stats,
+      diagnostic: result.diagnostic,
     }
     // Mehr Zeit zum Lesen, dann automatisch zum Charakter
     setTimeout(() => navigateTo(`/characters/${result.character.id}`), 4000)
@@ -145,7 +147,7 @@ const submit = async () => {
         v-if="status"
         color="success"
         :title="`Import erfolgreich (Vertrauen: ${status.confidence}) — ${status.stats}`"
-        :description="status.notes"
+        :description="`${status.notes}\n\nPDF-Diagnose: ${status.diagnostic}`"
       />
 
       <UButton
