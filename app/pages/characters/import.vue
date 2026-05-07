@@ -8,7 +8,7 @@ const file = ref<File | null>(null)
 const dragOver = ref(false)
 const loading = ref(false)
 const error = ref<string | null>(null)
-const status = ref<{ confidence: string; notes: string } | null>(null)
+const status = ref<{ confidence: string; notes: string; stats: string } | null>(null)
 
 const fileInput = ref<HTMLInputElement | null>(null)
 
@@ -54,12 +54,18 @@ const submit = async () => {
       character: { id: number }
       confidence: string
       notes: string
+      stats: string
     }>('/api/import/character', {
       method: 'POST',
       body: form,
     })
-    status.value = { confidence: result.confidence, notes: result.notes }
-    setTimeout(() => navigateTo(`/characters/${result.character.id}`), 1500)
+    status.value = {
+      confidence: result.confidence,
+      notes: result.notes,
+      stats: result.stats,
+    }
+    // Mehr Zeit zum Lesen, dann automatisch zum Charakter
+    setTimeout(() => navigateTo(`/characters/${result.character.id}`), 4000)
   } catch (e: unknown) {
     error.value =
       (e as { statusMessage?: string }).statusMessage ?? 'Import fehlgeschlagen.'
@@ -138,7 +144,7 @@ const submit = async () => {
       <UAlert
         v-if="status"
         color="success"
-        :title="`Import erfolgreich (Vertrauen: ${status.confidence})`"
+        :title="`Import erfolgreich (Vertrauen: ${status.confidence}) — ${status.stats}`"
         :description="status.notes"
       />
 
