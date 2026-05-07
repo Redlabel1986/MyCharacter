@@ -3,7 +3,7 @@ import { GAME_SYSTEMS, SYSTEM_META, type GameSystem } from '~~/shared/systems'
 
 definePageMeta({ middleware: ['auth'] })
 
-const selectedSystem = ref<'' | GameSystem>('')
+const selectedSystem = ref<GameSystem | undefined>(undefined)
 const file = ref<File | null>(null)
 const dragOver = ref(false)
 const loading = ref(false)
@@ -84,12 +84,22 @@ const submit = async () => {
 
     <div class="parchment-card p-6 space-y-4">
       <UFormField label="Regelwerk (optional — wird sonst automatisch erkannt)">
-        <USelect
-          v-model="selectedSystem"
-          :items="[{ label: 'Auto-erkennen', value: '' }, ...GAME_SYSTEMS.map((id) => ({ label: SYSTEM_META[id].label, value: id }))]"
-          value-key="value"
-          class="w-full"
-        />
+        <div class="flex gap-2 items-center">
+          <USelect
+            v-model="selectedSystem"
+            :items="GAME_SYSTEMS.map((id) => ({ label: SYSTEM_META[id].label, value: id }))"
+            value-key="value"
+            placeholder="Auto-erkennen (KI wählt selbst)"
+            class="w-full"
+          />
+          <UButton
+            v-if="selectedSystem"
+            size="xs"
+            variant="ghost"
+            icon="i-lucide-x"
+            @click="selectedSystem = undefined"
+          />
+        </div>
       </UFormField>
 
       <div

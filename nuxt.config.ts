@@ -54,6 +54,20 @@ export default defineNuxtConfig({
     experimental: {
       tasks: true,
     },
+    vercel: {
+      // Vercel-Function-Timeout auf 60 Sekunden — KI-Extraktion via Anthropic
+      // kann bei großen PDFs > 10s (Hobby-Default) dauern.
+      functions: {
+        maxDuration: 60,
+      },
+    },
+  },
+
+  routeRules: {
+    '/api/import/**': {
+      // Override für KI-Endpoints: bis zu 60s (Vercel Hobby max).
+      vercel: { maxDuration: 60 },
+    },
   },
 
   experimental: {

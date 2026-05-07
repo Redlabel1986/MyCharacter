@@ -144,9 +144,11 @@ REGELN:
   let parsed: ExtractedCharacter
   try {
     const response = await client.messages.create({
+      // Opus 4.7 ohne adaptive Thinking — fuer strukturierte Extraktion ist
+      // schnelle Antwort wichtiger als deep reasoning, und Vercel-Functions
+      // koennen sonst > 60s laufen.
       model: 'claude-opus-4-7',
-      max_tokens: 16_000,
-      thinking: { type: 'adaptive' },
+      max_tokens: 8_000,
       output_config: {
         effort: 'medium',
         format: { type: 'json_schema', schema: responseSchema },
