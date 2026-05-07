@@ -2,10 +2,14 @@
 import {
   HTBAH_TALENTS,
   HTBAH_TALENT_LABELS,
-  htbahCapForLevel,
+  HTBAH_SKILL_CAP,
   htbahSkillTotal,
-  htbahDefaultInsightMax,
+  htbahTalentValue,
+  htbahInsightMax,
   htbahCalcSpentPoints,
+  htbahPointsRemaining,
+  htbahInitiativeBonus,
+  htbahStatus,
   createBlankHtbah,
   type HtbahCharacterData,
   type HtbahTalent,
@@ -18,22 +22,34 @@ import StatBlock from '~/components/ui/StatBlock.vue'
 const props = defineProps<{ data: Record<string, unknown>; system: GameSystem }>()
 const emit = defineEmits<{ (e: 'update:data', v: Record<string, unknown>): void }>()
 
-// Mit Blank mergen — schützt alte Charaktere vor fehlenden Feldern (talents, pointsPool, etc.).
+// Mit Blank mergen — schützt alte Charaktere und ignoriert deprecated Felder.
 const sheet = computed<HtbahCharacterData>(() => {
   const blank = createBlankHtbah('')
-  const incoming = (props.data ?? {}) as Partial<HtbahCharacterData>
+  const incoming = (props.data ?? {}) as Partial<HtbahCharacterData> & {
+    inspiration?: number
+    level?: number
+    skillCap?: number
+  }
   return {
     ...blank,
-    ...incoming,
     identity: { ...blank.identity, ...(incoming.identity ?? {}) },
     hp: { ...blank.hp, ...(incoming.hp ?? {}) },
     pointsPool: { ...blank.pointsPool, ...(incoming.pointsPool ?? {}) },
     talents: {
-      handeln: { ...blank.talents.handeln, ...(incoming.talents?.handeln ?? {}) },
-      wissen: { ...blank.talents.wissen, ...(incoming.talents?.wissen ?? {}) },
-      soziales: { ...blank.talents.soziales, ...(incoming.talents?.soziales ?? {}) },
+      handeln: {
+        insightCurrent: incoming.talents?.handeln?.insightCurrent ?? 0,
+      },
+      wissen: {
+        insightCurrent: incoming.talents?.wissen?.insightCurrent ?? 0,
+      },
+      soziales: {
+        insightCurrent: incoming.talents?.soziales?.insightCurrent ?? 0,
+      },
     },
     skills: incoming.skills ?? [],
+    inventory: incoming.inventory ?? '',
+    beute: incoming.beute ?? '',
+    notes: incoming.notes ?? '',
   }
 })
 
@@ -44,43 +60,22 @@ const clone = () => JSON.parse(JSON.stringify(sheet.value)) as HtbahCharacterDat
 const setIdentity = <K extends keyof HtbahCharacterData['identity']>(k: K, v: string) => {
   const n = clone(); n.identity[k] = v; update(n)
 }
-const setLevel = (v: number) => {
-  const n = clone()
-  n.level = Math.max(1, v)
-  n.skillCap = htbahCapForLevel(n.level)
-  update(n)
-}
 const setHp = <K extends keyof HtbahCharacterData['hp']>(k: K, v: number) => {
   const n = clone(); n.hp[k] = v; update(n)
 }
-const setInspiration = (v: number) => { const n = clone(); n.inspiration = v; update(n) }
-const setPool = <K extends keyof HtbahCharacterData['pointsPool']>(k: K, v: number) => {
-  const n = clone(); n.pointsPool[k] = v; update(n)
+const setPoolTotal = (v: number) => { const n = clone(); n.pointsPool.total = v; update(n) }
+const setInsightCurrent = (t: HtbahTalent, v: number) => {
+  const n = clone(); n.talents[t].insightCurrent = v; update(n)
 }
-
-const setTalentValue = (t: HtbahTalent, v: number) => {
-  const n = clone()
-  const oldExpected = htbahDefaultInsightMax(sheet.value.talents[t].value)
-  n.talents[t].value = v
-  // Wenn insightMax noch dem alten Standard entsprach, mit dem neuen Standard ersetzen
-  if (n.talents[t].insightMax === oldExpected) {
-    n.talents[t].insightMax = htbahDefaultInsightMax(v)
-  }
-  update(n)
-}
-const setTalentInsight = (t: HtbahTalent, k: 'insightCurrent' | 'insightMax', v: number) => {
-  const n = clone(); n.talents[t][k] = v; update(n)
-}
-const autoFillInsight = (t: HtbahTalent) => {
-  const n = clone()
-  const max = htbahDefaultInsightMax(n.talents[t].value)
-  n.talents[t].insightMax = max
-  n.talents[t].insightCurrent = max
-  update(n)
-}
-
 const setText = <K extends 'inventory' | 'notes' | 'beute'>(k: K, v: string) => {
   const n = clone(); n[k] = v; update(n)
+}
+const refreshAllInsights = () => {
+  const n = clone()
+  for (const t of HTBAH_TALENTS) {
+    n.talents[t].insightCurrent = htbahInsightMax(n, t)
+  }
+  update(n)
 }
 
 const addSkill = (talent: HtbahTalent) => {
@@ -93,12 +88,6 @@ const updateSkill = (idx: number, patch: Partial<HtbahSkill>) => {
 }
 const removeSkill = (idx: number) => { const n = clone(); n.skills.splice(idx, 1); update(n) }
 
-const recalcSpent = () => {
-  const n = clone()
-  n.pointsPool.spent = htbahCalcSpentPoints(n)
-  update(n)
-}
-
 const skillsByTalent = computed(() => {
   const map: Record<HtbahTalent, Array<{ idx: number; skill: HtbahSkill }>> = {
     handeln: [], wissen: [], soziales: [],
@@ -109,9 +98,15 @@ const skillsByTalent = computed(() => {
   return map
 })
 
-const remainingPoints = computed(
-  () => sheet.value.pointsPool.total - sheet.value.pointsPool.spent,
-)
+const remaining = computed(() => htbahPointsRemaining(sheet.value))
+const status = computed(() => htbahStatus(sheet.value.hp))
+const statusLabel = computed(() => {
+  switch (status.value) {
+    case 'tot': return 'Tot'
+    case 'bewusstlos': return 'Bewusstlos'
+    default: return 'Normal'
+  }
+})
 </script>
 
 <template>
@@ -128,35 +123,60 @@ const remainingPoints = computed(
         <UFormField label="Stimme"><UInput :model-value="sheet.identity.voice" @update:model-value="setIdentity('voice', String($event))" /></UFormField>
         <UFormField label="Kleidung"><UInput :model-value="sheet.identity.clothing" @update:model-value="setIdentity('clothing', String($event))" /></UFormField>
         <UFormField label="Vorlieben"><UInput :model-value="sheet.identity.likes" @update:model-value="setIdentity('likes', String($event))" /></UFormField>
-        <UFormField label="Vorteile"><UTextarea rows="3" :model-value="sheet.identity.advantages" class="w-full" @update:model-value="setIdentity('advantages', String($event))" /></UFormField>
-        <UFormField label="Nachteile"><UTextarea rows="3" :model-value="sheet.identity.disadvantages" class="w-full" @update:model-value="setIdentity('disadvantages', String($event))" /></UFormField>
+        <UFormField label="Vorteile (kosten Punkte)"><UTextarea rows="3" :model-value="sheet.identity.advantages" class="w-full" @update:model-value="setIdentity('advantages', String($event))" /></UFormField>
+        <UFormField label="Nachteile (bringen Punkte)"><UTextarea rows="3" :model-value="sheet.identity.disadvantages" class="w-full" @update:model-value="setIdentity('disadvantages', String($event))" /></UFormField>
       </div>
     </SheetSection>
 
     <SheetSection title="Status">
       <div class="grid grid-cols-2 gap-2">
-        <StatBlock label="Stufe" :value="sheet.level" />
-        <StatBlock label="Skill-Cap" :value="sheet.skillCap" />
         <StatBlock label="LP" :value="`${sheet.hp.current}/${sheet.hp.max}`" />
-        <StatBlock label="Inspiration" :value="sheet.inspiration" />
+        <StatBlock label="Initiative" :value="`+${htbahInitiativeBonus(sheet)}`" sublabel="W10 + Handeln" />
       </div>
+      <div
+        class="mt-2 text-center text-xs uppercase tracking-widest font-semibold py-1 rounded"
+        :class="status === 'tot' ? 'bg-red-700 text-white'
+          : status === 'bewusstlos' ? 'bg-amber-200 text-amber-900'
+          : 'bg-green-100 text-green-800'"
+      >
+        {{ statusLabel }}
+      </div>
+
       <div class="grid grid-cols-2 gap-2 mt-3">
-        <UFormField label="Stufe"><UInput type="number" :model-value="sheet.level" @update:model-value="setLevel(Number($event))" /></UFormField>
-        <UFormField label="LP aktuell"><UInput type="number" :model-value="sheet.hp.current" @update:model-value="setHp('current', Number($event))" /></UFormField>
-        <UFormField label="LP max"><UInput type="number" :model-value="sheet.hp.max" @update:model-value="setHp('max', Number($event))" /></UFormField>
-        <UFormField label="Inspiration"><UInput type="number" :model-value="sheet.inspiration" @update:model-value="setInspiration(Number($event))" /></UFormField>
+        <UFormField label="LP aktuell">
+          <UInput type="number" :model-value="sheet.hp.current" @update:model-value="setHp('current', Number($event))" />
+        </UFormField>
+        <UFormField label="LP max">
+          <UInput type="number" :model-value="sheet.hp.max" @update:model-value="setHp('max', Number($event))" />
+        </UFormField>
       </div>
+      <p class="text-[10px] text-ink-300 mt-1">
+        &lt; 10 LP = bewusstlos · 0 LP = tot · &gt; 60 Schaden in einem Treffer = sofort bewusstlos
+      </p>
 
       <div class="accent-rule my-3" />
       <div class="text-xs uppercase tracking-widest text-ink-300 mb-1">Punkte-Pool</div>
       <div class="grid grid-cols-3 gap-2">
-        <UFormField label="Gesamt"><UInput type="number" :model-value="sheet.pointsPool.total" @update:model-value="setPool('total', Number($event))" /></UFormField>
-        <UFormField label="Verbraucht"><UInput type="number" :model-value="sheet.pointsPool.spent" @update:model-value="setPool('spent', Number($event))" /></UFormField>
-        <StatBlock label="Übrig" :value="remainingPoints" />
+        <UFormField label="Gesamt">
+          <UInput type="number" :model-value="sheet.pointsPool.total" @update:model-value="setPoolTotal(Number($event))" />
+        </UFormField>
+        <StatBlock label="Vergeben" :value="htbahCalcSpentPoints(sheet)" />
+        <StatBlock
+          label="Übrig"
+          :value="remaining"
+        />
       </div>
-      <UButton size="xs" variant="ghost" class="mt-2" @click="recalcSpent">
-        Aus Skills + Begabungen neu berechnen
+      <p class="text-[10px] text-ink-300 mt-1">
+        Default 400. Vor-/Nachteile passen den Pool an.
+      </p>
+
+      <div class="accent-rule my-3" />
+      <UButton size="xs" variant="outline" block @click="refreshAllInsights">
+        Geistesblitzpunkte auffrischen
       </UButton>
+      <p class="text-[10px] text-ink-300 mt-1">
+        GBP regenerieren am Anfang jedes Abenteuers.
+      </p>
     </SheetSection>
 
     <SheetSection
@@ -165,47 +185,33 @@ const remainingPoints = computed(
       :title="HTBAH_TALENT_LABELS[talent]"
       class="lg:col-span-1"
     >
-      <div class="grid grid-cols-2 gap-3 items-end">
-        <UFormField label="Grundwert">
-          <UInput
-            type="number"
-            :model-value="sheet.talents[talent].value"
-            @update:model-value="setTalentValue(talent, Number($event))"
-          />
-        </UFormField>
-        <div class="stat-block px-2 py-1 text-center">
-          <div class="text-[10px] uppercase tracking-widest text-ink-300">Gedankenblitze</div>
+      <div class="grid grid-cols-2 gap-2 items-end">
+        <div class="stat-block px-2 py-2 text-center">
+          <div class="text-[10px] uppercase tracking-widest text-ink-300">Begabungswert</div>
+          <div class="font-serif text-3xl">{{ htbahTalentValue(sheet, talent) }}</div>
+          <div class="text-[10px] text-ink-300">aus Skill-Punkten</div>
+        </div>
+        <div class="stat-block px-2 py-2 text-center">
+          <div class="text-[10px] uppercase tracking-widest text-ink-300">Geistesblitze</div>
           <div class="font-serif text-2xl">
-            {{ sheet.talents[talent].insightCurrent }}/{{ sheet.talents[talent].insightMax }}
+            {{ sheet.talents[talent].insightCurrent }}/{{ htbahInsightMax(sheet, talent) }}
           </div>
         </div>
       </div>
-      <div class="grid grid-cols-2 gap-2 mt-2">
-        <UFormField label="GB aktuell">
-          <UInput
-            type="number"
-            :model-value="sheet.talents[talent].insightCurrent"
-            @update:model-value="setTalentInsight(talent, 'insightCurrent', Number($event))"
-          />
-        </UFormField>
-        <UFormField label="GB max">
-          <UInput
-            type="number"
-            :model-value="sheet.talents[talent].insightMax"
-            @update:model-value="setTalentInsight(talent, 'insightMax', Number($event))"
-          />
-        </UFormField>
-      </div>
-      <UButton size="xs" variant="ghost" class="mt-2" @click="autoFillInsight(talent)">
-        Auto: {{ htbahDefaultInsightMax(sheet.talents[talent].value) }} GB
-      </UButton>
+      <UFormField label="GBP aktuell" class="mt-2">
+        <UInput
+          type="number"
+          :model-value="sheet.talents[talent].insightCurrent"
+          @update:model-value="setInsightCurrent(talent, Number($event))"
+        />
+      </UFormField>
 
       <div class="accent-rule my-3" />
       <div class="text-xs uppercase tracking-widest text-ink-300 mb-1">Fähigkeiten</div>
       <div class="hidden sm:grid grid-cols-12 gap-1 text-[10px] text-ink-300 px-1 mb-1">
         <div class="col-span-6">Name</div>
         <div class="col-span-2 text-center">Punkte</div>
-        <div class="col-span-1 text-center">Grund</div>
+        <div class="col-span-1 text-center">+Beg.</div>
         <div class="col-span-2 text-center">Total</div>
         <div class="col-span-1"></div>
       </div>
@@ -228,9 +234,13 @@ const remainingPoints = computed(
             @update:model-value="updateSkill(entry.idx, { spentPoints: Number($event) })"
           />
           <div class="col-span-1 text-center text-sm text-ink-400">
-            {{ sheet.talents[talent].value }}
+            {{ htbahTalentValue(sheet, talent) }}
           </div>
-          <div class="col-span-2 text-center font-serif text-base">
+          <div
+            class="col-span-2 text-center font-serif text-base"
+            :class="(entry.skill.spentPoints + htbahTalentValue(sheet, talent)) > HTBAH_SKILL_CAP ? 'text-red-700' : ''"
+            :title="(entry.skill.spentPoints + htbahTalentValue(sheet, talent)) > HTBAH_SKILL_CAP ? 'Cap bei 100 — überschüssige Punkte umverteilen' : ''"
+          >
             {{ htbahSkillTotal(sheet, entry.skill) }}
           </div>
           <UButton
