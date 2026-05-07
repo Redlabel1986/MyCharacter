@@ -110,19 +110,23 @@ ${JSON.stringify(blanks.htbah, null, 2)}
 REGELN:
 1. Antworte AUSSCHLIESSLICH mit JSON. Kein zusaetzlicher Text, keine Code-Fences (kein \`\`\`).
    Beginne deine Antwort direkt mit { und ende mit }.
-2. Das Antwort-JSON hat folgende Struktur:
+2. Das Antwort-JSON hat EXAKT diese aeussere Struktur (data ist ein NESTED Objekt!):
    {
-     "system": "dnd5e" | "dnd2024" | "dsa5" | "dsa41" | "htbah",
-     "name": "Charaktername",
-     "confidence": "high" | "medium" | "low",
-     "notes": "1-2 Saetze was erkannt wurde",
-     "data": { ... system-spezifische Struktur wie oben gezeigt ... }
+     "system": "<dnd5e|dnd2024|dsa5|dsa41|htbah>",
+     "name": "<Charaktername aus dem PDF>",
+     "confidence": "<high|medium|low>",
+     "notes": "<1-2 Saetze was erkannt wurde>",
+     "data": { <hier kommt das KOMPLETTE system-spezifische Objekt aus dem Schema oben - mit identity, talents, skills usw.> }
    }
-3. Felder, die du NICHT im Text findest: Default-Wert (0, "", [], false) BEIBEHALTEN — nicht raten.
-4. data MUSS die Struktur des erkannten Systems exakt einhalten (alle Felder vorhanden, keine zusaetzlichen).
-5. Bei D&D: edition korrekt auf "dnd5e" oder "dnd2024" setzen.
-6. Bei DSA-Talenten/Zaubern und HtbaH-Skills: nur Eintraege erstellen, die du im Text klar identifizierst. Generiere id-Felder als kurze Hex-Strings.
-7. confidence: "high" wenn alle Hauptwerte erkannt; "medium" wenn Stammdaten + Attribute klar; "low" wenn unsicher.`
+3. WICHTIG: data muss ein verschachteltes Objekt sein, NICHT die Felder direkt am Top-Level.
+4. Felder, die du NICHT im Text findest: Default-Wert (0, "", [], false) BEIBEHALTEN — nicht raten.
+5. data MUSS die Struktur des erkannten Systems exakt einhalten (alle Felder vorhanden, keine zusaetzlichen).
+6. Bei D&D: edition korrekt auf "dnd5e" oder "dnd2024" setzen.
+7. Bei DSA-Talenten/Zaubern und HtbaH-Skills: nur Eintraege erstellen, die du im Text klar identifizierst. Generiere id-Felder als kurze Hex-Strings (z.B. "a1b2c3d4").
+8. confidence: "high" wenn alle Hauptwerte erkannt; "medium" wenn Stammdaten + Attribute klar; "low" wenn unsicher.
+
+BEISPIEL einer korrekten Antwort fuer einen HtbaH-Charakter:
+{"system":"htbah","name":"Bargin","confidence":"high","notes":"...","data":{"identity":{"name":"Bargin","sex":"Maennlich",...},"hp":{"max":100,"current":94},"pointsPool":{"total":425},"talents":{"handeln":{"insightCurrent":2},"wissen":{"insightCurrent":2},"soziales":{"insightCurrent":1}},"skills":[{"id":"a1","name":"Fingerfertigkeit","talent":"handeln","spentPoints":60}],"inventory":"...","beute":"","notes":""}}`
 
   const userMessage = systemHint
     ? `User hat das Regelwerk vorab gewaehlt: **${systemHint}**. Verifiziere im Text und nutze das, falls passend.\n\nPDF-TEXT:\n\n${truncatedText}`
@@ -161,7 +165,34 @@ REGELN:
         .replace(/\s*```\s*$/, '')
         .trim()
     }
-    parsed = JSON.parse(jsonText) as ExtractedCharacter
+    const raw = JSON.parse(jsonText) as Record<string, unknown>
+
+    // Robust: wenn die KI das data-Feld weggelassen hat und die Charakter-
+    // felder direkt am Top-Level stehen, bauen wir data daraus.
+    const META_KEYS = new Set(['system', 'name', 'confidence', 'notes', 'data'])
+    let dataField: Record<string, unknown>
+    if (raw.data && typeof raw.data === 'object' && !Array.isArray(raw.data)) {
+      dataField = raw.data as Record<string, unknown>
+    } else {
+      console.warn('[import] KI gab keinen data-Wrapper zurueck — Top-Level-Fallback aktiv.')
+      dataField = {}
+      for (const [k, v] of Object.entries(raw)) {
+        if (!META_KEYS.has(k)) dataField[k] = v
+      }
+    }
+
+    parsed = {
+      system: raw.system as ExtractedCharacter['system'],
+      name: (raw.name as string) ?? '',
+      confidence: raw.confidence as ExtractedCharacter['confidence'],
+      notes: (raw.notes as string) ?? '',
+      data: dataField,
+    }
+
+    // Diagnose-Log fuer Vercel — sieht man im Function-Log
+    console.log('[import] system=%s name=%s confidence=%s data-keys=%s',
+      parsed.system, parsed.name, parsed.confidence,
+      Object.keys(parsed.data).join(','))
   } catch (err: unknown) {
     if (err instanceof Anthropic.RateLimitError) {
       throw createError({
