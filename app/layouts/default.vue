@@ -23,7 +23,7 @@ const roleBadge = computed(() => {
 <template>
   <div class="min-h-screen flex flex-col">
     <header class="no-print border-b border-parchment-700/30 bg-parchment-50/70 backdrop-blur">
-      <div class="max-w-6xl mx-auto px-4 py-3 flex items-center gap-4 flex-wrap">
+      <div class="max-w-screen-2xl mx-auto px-4 py-3 flex items-center gap-4 flex-wrap">
         <NuxtLink
           to="/"
           class="font-serif text-2xl font-bold text-ink-500 tracking-wide flex items-baseline"
@@ -67,7 +67,7 @@ const roleBadge = computed(() => {
       </div>
     </header>
 
-    <main class="flex-1 w-full max-w-6xl mx-auto px-4 py-8">
+    <main class="flex-1 w-full max-w-screen-2xl mx-auto px-4 py-8">
       <slot />
     </main>
 
