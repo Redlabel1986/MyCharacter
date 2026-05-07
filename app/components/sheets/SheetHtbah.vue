@@ -10,6 +10,9 @@ import {
   htbahPointsRemaining,
   htbahInitiativeBonus,
   htbahStatus,
+  htbahRollProbe,
+  htbahCritThreshold,
+  htbahFumbleThreshold,
   createBlankHtbah,
   type HtbahCharacterData,
   type HtbahTalent,
@@ -107,6 +110,92 @@ const statusLabel = computed(() => {
     default: return 'Normal'
   }
 })
+
+// — Probe würfeln —
+const probeTargetId = ref<string | undefined>(undefined)
+const probeRoll = ref<number | null>(null)
+
+interface ProbeOption { label: string; value: string; group?: string }
+const probeOptions = computed<ProbeOption[]>(() => {
+  const items: ProbeOption[] = []
+  for (const t of HTBAH_TALENTS) {
+    const val = htbahTalentValue(sheet.value, t)
+    items.push({ label: `${HTBAH_TALENT_LABELS[t]} (${val})`, value: `talent:${t}` })
+  }
+  for (const s of sheet.value.skills) {
+    if (!s.name.trim()) continue
+    const total = htbahSkillTotal(sheet.value, s)
+    items.push({
+      label: `${s.name} — ${HTBAH_TALENT_LABELS[s.talent]} (${total})`,
+      value: `skill:${s.id}`,
+    })
+  }
+  return items
+})
+
+const probeTarget = computed<{ value: number; label: string; isTalentOnly: boolean } | null>(() => {
+  if (!probeTargetId.value) return null
+  const [type, id] = probeTargetId.value.split(':')
+  if (type === 'talent') {
+    const tal = id as HtbahTalent
+    return {
+      value: htbahTalentValue(sheet.value, tal),
+      label: `${HTBAH_TALENT_LABELS[tal]} (Begabungsprobe)`,
+      isTalentOnly: true,
+    }
+  }
+  if (type === 'skill') {
+    const skill = sheet.value.skills.find((s) => s.id === id)
+    if (!skill) return null
+    return {
+      value: htbahSkillTotal(sheet.value, skill),
+      label: skill.name || '(unbenannt)',
+      isTalentOnly: false,
+    }
+  }
+  return null
+})
+
+const probeResult = computed(() => {
+  if (!probeTarget.value || probeRoll.value === null) return null
+  if (probeRoll.value < 1 || probeRoll.value > 100) return null
+  return htbahRollProbe({
+    roll: probeRoll.value,
+    target: probeTarget.value.value,
+    isTalentOnly: probeTarget.value.isTalentOnly,
+  })
+})
+
+const resultText = computed(() => {
+  if (!probeResult.value) return ''
+  if (probeResult.value.fumble) return 'Kritischer Patzer'
+  if (probeResult.value.critical) return 'Kritischer Erfolg'
+  if (probeResult.value.success) return 'Erfolg'
+  return 'Misserfolg'
+})
+
+const resultClass = computed(() => {
+  if (!probeResult.value) return ''
+  if (probeResult.value.fumble) return 'bg-red-700 text-white border-red-900'
+  if (probeResult.value.critical) return 'bg-emerald-600 text-white border-emerald-800'
+  if (probeResult.value.success) return 'bg-emerald-100 text-emerald-900 border-emerald-300'
+  return 'bg-amber-100 text-amber-900 border-amber-300'
+})
+
+const resultIcon = computed(() => {
+  if (!probeResult.value) return ''
+  if (probeResult.value.fumble) return 'i-lucide-skull'
+  if (probeResult.value.critical) return 'i-lucide-sparkles'
+  if (probeResult.value.success) return 'i-lucide-check'
+  return 'i-lucide-x'
+})
+
+const rollDice = () => {
+  probeRoll.value = Math.floor(Math.random() * 100) + 1
+}
+const resetProbe = () => {
+  probeRoll.value = null
+}
 </script>
 
 <template>
@@ -256,6 +345,69 @@ const statusLabel = computed(() => {
       <UButton size="xs" variant="ghost" icon="i-lucide-plus" class="mt-2" @click="addSkill(talent)">
         Fähigkeit
       </UButton>
+    </SheetSection>
+
+    <SheetSection title="Probe würfeln" class="lg:col-span-3">
+      <div class="grid sm:grid-cols-12 gap-3 items-end">
+        <UFormField label="Fähigkeit / Begabung" class="sm:col-span-6">
+          <USelect
+            v-model="probeTargetId"
+            :items="probeOptions"
+            value-key="value"
+            placeholder="Was wird geprüft?"
+            class="w-full"
+          />
+        </UFormField>
+        <UFormField label="Wurf (1–100)" class="sm:col-span-2">
+          <UInput
+            v-model.number="probeRoll"
+            type="number"
+            min="1"
+            max="100"
+            placeholder="—"
+          />
+        </UFormField>
+        <UButton
+          color="primary"
+          icon="i-lucide-dices"
+          class="sm:col-span-2"
+          :disabled="!probeTargetId"
+          @click="rollDice"
+        >
+          W100 würfeln
+        </UButton>
+        <UButton
+          variant="ghost"
+          icon="i-lucide-rotate-ccw"
+          class="sm:col-span-2"
+          :disabled="probeRoll === null"
+          @click="resetProbe"
+        >
+          Zurücksetzen
+        </UButton>
+      </div>
+
+      <div
+        v-if="probeTarget && probeResult"
+        :class="resultClass"
+        class="mt-4 p-4 rounded-lg border-2 text-center transition"
+      >
+        <div class="flex items-center justify-center gap-3">
+          <UIcon :name="resultIcon" class="size-8" />
+          <div class="font-serif text-3xl">{{ resultText }}</div>
+        </div>
+        <div class="text-sm mt-2 opacity-90">
+          <strong>{{ probeTarget.label }}</strong> · Zielwert {{ probeTarget.value }} · Wurf {{ probeRoll }}
+        </div>
+        <div class="text-xs mt-1 opacity-75">
+          Krit-Erfolg ≤ {{ probeTarget.isTalentOnly ? '— (kein Krit bei reiner Begabungsprobe)' : htbahCritThreshold(probeTarget.value) }}
+          ·
+          Krit-Patzer ≥ {{ htbahFumbleThreshold(probeTarget.value) }}
+        </div>
+      </div>
+      <p v-else class="text-xs text-ink-300 mt-3 text-center">
+        Wähle eine Fähigkeit oder Begabung und gib das Würfelergebnis ein (oder klick auf <em>W100 würfeln</em>).
+      </p>
     </SheetSection>
 
     <SheetSection title="Inventar & Beute" class="lg:col-span-2">
