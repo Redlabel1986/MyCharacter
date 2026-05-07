@@ -35,9 +35,14 @@ const remove = async (id: number, name: string) => {
         <h1 class="font-serif text-3xl">Meine Charaktere</h1>
         <p class="text-ink-400 text-sm">Pflege deine Helden und beginne neue Abenteuer.</p>
       </div>
-      <UButton to="/characters/new" color="primary" icon="i-lucide-plus">
-        Neuer Charakter
-      </UButton>
+      <div class="flex gap-2 flex-wrap">
+        <UButton to="/characters/import" variant="outline" icon="i-lucide-upload">
+          PDF importieren
+        </UButton>
+        <UButton to="/characters/new" color="primary" icon="i-lucide-plus">
+          Neuer Charakter
+        </UButton>
+      </div>
     </div>
 
     <div v-if="pending" class="text-ink-400">Lade…</div>
