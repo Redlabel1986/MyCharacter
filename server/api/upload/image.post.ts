@@ -37,7 +37,7 @@ export default defineEventHandler(async (event) => {
   if (token) {
     try {
       const blob = await put(slug, file.data, {
-        access: 'public',
+        access: 'private',
         contentType: file.type,
         token,
       })

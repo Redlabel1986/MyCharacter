@@ -13,8 +13,19 @@ const imageError = ref<string | null>(null)
 
 const pick = () => fileInput.value?.click()
 
+// Privater Vercel-Blob-Store: Bild kann nicht direkt geladen werden, sondern
+// muss ueber den Proxy /api/portrait/<id> geholt werden (mit Auth + Token).
+// Lokaler Dev-Fallback (/uploads/...) geht denselben Weg, damit es nur einen
+// Code-Pfad gibt.
+// Cache-Bust = Suffix der gespeicherten URL → aendert sich bei jedem Re-Upload.
+const proxySrc = computed(() => {
+  if (!props.modelValue) return null
+  const cacheBust = props.modelValue.slice(-32).replace(/[^a-zA-Z0-9]/g, '')
+  return `/api/portrait/${props.characterId}?v=${cacheBust}`
+})
+
 const onImgError = () => {
-  imageError.value = `Bild konnte nicht geladen werden. URL: ${props.modelValue ?? '(leer)'}`
+  imageError.value = `Bild konnte nicht geladen werden (Proxy ${proxySrc.value ?? '(leer)'})`
 }
 const onImgLoad = () => { imageError.value = null }
 
@@ -80,8 +91,8 @@ const remove = async () => {
       class="w-40 h-40 rounded-full overflow-hidden border-2 border-[var(--color-accent)]/40 bg-white/40 flex items-center justify-center"
     >
       <img
-        v-if="modelValue"
-        :src="modelValue"
+        v-if="proxySrc"
+        :src="proxySrc"
         alt="Portrait"
         class="w-full h-full object-cover"
         @error="onImgError"
