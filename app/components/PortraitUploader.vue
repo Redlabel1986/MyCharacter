@@ -45,9 +45,18 @@ const onChange = async (e: Event) => {
     console.log('[portrait] persisted url=', result.url)
   } catch (e: unknown) {
     console.error('[portrait] upload error', e)
+    // Nuxt $fetch wirft FetchError; die echte Server-statusMessage liegt
+    // entweder direkt am Error oder unter .data.statusMessage / .data.message.
+    const err = e as {
+      statusMessage?: string
+      message?: string
+      data?: { statusMessage?: string; message?: string }
+    }
     error.value =
-      (e as { statusMessage?: string; message?: string }).statusMessage ??
-      (e as { message?: string }).message ??
+      err.data?.statusMessage ??
+      err.data?.message ??
+      err.statusMessage ??
+      err.message ??
       'Upload fehlgeschlagen.'
   } finally {
     uploading.value = false
