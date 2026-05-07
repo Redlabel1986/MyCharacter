@@ -58,7 +58,14 @@ const sheet = computed<HtbahCharacterData>(() => {
         insightCurrent: incoming.talents?.soziales?.insightCurrent ?? 0,
       },
     },
-    skills: incoming.skills ?? [],
+    skills: (incoming.skills ?? []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      talent: s.talent,
+      spentPoints: s.spentPoints || 0,
+      modifier: s.modifier || 0,
+      note: s.note || '',
+    })),
     advantages: incoming.advantages ?? [],
     disadvantages: incoming.disadvantages ?? [],
     backstory: { ...blank.backstory, ...(incoming.backstory ?? {}) },
@@ -118,7 +125,7 @@ const refreshAllInsights = () => {
 
 const addSkill = (talent: HtbahTalent) => {
   const n = clone()
-  n.skills.push({ id: crypto.randomUUID(), name: '', talent, spentPoints: 0 })
+  n.skills.push({ id: crypto.randomUUID(), name: '', talent, spentPoints: 0, modifier: 0, note: '' })
   update(n)
 }
 const updateSkill = (idx: number, patch: Partial<HtbahSkill>) => {
@@ -335,47 +342,63 @@ const resetProbe = () => {
       <div class="accent-rule my-3" />
       <div class="text-xs uppercase tracking-widest text-ink-300 mb-1">Fähigkeiten</div>
       <div class="hidden sm:grid grid-cols-12 gap-1 text-[10px] text-ink-300 px-1 mb-1">
-        <div class="col-span-6">Name</div>
+        <div class="col-span-5">Name</div>
         <div class="col-span-2 text-center">Punkte</div>
         <div class="col-span-1 text-center">+Beg.</div>
+        <div class="col-span-1 text-center">Mod</div>
         <div class="col-span-2 text-center">Total</div>
         <div class="col-span-1"></div>
       </div>
-      <div class="space-y-1">
+      <div class="space-y-2">
         <div
           v-for="entry in skillsByTalent[talent]"
           :key="entry.skill.id"
-          class="grid grid-cols-12 gap-1 items-center"
+          class="space-y-1"
         >
-          <UInput
-            class="col-span-6"
-            :model-value="entry.skill.name"
-            placeholder="Name"
-            @update:model-value="updateSkill(entry.idx, { name: String($event) })"
-          />
-          <UInput
-            type="number"
-            class="col-span-2"
-            :model-value="entry.skill.spentPoints"
-            @update:model-value="updateSkill(entry.idx, { spentPoints: Number($event) })"
-          />
-          <div class="col-span-1 text-center text-sm text-ink-400">
-            {{ htbahTalentValue(sheet, talent) }}
+          <div class="grid grid-cols-12 gap-1 items-center">
+            <UInput
+              class="col-span-5"
+              :model-value="entry.skill.name"
+              placeholder="Name"
+              @update:model-value="updateSkill(entry.idx, { name: String($event) })"
+            />
+            <UInput
+              type="number"
+              class="col-span-2"
+              :model-value="entry.skill.spentPoints"
+              @update:model-value="updateSkill(entry.idx, { spentPoints: Number($event) })"
+            />
+            <div class="col-span-1 text-center text-sm text-ink-400">
+              {{ htbahTalentValue(sheet, talent) }}
+            </div>
+            <UInput
+              type="number"
+              class="col-span-1"
+              :model-value="entry.skill.modifier"
+              placeholder="±"
+              @update:model-value="updateSkill(entry.idx, { modifier: Number($event) })"
+            />
+            <div
+              class="col-span-2 text-center font-serif text-base"
+              :class="(entry.skill.spentPoints + htbahTalentValue(sheet, talent)) > HTBAH_SKILL_CAP ? 'text-red-700' : ''"
+              :title="(entry.skill.spentPoints + htbahTalentValue(sheet, talent)) > HTBAH_SKILL_CAP ? 'Grundwert über 100 — Cap greift, Modifikator wird darauf addiert' : ''"
+            >
+              {{ htbahSkillTotal(sheet, entry.skill) }}
+            </div>
+            <UButton
+              size="xs"
+              color="error"
+              variant="ghost"
+              icon="i-lucide-x"
+              class="col-span-1"
+              @click="removeSkill(entry.idx)"
+            />
           </div>
-          <div
-            class="col-span-2 text-center font-serif text-base"
-            :class="(entry.skill.spentPoints + htbahTalentValue(sheet, talent)) > HTBAH_SKILL_CAP ? 'text-red-700' : ''"
-            :title="(entry.skill.spentPoints + htbahTalentValue(sheet, talent)) > HTBAH_SKILL_CAP ? 'Cap bei 100 — überschüssige Punkte umverteilen' : ''"
-          >
-            {{ htbahSkillTotal(sheet, entry.skill) }}
-          </div>
-          <UButton
+          <UInput
             size="xs"
-            color="error"
-            variant="ghost"
-            icon="i-lucide-x"
-            class="col-span-1"
-            @click="removeSkill(entry.idx)"
+            placeholder="Notiz (z.B. Nachteil X reduziert um 10)"
+            :model-value="entry.skill.note"
+            @update:model-value="updateSkill(entry.idx, { note: String($event) })"
           />
         </div>
       </div>

@@ -22,6 +22,14 @@ export interface HtbahSkill {
   talent: HtbahTalent
   /** Vergebene Fähigkeitspunkte (mittlere Spalte im Bogen). */
   spentPoints: number
+  /**
+   * Signierter Modifikator. Wird zum Skill-Total addiert (negativ = abgezogen).
+   * Z.B. fuer "Nachteil X reduziert diese Faehigkeit um 10 Punkte" → -10.
+   * Wird NICHT durch den 100-Cap der Grundregel begrenzt.
+   */
+  modifier: number
+  /** Freitext-Notiz fuer diesen Skill (z.B. Begruendung des Modifikators). */
+  note: string
 }
 
 /**
@@ -138,12 +146,21 @@ export function htbahInsightMax(data: HtbahCharacterData, talent: HtbahTalent): 
 }
 
 /**
- * Fähigkeitswert (Probenwert) = vergebene Punkte + Begabungswert, gedeckelt bei 100.
+ * Grundwert ohne Modifikator: vergebene Punkte + Begabungswert, gedeckelt bei 100.
  * Regelwerk: "keine Fähigkeit kann über 100 Punkte haben".
  */
-export function htbahSkillTotal(data: HtbahCharacterData, skill: HtbahSkill): number {
+export function htbahSkillBase(data: HtbahCharacterData, skill: HtbahSkill): number {
   const total = (skill.spentPoints || 0) + htbahTalentValue(data, skill.talent)
   return Math.min(HTBAH_SKILL_CAP, total)
+}
+
+/**
+ * Fähigkeitswert (Probenwert) = Grundwert + Modifikator.
+ * Der Cap gilt nur fuer den Grundwert (Punkte + Begabung); Modifikatoren
+ * (z.B. aus Vor-/Nachteilen) koennen den Wert daraus heraus verschieben.
+ */
+export function htbahSkillTotal(data: HtbahCharacterData, skill: HtbahSkill): number {
+  return htbahSkillBase(data, skill) + (skill.modifier || 0)
 }
 
 /**
