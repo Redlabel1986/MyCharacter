@@ -75,7 +75,7 @@ const remove = async (id: number) => {
 
     <div v-if="pending" class="text-ink-400 text-sm">Lade…</div>
     <div v-else-if="!myAccess.length" class="text-sm text-ink-400">
-      Noch kein DM hat Zugriff auf diesen Charakter.
+      Es hat noch kein DM Zugriff auf diesen Charakter.
     </div>
     <ul v-else class="divide-y divide-parchment-700/15">
       <li v-for="row in myAccess" :key="row.id" class="py-2 flex items-center gap-3 text-sm">
