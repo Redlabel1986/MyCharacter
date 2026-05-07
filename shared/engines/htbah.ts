@@ -24,6 +24,18 @@ export interface HtbahSkill {
   spentPoints: number
 }
 
+/**
+ * Vorteil oder Nachteil. cost = absoluter Betrag.
+ * Vorteile: cost wird vom Pool ABGEZOGEN.
+ * Nachteile: cost wird auf den Pool ADDIERT.
+ */
+export interface HtbahPerk {
+  id: string
+  name: string
+  cost: number
+  note: string
+}
+
 export interface HtbahTalentBlock {
   /** Aktuelle Geistesblitzpunkte (vom Spieler verbrauchbar pro Abenteuer). */
   insightCurrent: number
@@ -42,13 +54,22 @@ export interface HtbahCharacterData {
     voice: string
     clothing: string
     likes: string
-    advantages: string // Vorteile
-    disadvantages: string // Nachteile
   }
   hp: { max: number; current: number }
-  pointsPool: { total: number }
+  /**
+   * total: Basispool (default 400).
+   * racePoints: Volkspunkte — wird automatisch zum Pool addiert.
+   */
+  pointsPool: { total: number; racePoints: number }
   talents: Record<HtbahTalent, HtbahTalentBlock>
   skills: HtbahSkill[]
+  advantages: HtbahPerk[]
+  disadvantages: HtbahPerk[]
+  /**
+   * Vorgeschichte. points kann optional Bonus-Punkte fuer den Pool liefern
+   * (z.B. fuer eine besonders harte Vergangenheit).
+   */
+  backstory: { text: string; points: number }
   inventory: string
   beute: string
   notes: string
@@ -68,17 +89,18 @@ export function createBlankHtbah(name: string): HtbahCharacterData {
       voice: '',
       clothing: '',
       likes: '',
-      advantages: '',
-      disadvantages: '',
     },
     hp: { max: 100, current: 100 },
-    pointsPool: { total: HTBAH_DEFAULT_POOL },
+    pointsPool: { total: HTBAH_DEFAULT_POOL, racePoints: 0 },
     talents: {
       handeln: { insightCurrent: 0 },
       wissen: { insightCurrent: 0 },
       soziales: { insightCurrent: 0 },
     },
     skills: [],
+    advantages: [],
+    disadvantages: [],
+    backstory: { text: '', points: 0 },
     inventory: '',
     beute: '',
     notes: '',
@@ -132,8 +154,25 @@ export function htbahCalcSpentPoints(data: HtbahCharacterData): number {
   return data.skills.reduce((acc, s) => acc + (s.spentPoints || 0), 0)
 }
 
+/**
+ * Effektiver Pool nach allen Modifikatoren:
+ *   Basis (total)
+ * + Volkspunkte (racePoints)
+ * + Σ Nachteile (cost — bringen Punkte)
+ * - Σ Vorteile  (cost — kosten Punkte)
+ * + Vorgeschichte-Bonus (backstory.points)
+ */
+export function htbahPoolTotal(data: HtbahCharacterData): number {
+  const base = data.pointsPool.total || 0
+  const race = data.pointsPool.racePoints || 0
+  const disSum = (data.disadvantages || []).reduce((a, p) => a + (p.cost || 0), 0)
+  const advSum = (data.advantages || []).reduce((a, p) => a + (p.cost || 0), 0)
+  const backstory = data.backstory?.points || 0
+  return base + race + disSum - advSum + backstory
+}
+
 export function htbahPointsRemaining(data: HtbahCharacterData): number {
-  return data.pointsPool.total - htbahCalcSpentPoints(data)
+  return htbahPoolTotal(data) - htbahCalcSpentPoints(data)
 }
 
 /** Initiative = 1W10 + Handeln-Begabungswert. Hier nur der Bonus. */

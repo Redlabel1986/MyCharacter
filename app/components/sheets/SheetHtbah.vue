@@ -8,6 +8,7 @@ import {
   htbahInsightMax,
   htbahCalcSpentPoints,
   htbahPointsRemaining,
+  htbahPoolTotal,
   htbahInitiativeBonus,
   htbahStatus,
   htbahRollProbe,
@@ -17,6 +18,7 @@ import {
   type HtbahCharacterData,
   type HtbahTalent,
   type HtbahSkill,
+  type HtbahPerk,
 } from '~~/shared/engines/htbah'
 import type { GameSystem } from '~~/shared/systems'
 import SheetSection from '~/components/ui/SheetSection.vue'
@@ -32,10 +34,17 @@ const sheet = computed<HtbahCharacterData>(() => {
     inspiration?: number
     level?: number
     skillCap?: number
+    identity?: Partial<HtbahCharacterData['identity']> & {
+      advantages?: unknown
+      disadvantages?: unknown
+    }
   }
+  // Identity: deprecated string-Felder (advantages/disadvantages) ausfiltern.
+  const { advantages: _legacyAdv, disadvantages: _legacyDis, ...incomingIdentity } =
+    incoming.identity ?? {}
   return {
     ...blank,
-    identity: { ...blank.identity, ...(incoming.identity ?? {}) },
+    identity: { ...blank.identity, ...incomingIdentity },
     hp: { ...blank.hp, ...(incoming.hp ?? {}) },
     pointsPool: { ...blank.pointsPool, ...(incoming.pointsPool ?? {}) },
     talents: {
@@ -50,6 +59,9 @@ const sheet = computed<HtbahCharacterData>(() => {
       },
     },
     skills: incoming.skills ?? [],
+    advantages: incoming.advantages ?? [],
+    disadvantages: incoming.disadvantages ?? [],
+    backstory: { ...blank.backstory, ...(incoming.backstory ?? {}) },
     inventory: incoming.inventory ?? '',
     beute: incoming.beute ?? '',
     notes: incoming.notes ?? '',
@@ -67,6 +79,29 @@ const setHp = <K extends keyof HtbahCharacterData['hp']>(k: K, v: number) => {
   const n = clone(); n.hp[k] = v; update(n)
 }
 const setPoolTotal = (v: number) => { const n = clone(); n.pointsPool.total = v; update(n) }
+const setRacePoints = (v: number) => { const n = clone(); n.pointsPool.racePoints = v; update(n) }
+const setBackstoryText = (v: string) => { const n = clone(); n.backstory.text = v; update(n) }
+const setBackstoryPoints = (v: number) => { const n = clone(); n.backstory.points = v; update(n) }
+
+const addPerk = (kind: 'advantages' | 'disadvantages') => {
+  const n = clone()
+  n[kind].push({ id: crypto.randomUUID(), name: '', cost: 0, note: '' })
+  update(n)
+}
+const updatePerk = (
+  kind: 'advantages' | 'disadvantages',
+  idx: number,
+  patch: Partial<HtbahPerk>,
+) => {
+  const n = clone()
+  const current = n[kind][idx]
+  if (!current) return
+  n[kind][idx] = { ...current, ...patch }
+  update(n)
+}
+const removePerk = (kind: 'advantages' | 'disadvantages', idx: number) => {
+  const n = clone(); n[kind].splice(idx, 1); update(n)
+}
 const setInsightCurrent = (t: HtbahTalent, v: number) => {
   const n = clone(); n.talents[t].insightCurrent = v; update(n)
 }
@@ -102,6 +137,7 @@ const skillsByTalent = computed(() => {
 })
 
 const remaining = computed(() => htbahPointsRemaining(sheet.value))
+const effectivePool = computed(() => htbahPoolTotal(sheet.value))
 const status = computed(() => htbahStatus(sheet.value.hp))
 const statusLabel = computed(() => {
   switch (status.value) {
@@ -211,9 +247,7 @@ const resetProbe = () => {
         <UFormField label="Aussehen" class="sm:col-span-3"><UInput :model-value="sheet.identity.appearance" @update:model-value="setIdentity('appearance', String($event))" /></UFormField>
         <UFormField label="Stimme"><UInput :model-value="sheet.identity.voice" @update:model-value="setIdentity('voice', String($event))" /></UFormField>
         <UFormField label="Kleidung"><UInput :model-value="sheet.identity.clothing" @update:model-value="setIdentity('clothing', String($event))" /></UFormField>
-        <UFormField label="Vorlieben"><UInput :model-value="sheet.identity.likes" @update:model-value="setIdentity('likes', String($event))" /></UFormField>
-        <UFormField label="Vorteile (kosten Punkte)"><UTextarea rows="3" :model-value="sheet.identity.advantages" class="w-full" @update:model-value="setIdentity('advantages', String($event))" /></UFormField>
-        <UFormField label="Nachteile (bringen Punkte)"><UTextarea rows="3" :model-value="sheet.identity.disadvantages" class="w-full" @update:model-value="setIdentity('disadvantages', String($event))" /></UFormField>
+        <UFormField label="Vorlieben" class="sm:col-span-3"><UInput :model-value="sheet.identity.likes" @update:model-value="setIdentity('likes', String($event))" /></UFormField>
       </div>
     </SheetSection>
 
@@ -245,18 +279,21 @@ const resetProbe = () => {
 
       <div class="accent-rule my-3" />
       <div class="text-xs uppercase tracking-widest text-ink-300 mb-1">Punkte-Pool</div>
-      <div class="grid grid-cols-3 gap-2">
-        <UFormField label="Gesamt">
+      <div class="grid grid-cols-2 gap-2">
+        <UFormField label="Basis">
           <UInput type="number" :model-value="sheet.pointsPool.total" @update:model-value="setPoolTotal(Number($event))" />
         </UFormField>
+        <UFormField label="Volkspunkte">
+          <UInput type="number" :model-value="sheet.pointsPool.racePoints" @update:model-value="setRacePoints(Number($event))" />
+        </UFormField>
+      </div>
+      <div class="grid grid-cols-3 gap-2 mt-2">
+        <StatBlock label="Effektiv" :value="effectivePool" />
         <StatBlock label="Vergeben" :value="htbahCalcSpentPoints(sheet)" />
-        <StatBlock
-          label="Übrig"
-          :value="remaining"
-        />
+        <StatBlock label="Übrig" :value="remaining" />
       </div>
       <p class="text-[10px] text-ink-300 mt-1">
-        Default 400. Vor-/Nachteile passen den Pool an.
+        Effektiv = Basis + Volkspunkte + Σ Nachteile − Σ Vorteile + Vorgeschichte-Bonus.
       </p>
 
       <div class="accent-rule my-3" />
@@ -345,6 +382,126 @@ const resetProbe = () => {
       <UButton size="xs" variant="ghost" icon="i-lucide-plus" class="mt-2" @click="addSkill(talent)">
         Fähigkeit
       </UButton>
+    </SheetSection>
+
+    <SheetSection title="Vorteile (kosten Punkte)" class="lg:col-span-1">
+      <div class="hidden sm:grid grid-cols-12 gap-1 text-[10px] text-ink-300 px-1 mb-1">
+        <div class="col-span-7">Name</div>
+        <div class="col-span-3 text-center">Kosten</div>
+        <div class="col-span-2"></div>
+      </div>
+      <div class="space-y-2">
+        <div
+          v-for="(perk, idx) in sheet.advantages"
+          :key="perk.id"
+          class="space-y-1"
+        >
+          <div class="grid grid-cols-12 gap-1 items-center">
+            <UInput
+              class="col-span-7"
+              placeholder="Name"
+              :model-value="perk.name"
+              @update:model-value="updatePerk('advantages', idx, { name: String($event) })"
+            />
+            <UInput
+              type="number"
+              class="col-span-3"
+              :model-value="perk.cost"
+              @update:model-value="updatePerk('advantages', idx, { cost: Number($event) })"
+            />
+            <UButton
+              size="xs"
+              color="error"
+              variant="ghost"
+              icon="i-lucide-x"
+              class="col-span-2"
+              @click="removePerk('advantages', idx)"
+            />
+          </div>
+          <UInput
+            placeholder="Notiz (optional)"
+            :model-value="perk.note"
+            @update:model-value="updatePerk('advantages', idx, { note: String($event) })"
+          />
+        </div>
+      </div>
+      <UButton size="xs" variant="ghost" icon="i-lucide-plus" class="mt-2" @click="addPerk('advantages')">
+        Vorteil
+      </UButton>
+      <p class="text-[10px] text-ink-300 mt-2">
+        Kosten werden vom Pool abgezogen.
+      </p>
+    </SheetSection>
+
+    <SheetSection title="Nachteile (bringen Punkte)" class="lg:col-span-1">
+      <div class="hidden sm:grid grid-cols-12 gap-1 text-[10px] text-ink-300 px-1 mb-1">
+        <div class="col-span-7">Name</div>
+        <div class="col-span-3 text-center">Punkte</div>
+        <div class="col-span-2"></div>
+      </div>
+      <div class="space-y-2">
+        <div
+          v-for="(perk, idx) in sheet.disadvantages"
+          :key="perk.id"
+          class="space-y-1"
+        >
+          <div class="grid grid-cols-12 gap-1 items-center">
+            <UInput
+              class="col-span-7"
+              placeholder="Name"
+              :model-value="perk.name"
+              @update:model-value="updatePerk('disadvantages', idx, { name: String($event) })"
+            />
+            <UInput
+              type="number"
+              class="col-span-3"
+              :model-value="perk.cost"
+              @update:model-value="updatePerk('disadvantages', idx, { cost: Number($event) })"
+            />
+            <UButton
+              size="xs"
+              color="error"
+              variant="ghost"
+              icon="i-lucide-x"
+              class="col-span-2"
+              @click="removePerk('disadvantages', idx)"
+            />
+          </div>
+          <UInput
+            placeholder="Notiz (optional)"
+            :model-value="perk.note"
+            @update:model-value="updatePerk('disadvantages', idx, { note: String($event) })"
+          />
+        </div>
+      </div>
+      <UButton size="xs" variant="ghost" icon="i-lucide-plus" class="mt-2" @click="addPerk('disadvantages')">
+        Nachteil
+      </UButton>
+      <p class="text-[10px] text-ink-300 mt-2">
+        Punkte werden auf den Pool addiert.
+      </p>
+    </SheetSection>
+
+    <SheetSection title="Vorgeschichte" class="lg:col-span-1">
+      <UFormField label="Bonus-Punkte">
+        <UInput
+          type="number"
+          :model-value="sheet.backstory.points"
+          @update:model-value="setBackstoryPoints(Number($event))"
+        />
+      </UFormField>
+      <p class="text-[10px] text-ink-300 mt-1">
+        Optional — werden zum Pool addiert.
+      </p>
+      <UFormField label="Text" class="mt-3">
+        <UTextarea
+          rows="9"
+          placeholder="Herkunft, prägende Ereignisse, Motivation…"
+          :model-value="sheet.backstory.text"
+          class="w-full"
+          @update:model-value="setBackstoryText(String($event))"
+        />
+      </UFormField>
     </SheetSection>
 
     <SheetSection title="Probe würfeln" class="lg:col-span-3">
