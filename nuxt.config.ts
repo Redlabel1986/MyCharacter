@@ -49,7 +49,8 @@ export default defineNuxtConfig({
   },
 
   nitro: {
-    preset: process.env.NITRO_PRESET || 'node-server',
+    // Preset wird automatisch erkannt: lokal 'node-server', auf Vercel 'vercel'
+    // (durch VERCEL=1 env). Override via NITRO_PRESET-Env möglich.
     experimental: {
       tasks: true,
     },
