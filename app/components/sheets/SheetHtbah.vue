@@ -342,10 +342,10 @@ const resetProbe = () => {
       <div class="accent-rule my-3" />
       <div class="text-xs uppercase tracking-widest text-ink-300 mb-1">Fähigkeiten</div>
       <div class="hidden sm:grid grid-cols-12 gap-1 text-[10px] text-ink-300 px-1 mb-1">
-        <div class="col-span-5">Name</div>
+        <div class="col-span-4">Name</div>
         <div class="col-span-2 text-center">Punkte</div>
         <div class="col-span-1 text-center">+Beg.</div>
-        <div class="col-span-1 text-center">Mod</div>
+        <div class="col-span-2 text-center">Mod</div>
         <div class="col-span-2 text-center">Total</div>
         <div class="col-span-1"></div>
       </div>
@@ -357,7 +357,7 @@ const resetProbe = () => {
         >
           <div class="grid grid-cols-12 gap-1 items-center">
             <UInput
-              class="col-span-5"
+              class="col-span-4"
               :model-value="entry.skill.name"
               placeholder="Name"
               @update:model-value="updateSkill(entry.idx, { name: String($event) })"
@@ -373,7 +373,7 @@ const resetProbe = () => {
             </div>
             <UInput
               type="number"
-              class="col-span-1"
+              class="col-span-2"
               :model-value="entry.skill.modifier"
               placeholder="±"
               @update:model-value="updateSkill(entry.idx, { modifier: Number($event) })"
