@@ -44,22 +44,48 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 413, statusMessage: 'PDF ist größer als 10 MB.' })
   }
 
-  // 1) Text aus dem PDF extrahieren
+  // 1) Text + Form-Felder aus dem PDF extrahieren.
+  //    Wichtig: bei AcroForm-PDFs (z.B. offizielle HtbaH-Boegen) sind die
+  //    ausgefuellten Werte NICHT im Static-Text — nur in den Form-Field-
+  //    Annotations. Wir muessen beides extrahieren und Claude geben.
   let pdfText: string
+  let formFieldsText: string
+  let formFieldCount: number
   try {
     const pdf = await getDocumentProxy(new Uint8Array(filePart.data))
     const { text } = await extractText(pdf, { mergePages: true })
     pdfText = (Array.isArray(text) ? text.join('\n\n') : text).trim()
+
+    // Form-Felder pro Page sammeln
+    const fields: Array<{ name: string; value: string }> = []
+    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+      const page = await pdf.getPage(pageNum)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const annotations = (await page.getAnnotations()) as Array<Record<string, any>>
+      for (const annot of annotations) {
+        if (annot.subtype !== 'Widget') continue
+        const name = String(annot.fieldName ?? annot.id ?? '').trim()
+        if (!name) continue
+        // Wert: bei Text fieldValue, bei Checkbox/Radio buttonValue, bei Dropdown V/fieldValue
+        const rawValue = annot.fieldValue ?? annot.buttonValue ?? annot.V ?? ''
+        const value = Array.isArray(rawValue) ? rawValue.join(', ') : String(rawValue)
+        const trimmed = value.trim()
+        if (!trimmed || trimmed === 'Off' || trimmed === '/Off') continue
+        fields.push({ name, value: trimmed })
+      }
+    }
+    formFieldCount = fields.length
+    formFieldsText = fields.map((f) => `  ${f.name}: ${f.value}`).join('\n')
   } catch (err) {
     console.error('PDF parse error:', err)
     throw createError({ statusCode: 422, statusMessage: 'Konnte PDF nicht lesen.' })
   }
 
-  if (pdfText.length < 50) {
+  if (pdfText.length < 50 && formFieldCount === 0) {
     throw createError({
       statusCode: 422,
       statusMessage:
-        'PDF enthält keinen lesbaren Text — vermutlich ein gescannter Bogen ohne OCR.',
+        'PDF enthält weder lesbaren Text noch ausgefüllte Form-Felder — vermutlich ein gescannter Bogen ohne OCR.',
     })
   }
   const truncatedText =
@@ -136,9 +162,13 @@ VOLLSTAENDIGES BEISPIEL einer korrekten Antwort fuer "Bargin Kupferfaust" (HtbaH
 
 BEACHTE: skills hat 7 Eintraege, weil der PDF 7 ausgefuellte Skill-Zeilen hat. NIEMALS skills:[] zurueckgeben wenn der PDF Skills enthaelt!`
 
+  const formFieldBlock = formFieldCount > 0
+    ? `\n\nPDF-FORMULAR-FELDER (ausgefuellte Werte aus AcroForm-Annotations — DAS sind die echten Daten, nicht die Labels im Text):\n${formFieldsText}\n`
+    : ''
+
   const userMessage = systemHint
-    ? `User hat das Regelwerk vorab gewaehlt: **${systemHint}**. Verifiziere im Text und nutze das, falls passend.\n\nPDF-TEXT:\n\n${truncatedText}`
-    : `PDF-TEXT (Regelwerk bitte selbst erkennen):\n\n${truncatedText}`
+    ? `User hat das Regelwerk vorab gewaehlt: **${systemHint}**. Verifiziere im Text und nutze das, falls passend.${formFieldBlock}\n\nPDF-TEXT (Layout-Labels, oft nur Feldnamen):\n\n${truncatedText}`
+    : `${formFieldBlock}\n\nPDF-TEXT (Regelwerk bitte selbst erkennen):\n\n${truncatedText}`
 
   let parsed: ExtractedCharacter
   try {
@@ -202,12 +232,13 @@ BEACHTE: skills hat 7 Eintraege, weil der PDF 7 ausgefuellte Skill-Zeilen hat. N
       ? ((parsed.data as { skills: unknown[] }).skills.length)
       : 0
     console.log(
-      '[import] system=%s name="%s" confidence=%s data-keys=%s skill-count=%d response-bytes=%d',
+      '[import] system=%s name="%s" confidence=%s data-keys=%s skill-count=%d form-fields=%d response-bytes=%d',
       parsed.system,
       parsed.name,
       parsed.confidence,
       Object.keys(parsed.data).join(','),
       skillCount,
+      formFieldCount,
       jsonText.length,
     )
   } catch (err: unknown) {
