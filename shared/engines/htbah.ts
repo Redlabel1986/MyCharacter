@@ -235,6 +235,27 @@ export interface HtbahProbeResult {
   success: boolean
   critical: boolean
   fumble: boolean
+  /**
+   * Qualitaetsstufe bei Erfolg (1-6) oder 7 = "Maximaler Erfolg".
+   * Marge = target - roll. 0-19 → Stufe 1, 20-29 → 2, 30-39 → 3,
+   * 40-49 → 4, 50-59 → 5, 60-69 → 6, 70+ → Maximaler Erfolg.
+   * undefined bei Misserfolg/Patzer.
+   */
+  qualityStep?: number
+}
+
+export function htbahQualityStep(margin: number): number {
+  if (margin < 20) return 1
+  if (margin < 30) return 2
+  if (margin < 40) return 3
+  if (margin < 50) return 4
+  if (margin < 60) return 5
+  if (margin < 70) return 6
+  return 7
+}
+
+export function htbahQualityLabel(step: number): string {
+  return step >= 7 ? 'Maximaler Erfolg' : `Stufe ${step}`
 }
 
 export function htbahRollProbe(input: HtbahProbeInput): HtbahProbeResult {
@@ -242,7 +263,8 @@ export function htbahRollProbe(input: HtbahProbeInput): HtbahProbeResult {
   const critical =
     !input.isTalentOnly && success && input.roll <= htbahCritThreshold(input.target)
   const fumble = input.roll >= htbahFumbleThreshold(input.target)
-  return { success, critical, fumble }
+  const qualityStep = success ? htbahQualityStep(input.target - input.roll) : undefined
+  return { success, critical, fumble, qualityStep }
 }
 
 // Schaden ist Waffen-spezifisch (Regelwerk 4.5): X * W10. Hier eine

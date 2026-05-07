@@ -14,6 +14,7 @@ import {
   htbahRollProbe,
   htbahCritThreshold,
   htbahFumbleThreshold,
+  htbahQualityLabel,
   createBlankHtbah,
   type HtbahCharacterData,
   type HtbahTalent,
@@ -215,6 +216,16 @@ const resultText = computed(() => {
   if (probeResult.value.critical) return 'Kritischer Erfolg'
   if (probeResult.value.success) return 'Erfolg'
   return 'Misserfolg'
+})
+
+// Qualitaetsstufe + Marge nur bei Erfolg (Marge = Zielwert − Wurf).
+// Stufe-Schwellen: 0-19 → 1, 20-29 → 2, ..., 60-69 → 6, 70+ → Maximaler Erfolg.
+const qualityText = computed(() => {
+  if (!probeResult.value || !probeResult.value.success) return ''
+  if (probeResult.value.qualityStep === undefined) return ''
+  if (!probeTarget.value || probeRoll.value === null) return ''
+  const margin = probeTarget.value.value - probeRoll.value
+  return `${htbahQualityLabel(probeResult.value.qualityStep)} · um ${margin} unterboten`
 })
 
 const resultClass = computed(() => {
@@ -575,6 +586,9 @@ const resetProbe = () => {
         <div class="flex items-center justify-center gap-3">
           <UIcon :name="resultIcon" class="size-8" />
           <div class="font-serif text-3xl">{{ resultText }}</div>
+        </div>
+        <div v-if="qualityText" class="font-serif text-lg mt-1">
+          {{ qualityText }}
         </div>
         <div class="text-sm mt-2 opacity-90">
           <strong>{{ probeTarget.label }}</strong> · Zielwert {{ probeTarget.value }} · Wurf {{ probeRoll }}
