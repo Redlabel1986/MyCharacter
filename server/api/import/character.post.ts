@@ -108,34 +108,21 @@ ${JSON.stringify(blanks.dsa41, null, 2)}
 ${JSON.stringify(blanks.htbah, null, 2)}
 
 REGELN:
-1. Antworte AUSSCHLIESSLICH mit JSON nach dem responseSchema (keine Erklaerung drumherum).
-2. Felder, die du NICHT im Text findest: Default-Wert (0, "", [], false) BEIBEHALTEN — nicht raten.
-3. data MUSS die Struktur des erkannten Systems exakt einhalten (alle Felder vorhanden, keine zusaetzlichen).
-4. Bei D&D: edition korrekt auf "dnd5e" oder "dnd2024" setzen.
-5. Bei DSA-Talenten/Zaubern und HtbaH-Skills: nur Eintraege erstellen, die du im Text klar identifizierst. Generiere id-Felder als kurze Hex-Strings.
-6. confidence: "high" wenn alle Hauptwerte erkannt; "medium" wenn Stammdaten + Attribute klar; "low" wenn unsicher.
-7. notes: 1-2 Saetze was du erkannt hast und woran (deutsch).`
-
-  const responseSchema = {
-    type: 'object',
-    properties: {
-      system: {
-        type: 'string',
-        enum: ['dnd5e', 'dnd2024', 'dsa5', 'dsa41', 'htbah'],
-        description: 'Das erkannte Regelwerk',
-      },
-      name: { type: 'string', description: 'Charaktername' },
-      confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
-      notes: { type: 'string' },
-      data: {
-        type: 'object',
-        description: 'System-spezifische Charakterdaten — Struktur passend zum erkannten System',
-        additionalProperties: true,
-      },
-    },
-    required: ['system', 'name', 'data'],
-    additionalProperties: false,
-  } as const
+1. Antworte AUSSCHLIESSLICH mit JSON. Kein zusaetzlicher Text, keine Code-Fences (kein \`\`\`).
+   Beginne deine Antwort direkt mit { und ende mit }.
+2. Das Antwort-JSON hat folgende Struktur:
+   {
+     "system": "dnd5e" | "dnd2024" | "dsa5" | "dsa41" | "htbah",
+     "name": "Charaktername",
+     "confidence": "high" | "medium" | "low",
+     "notes": "1-2 Saetze was erkannt wurde",
+     "data": { ... system-spezifische Struktur wie oben gezeigt ... }
+   }
+3. Felder, die du NICHT im Text findest: Default-Wert (0, "", [], false) BEIBEHALTEN — nicht raten.
+4. data MUSS die Struktur des erkannten Systems exakt einhalten (alle Felder vorhanden, keine zusaetzlichen).
+5. Bei D&D: edition korrekt auf "dnd5e" oder "dnd2024" setzen.
+6. Bei DSA-Talenten/Zaubern und HtbaH-Skills: nur Eintraege erstellen, die du im Text klar identifizierst. Generiere id-Felder als kurze Hex-Strings.
+7. confidence: "high" wenn alle Hauptwerte erkannt; "medium" wenn Stammdaten + Attribute klar; "low" wenn unsicher.`
 
   const userMessage = systemHint
     ? `User hat das Regelwerk vorab gewaehlt: **${systemHint}**. Verifiziere im Text und nutze das, falls passend.\n\nPDF-TEXT:\n\n${truncatedText}`
@@ -149,10 +136,7 @@ REGELN:
       // koennen sonst > 60s laufen.
       model: 'claude-opus-4-7',
       max_tokens: 8_000,
-      output_config: {
-        effort: 'medium',
-        format: { type: 'json_schema', schema: responseSchema },
-      },
+      output_config: { effort: 'medium' },
       system: [
         {
           type: 'text',
@@ -167,7 +151,17 @@ REGELN:
     if (!textBlock || textBlock.type !== 'text') {
       throw new Error('Claude returned no text content')
     }
-    parsed = JSON.parse(textBlock.text) as ExtractedCharacter
+
+    // Strip optionale Code-Fences (sollte mit dem Prompt nicht passieren,
+    // aber als Robustheits-Massnahme).
+    let jsonText = textBlock.text.trim()
+    if (jsonText.startsWith('```')) {
+      jsonText = jsonText
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```\s*$/, '')
+        .trim()
+    }
+    parsed = JSON.parse(jsonText) as ExtractedCharacter
   } catch (err: unknown) {
     if (err instanceof Anthropic.RateLimitError) {
       throw createError({
