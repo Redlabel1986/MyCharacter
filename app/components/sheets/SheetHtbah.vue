@@ -251,10 +251,10 @@ const resetProbe = () => {
         <UFormField label="Religion"><UInput :model-value="sheet.identity.religion" @update:model-value="setIdentity('religion', String($event))" /></UFormField>
         <UFormField label="Beruf"><UInput :model-value="sheet.identity.occupation" @update:model-value="setIdentity('occupation', String($event))" /></UFormField>
         <UFormField label="Familienstand"><UInput :model-value="sheet.identity.maritalStatus" @update:model-value="setIdentity('maritalStatus', String($event))" /></UFormField>
-        <UFormField label="Aussehen" class="sm:col-span-3"><UInput :model-value="sheet.identity.appearance" @update:model-value="setIdentity('appearance', String($event))" /></UFormField>
+        <UFormField label="Aussehen" class="sm:col-span-3"><UTextarea autoresize :rows="2" class="w-full" :model-value="sheet.identity.appearance" @update:model-value="setIdentity('appearance', String($event))" /></UFormField>
         <UFormField label="Stimme"><UInput :model-value="sheet.identity.voice" @update:model-value="setIdentity('voice', String($event))" /></UFormField>
-        <UFormField label="Kleidung"><UInput :model-value="sheet.identity.clothing" @update:model-value="setIdentity('clothing', String($event))" /></UFormField>
-        <UFormField label="Vorlieben" class="sm:col-span-3"><UInput :model-value="sheet.identity.likes" @update:model-value="setIdentity('likes', String($event))" /></UFormField>
+        <UFormField label="Kleidung" class="sm:col-span-2"><UTextarea autoresize :rows="2" class="w-full" :model-value="sheet.identity.clothing" @update:model-value="setIdentity('clothing', String($event))" /></UFormField>
+        <UFormField label="Vorlieben" class="sm:col-span-3"><UTextarea autoresize :rows="2" class="w-full" :model-value="sheet.identity.likes" @update:model-value="setIdentity('likes', String($event))" /></UFormField>
       </div>
     </SheetSection>
 
