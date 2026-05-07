@@ -31,6 +31,7 @@ export const characters = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     system: text('system').notNull().$type<'dnd5e' | 'dnd2024' | 'dsa5' | 'dsa41' | 'htbah'>(),
     name: text('name').notNull(),
+    portraitUrl: text('portrait_url'),
     data: jsonb('data').notNull().$type<Record<string, unknown>>().default({}),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -58,11 +59,58 @@ export const characterAccess = pgTable(
   }),
 )
 
+export const groups = pgTable('groups', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  ownerUserId: integer('owner_user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const groupMembers = pgTable(
+  'group_members',
+  {
+    id: serial('id').primaryKey(),
+    groupId: integer('group_id')
+      .notNull()
+      .references(() => groups.id, { onDelete: 'cascade' }),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    unq: unique('uniq_group_member').on(table.groupId, table.userId),
+    userIdx: index('idx_group_members_user').on(table.userId),
+  }),
+)
+
+export const messages = pgTable(
+  'messages',
+  {
+    id: serial('id').primaryKey(),
+    groupId: integer('group_id')
+      .notNull()
+      .references(() => groups.id, { onDelete: 'cascade' }),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    content: text('content').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    groupCreatedIdx: index('idx_messages_group_created').on(table.groupId, table.createdAt),
+  }),
+)
+
 export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert
 export type Character = typeof characters.$inferSelect
 export type NewCharacter = typeof characters.$inferInsert
 export type CharacterAccess = typeof characterAccess.$inferSelect
-export type NewCharacterAccess = typeof characterAccess.$inferInsert
+export type Group = typeof groups.$inferSelect
+export type GroupMember = typeof groupMembers.$inferSelect
+export type Message = typeof messages.$inferSelect
 
 export type GameSystem = NonNullable<Character['system']>

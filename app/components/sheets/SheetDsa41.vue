@@ -164,9 +164,9 @@ const setBlessed = (v: boolean) => { const n = clone(); n.isBlessed = v; update(
       <UFormField label="Sonderfertigkeiten" class="mt-2"><UTextarea rows="4" :model-value="sheet.specialAbilities" @update:model-value="setText('specialAbilities', String($event))" /></UFormField>
     </SheetSection>
 
-    <SheetSection title="Inventar & Notizen">
-      <UFormField label="Inventar"><UTextarea rows="6" :model-value="sheet.inventory" @update:model-value="setText('inventory', String($event))" /></UFormField>
-      <UFormField label="Notizen" class="mt-2"><UTextarea rows="6" :model-value="sheet.notes" @update:model-value="setText('notes', String($event))" /></UFormField>
+    <SheetSection title="Inventar & Notizen" class="lg:col-span-3">
+      <UFormField label="Inventar"><UTextarea rows="6" :model-value="sheet.inventory" class="w-full" @update:model-value="setText('inventory', String($event))" /></UFormField>
+      <UFormField label="Notizen" class="mt-2"><UTextarea rows="6" :model-value="sheet.notes" class="w-full" @update:model-value="setText('notes', String($event))" /></UFormField>
     </SheetSection>
   </div>
 </template>

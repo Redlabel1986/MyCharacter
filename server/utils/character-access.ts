@@ -10,6 +10,7 @@ export interface AccessibleCharacter {
   userId: number
   system: 'dnd5e' | 'dnd2024' | 'dsa5' | 'dsa41' | 'htbah'
   name: string
+  portraitUrl: string | null
   data: Record<string, unknown>
   createdAt: Date
   updatedAt: Date
@@ -38,6 +39,7 @@ export async function loadAccessibleCharacter(
       userId: c.userId,
       system: c.system!,
       name: c.name,
+      portraitUrl: c.portraitUrl,
       data: c.data as Record<string, unknown>,
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
@@ -45,7 +47,6 @@ export async function loadAccessibleCharacter(
     }
   }
 
-  // DM-Zugriff nur, wenn die Rolle DM oder Admin ist.
   if (user.role !== 'dm' && user.role !== 'admin') return null
 
   const dmHit = await db
@@ -64,6 +65,7 @@ export async function loadAccessibleCharacter(
     userId: c.userId,
     system: c.system!,
     name: c.name,
+    portraitUrl: c.portraitUrl,
     data: c.data as Record<string, unknown>,
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
@@ -71,13 +73,8 @@ export async function loadAccessibleCharacter(
   }
 }
 
-/**
- * Gibt die where-Bedingung zurück, die einen Charakter dem aktuellen User
- * zuordnet (Owner ODER granted DM). Für list-Queries.
- */
 export function accessibleCharacterCondition(user: { id: number; role: UserRole }) {
   if (user.role === 'admin' || user.role === 'dm') {
-    // Admin/DM: Owner ODER granted-Access — wird über LEFT JOIN abgedeckt.
     return or(eq(characters.userId, user.id))
   }
   return eq(characters.userId, user.id)

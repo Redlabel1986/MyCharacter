@@ -7,6 +7,7 @@ import { loadAccessibleCharacter } from '~~/server/utils/character-access'
 const bodySchema = z.object({
   name: z.string().min(1).max(120).optional(),
   data: z.record(z.unknown()).optional(),
+  portraitUrl: z.string().url().nullable().optional(),
 })
 
 export default defineEventHandler(async (event) => {
@@ -19,7 +20,6 @@ export default defineEventHandler(async (event) => {
   const body = await readValidatedBody(event, bodySchema.parse)
   const db = useDb()
 
-  // Berechtigung prüfen — Owner oder DM mit explizitem Zugriff
   const access = await loadAccessibleCharacter(db, id, user)
   if (!access) {
     throw createError({ statusCode: 404, statusMessage: 'Charakter nicht gefunden.' })
@@ -30,6 +30,7 @@ export default defineEventHandler(async (event) => {
     .set({
       ...(body.name !== undefined ? { name: body.name } : {}),
       ...(body.data !== undefined ? { data: body.data } : {}),
+      ...(body.portraitUrl !== undefined ? { portraitUrl: body.portraitUrl } : {}),
       updatedAt: sql`NOW()`,
     })
     .where(eq(characters.id, id))

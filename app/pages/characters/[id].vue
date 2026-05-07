@@ -5,6 +5,7 @@ import SheetDsa5 from '~/components/sheets/SheetDsa5.vue'
 import SheetDsa41 from '~/components/sheets/SheetDsa41.vue'
 import SheetHtbah from '~/components/sheets/SheetHtbah.vue'
 import DmAccessManager from '~/components/DmAccessManager.vue'
+import PortraitUploader from '~/components/PortraitUploader.vue'
 
 definePageMeta({ middleware: ['auth'] })
 
@@ -12,6 +13,7 @@ interface Character {
   id: number
   system: GameSystem
   name: string
+  portraitUrl: string | null
   data: Record<string, unknown>
   createdAt: string
   updatedAt: string
@@ -20,7 +22,6 @@ interface Character {
 
 const route = useRoute()
 const id = Number(route.params.id)
-const { user } = useUserSession()
 
 const { data, error, refresh } = await useFetch<{ character: Character }>(`/api/characters/${id}`)
 
@@ -33,11 +34,13 @@ const isOwner = computed(() => character.value?.accessKind === 'owner')
 
 const draftName = ref(character.value?.name ?? '')
 const draftData = ref(character.value?.data ?? {})
+const portraitUrl = ref<string | null>(character.value?.portraitUrl ?? null)
 
 watch(character, (c) => {
   if (c) {
     draftName.value = c.name
     draftData.value = c.data
+    portraitUrl.value = c.portraitUrl
   }
 }, { immediate: true })
 
@@ -90,25 +93,33 @@ const sheetComponent = computed(() => {
 <template>
   <div v-if="character" :data-system="character.system" class="space-y-6">
     <div class="flex items-end justify-between flex-wrap gap-4 no-print">
-      <div>
-        <NuxtLink
-          :to="isOwner ? '/characters' : '/dm/characters'"
-          class="text-sm text-ink-400 hover:text-[var(--color-accent)]"
-        >
-          ← Zur Übersicht
-        </NuxtLink>
-        <div class="text-xs uppercase tracking-widest text-[var(--color-accent)] font-semibold mt-1 flex gap-2 items-baseline">
-          <span>{{ SYSTEM_META[character.system].shortLabel }}</span>
-          <span v-if="!isOwner" class="text-[10px] bg-[var(--color-accent-soft)] px-2 py-0.5 rounded-full text-[var(--color-accent)]">
-            DM-Zugriff
-          </span>
-        </div>
-        <UInput
-          v-model="draftName"
-          class="mt-1 font-serif text-3xl"
-          variant="none"
-          :ui="{ base: 'font-serif text-3xl !p-0 bg-transparent w-full' }"
+      <div class="flex gap-4 items-center flex-wrap">
+        <PortraitUploader
+          v-model="portraitUrl"
+          :character-id="character.id"
+          :readonly="!isOwner"
+          class="!p-2 !w-auto"
         />
+        <div>
+          <NuxtLink
+            :to="isOwner ? '/characters' : '/dm/characters'"
+            class="text-sm text-ink-400 hover:text-[var(--color-accent)]"
+          >
+            ← Zur Übersicht
+          </NuxtLink>
+          <div class="text-xs uppercase tracking-widest text-[var(--color-accent)] font-semibold mt-1 flex gap-2 items-baseline">
+            <span>{{ SYSTEM_META[character.system].shortLabel }}</span>
+            <span v-if="!isOwner" class="text-[10px] bg-[var(--color-accent-soft)] px-2 py-0.5 rounded-full text-[var(--color-accent)]">
+              DM-Zugriff
+            </span>
+          </div>
+          <UInput
+            v-model="draftName"
+            class="mt-1 font-serif text-3xl"
+            variant="none"
+            :ui="{ base: 'font-serif text-3xl !p-0 bg-transparent w-full' }"
+          />
+        </div>
       </div>
       <div class="flex items-center gap-3">
         <span v-if="saveStatus === 'saved'" class="text-sm text-green-700">Gespeichert ✓</span>

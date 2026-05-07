@@ -36,6 +36,9 @@ const roleBadge = computed(() => {
             <NuxtLink to="/characters" class="hover:text-[var(--color-accent)]">
               Meine Charaktere
             </NuxtLink>
+            <NuxtLink to="/groups" class="hover:text-[var(--color-accent)]">
+              Gruppen
+            </NuxtLink>
             <NuxtLink v-if="isDm" to="/dm/characters" class="hover:text-[var(--color-accent)]">
               DM-Übersicht
             </NuxtLink>

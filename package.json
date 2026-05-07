@@ -17,6 +17,7 @@
     "@neondatabase/serverless": "^0.10.4",
     "@nuxt/ui": "^3.0.0",
     "@nuxtjs/google-fonts": "^3.2.0",
+    "@vercel/blob": "^2.3.3",
     "drizzle-orm": "^0.36.0",
     "nuxt": "^3.14.0",
     "nuxt-auth-utils": "^0.5.10",

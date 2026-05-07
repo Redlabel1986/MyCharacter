@@ -350,7 +350,7 @@ const setHp = <K extends keyof DnDCharacterData['combat']['hp']>(key: K, value: 
       </div>
     </SheetSection>
 
-    <SheetSection title="Inventar & Münzen">
+    <SheetSection title="Inventar & Münzen" class="lg:col-span-3">
       <UFormField label="Ausrüstung (Freitext)">
         <UTextarea
           :model-value="sheet.equipment"
