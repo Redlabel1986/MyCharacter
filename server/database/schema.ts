@@ -86,6 +86,24 @@ export const groupMembers = pgTable(
   }),
 )
 
+export const MESSAGE_TYPES = ['text', 'character_share'] as const
+export type MessageType = (typeof MESSAGE_TYPES)[number]
+
+/**
+ * Payload fuer character_share-Nachrichten. Live-Modell: gespeichert ist nur,
+ * WAS gezeigt werden soll; der Inhalt wird beim Anzeigen frisch aus dem Bogen
+ * geladen, damit Aenderungen am Bogen sichtbar bleiben.
+ */
+export interface CharacterSharePayload {
+  characterId: number
+  /** Liste der HtbahSkill-IDs, die angezeigt werden sollen. Leer = keine Faehigkeiten. */
+  visibleSkillIds: string[]
+  /** Wenn true, wird die Hintergrundgeschichte mitgezeigt. */
+  showStory: boolean
+}
+
+export type MessagePayload = CharacterSharePayload | null
+
 export const messages = pgTable(
   'messages',
   {
@@ -96,7 +114,9 @@ export const messages = pgTable(
     userId: integer('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    type: text('type').notNull().$type<MessageType>().default('text'),
     content: text('content').notNull(),
+    payload: jsonb('payload').$type<MessagePayload>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({

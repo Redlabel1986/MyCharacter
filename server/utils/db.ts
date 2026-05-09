@@ -117,6 +117,13 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_messages_group_created ON messages(group_id, created_at)
   `)
+  // Nachrichten-Typ + Payload (idempotent fuer bestehende Tabellen)
+  await db.execute(sql`
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'text'
+  `)
+  await db.execute(sql`
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS payload JSONB
+  `)
   await db.execute(sql`
     UPDATE users SET role = 'admin' WHERE email = ${ADMIN_EMAIL} AND role <> 'admin'
   `)

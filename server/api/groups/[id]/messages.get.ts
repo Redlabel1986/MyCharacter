@@ -18,7 +18,9 @@ export default defineEventHandler(async (event) => {
   const rows = await db
     .select({
       id: messages.id,
+      type: messages.type,
       content: messages.content,
+      payload: messages.payload,
       createdAt: messages.createdAt,
       user: { id: users.id, username: users.username, role: users.role },
     })

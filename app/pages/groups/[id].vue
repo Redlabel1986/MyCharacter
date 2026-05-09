@@ -11,7 +11,9 @@ interface Member {
 }
 interface ChatMessage {
   id: number
+  type: 'text' | 'character_share'
   content: string
+  payload: unknown
   createdAt: string
   user: { id: number; username: string; role: 'player' | 'dm' | 'admin' }
 }
@@ -51,7 +53,8 @@ const fetchNew = async () => {
     })
     if (res.messages.length) {
       messages.value.push(...res.messages)
-      lastId.value = res.messages[res.messages.length - 1].id
+      const last = res.messages[res.messages.length - 1]
+      if (last) lastId.value = last.id
       scrollToBottom()
     }
   } catch {
@@ -119,6 +122,8 @@ const deleteGroup = async () => {
   await navigateTo('/groups')
 }
 
+const shareModalOpen = ref(false)
+
 const formatTime = (iso: string) =>
   new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
 
@@ -159,13 +164,26 @@ const roleBadge = (r: 'player' | 'dm' | 'admin') =>
             <div class="text-[10px] uppercase tracking-widest text-[var(--color-accent)] font-semibold">
               {{ m.user.username }} <span class="text-ink-300">· {{ roleBadge(m.user.role) }}</span>
             </div>
-            <div class="whitespace-pre-wrap text-sm">{{ m.content }}</div>
+            <SharedSheetCard
+              v-if="m.type === 'character_share'"
+              :group-id="id"
+              :message-id="m.id"
+              class="mt-1"
+            />
+            <div v-else class="whitespace-pre-wrap text-sm">{{ m.content }}</div>
             <div class="text-[10px] text-ink-300 mt-1">{{ formatTime(m.createdAt) }}</div>
           </div>
         </div>
       </div>
 
       <form class="mt-3 flex gap-2" @submit.prevent="send">
+        <UButton
+          type="button"
+          variant="outline"
+          icon="i-lucide-scroll-text"
+          title="Charakterbogen teilen"
+          @click="shareModalOpen = true"
+        />
         <UInput
           v-model="composer"
           class="flex-1"
@@ -176,6 +194,8 @@ const roleBadge = (r: 'player' | 'dm' | 'admin') =>
           Senden
         </UButton>
       </form>
+
+      <ShareSheetModal v-model:open="shareModalOpen" :group-id="id" @shared="fetchNew" />
     </section>
 
     <!-- Mitglieder -->
