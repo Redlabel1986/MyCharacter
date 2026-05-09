@@ -73,6 +73,12 @@ const save = async () => {
   }
 }
 
+const downloadPdf = () => {
+  // Direkt-Link mit denselben Cookies — kein fetch noetig, Browser zeigt
+  // den Datei-Speichern-Dialog ueber Content-Disposition.
+  window.location.href = `/api/characters/${id}/pdf`
+}
+
 const sheetComponent = computed(() => {
   if (!character.value) return null
   switch (character.value.system) {
@@ -125,6 +131,15 @@ const sheetComponent = computed(() => {
         <span v-if="saveStatus === 'saved'" class="text-sm text-green-700">Gespeichert ✓</span>
         <span v-else-if="saveStatus === 'error'" class="text-sm text-red-700">Fehler beim Speichern</span>
         <span v-else-if="dirty" class="text-sm text-ink-300">Änderungen nicht gespeichert</span>
+        <UButton
+          v-if="character.system === 'htbah'"
+          variant="outline"
+          icon="i-lucide-download"
+          :title="dirty ? 'Erst speichern, sonst fehlen die letzten Aenderungen im PDF' : 'Bogen als ausfuellbares PDF herunterladen'"
+          @click="downloadPdf"
+        >
+          PDF
+        </UButton>
         <UButton color="primary" :loading="saving" :disabled="!dirty" @click="save">
           Speichern
         </UButton>
