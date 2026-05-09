@@ -60,6 +60,69 @@ watchEffect(() => {
 
 // Layout-Toggle
 const showTranslation = ref(true)
+
+// Text-Größe der Übersetzung (px)
+const translationFontSize = ref(14)
+const FONT_MIN = 10
+const FONT_MAX = 28
+const adjustFont = (delta: number) => {
+  translationFontSize.value = Math.min(
+    FONT_MAX,
+    Math.max(FONT_MIN, translationFontSize.value + delta),
+  )
+}
+
+// Scroll-Sync: Übersetzung → PDF-Seite
+const pdfFrame = ref<HTMLIFrameElement | null>(null)
+const translationScroll = ref<HTMLElement | null>(null)
+const currentPdfPage = ref(1)
+let pageObserver: IntersectionObserver | null = null
+
+const navigatePdfTo = (page: number) => {
+  if (page === currentPdfPage.value) return
+  currentPdfPage.value = page
+  const frame = pdfFrame.value
+  if (!frame) return
+  // Hash-Navigation ohne Reload (gleicher Origin)
+  try {
+    frame.contentWindow?.location.replace(`${pdfUrl.value}#page=${page}`)
+  } catch {
+    frame.src = `${pdfUrl.value}#page=${page}`
+  }
+}
+
+const setupPageObserver = () => {
+  pageObserver?.disconnect()
+  pageObserver = null
+  const root = translationScroll.value
+  if (!root || !translation.value) return
+  pageObserver = new IntersectionObserver(
+    (entries) => {
+      const visible = entries
+        .filter((e) => e.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
+      const top = visible[0]?.target as HTMLElement | undefined
+      if (!top) return
+      const m = top.id.match(/^seite-(\d+)$/)
+      if (m) navigatePdfTo(Number(m[1]))
+    },
+    { root, rootMargin: '0px 0px -70% 0px', threshold: 0 },
+  )
+  const sections = root.querySelectorAll('section[id^="seite-"]')
+  sections.forEach((el: Element) => {
+    pageObserver!.observe(el)
+  })
+}
+
+watch(
+  () => translation.value,
+  async () => {
+    await nextTick()
+    setupPageObserver()
+  },
+)
+
+onBeforeUnmount(() => pageObserver?.disconnect())
 </script>
 
 <template>
@@ -89,6 +152,7 @@ const showTranslation = ref(true)
       <!-- PDF-Viewer (nativer Browser-Viewer ueber iframe) -->
       <div class="parchment-card p-2 h-[80vh] min-h-[600px]">
         <iframe
+          ref="pdfFrame"
           :src="pdfUrl"
           class="w-full h-full rounded"
           :title="title"
@@ -98,35 +162,64 @@ const showTranslation = ref(true)
       <!-- Uebersetzungs-Panel -->
       <aside
         v-if="showTranslation && (translation || entry?.hasTranslation || translationLoading)"
-        class="parchment-card p-4 h-[80vh] min-h-[600px] overflow-auto"
+        class="parchment-card p-4 h-[80vh] min-h-[600px] flex flex-col"
       >
-        <div class="flex items-baseline justify-between mb-3">
+        <div class="flex items-center justify-between gap-3 mb-3 flex-wrap">
           <h2 class="font-serif text-lg">Deutsche Übersetzung</h2>
-          <span v-if="translation" class="text-[10px] uppercase tracking-widest text-ink-300">
-            {{ translation.pages.length }} Seiten
-          </span>
+          <div class="flex items-center gap-2">
+            <div v-if="translation" class="flex items-center gap-1">
+              <UButton
+                size="xs"
+                variant="ghost"
+                icon="i-lucide-minus"
+                :disabled="translationFontSize <= FONT_MIN"
+                aria-label="Schrift verkleinern"
+                @click="adjustFont(-1)"
+              />
+              <span class="text-[10px] tabular-nums w-10 text-center text-ink-400">
+                {{ translationFontSize }}px
+              </span>
+              <UButton
+                size="xs"
+                variant="ghost"
+                icon="i-lucide-plus"
+                :disabled="translationFontSize >= FONT_MAX"
+                aria-label="Schrift vergrößern"
+                @click="adjustFont(1)"
+              />
+            </div>
+            <span v-if="translation" class="text-[10px] uppercase tracking-widest text-ink-300">
+              {{ translation.pages.length }} Seiten
+            </span>
+          </div>
         </div>
 
-        <div v-if="translationLoading" class="text-ink-400 italic">
-          Lade Übersetzung …
-        </div>
-        <div v-else-if="translationError" class="text-ink-400 text-sm">
-          {{ translationError }}
-        </div>
-        <div v-else-if="translation" class="space-y-6 text-sm leading-relaxed">
-          <section
-            v-for="p in translation.pages"
-            :id="`seite-${p.page}`"
-            :key="p.page"
-            class="space-y-1"
+        <div ref="translationScroll" class="overflow-auto flex-1 -mx-1 px-1">
+          <div v-if="translationLoading" class="text-ink-400 italic">
+            Lade Übersetzung …
+          </div>
+          <div v-else-if="translationError" class="text-ink-400 text-sm">
+            {{ translationError }}
+          </div>
+          <div
+            v-else-if="translation"
+            class="space-y-6 leading-relaxed"
+            :style="{ fontSize: translationFontSize + 'px' }"
           >
-            <div class="text-[10px] uppercase tracking-widest text-[var(--color-accent)] font-semibold">
-              Seite {{ p.page }}
-            </div>
-            <p v-for="(para, i) in p.text.split(/\n\n+/)" :key="i" class="whitespace-pre-line">
-              {{ para }}
-            </p>
-          </section>
+            <section
+              v-for="p in translation.pages"
+              :id="`seite-${p.page}`"
+              :key="p.page"
+              class="space-y-1"
+            >
+              <div class="text-[10px] uppercase tracking-widest text-[var(--color-accent)] font-semibold">
+                Seite {{ p.page }}
+              </div>
+              <p v-for="(para, i) in p.text.split(/\n\n+/)" :key="i" class="whitespace-pre-line">
+                {{ para }}
+              </p>
+            </section>
+          </div>
         </div>
       </aside>
     </div>
