@@ -123,6 +123,10 @@ const setSpellcasting = <K extends keyof DnDCharacterData['spellcasting']>(key: 
   update(next)
 }
 
+const setSpellcastingAbility = (value: unknown) => {
+  setSpellcasting('ability', (value ?? '') as DnDAbility | '')
+}
+
 const setProficiencies = <K extends keyof DnDCharacterData['proficiencies']>(key: K, value: string) => {
   const next: DnDCharacterData = JSON.parse(JSON.stringify(sheet.value))
   next.proficiencies[key] = value
@@ -311,11 +315,22 @@ const setHp = <K extends keyof DnDCharacterData['combat']['hp']>(key: K, value: 
     <SheetSection title="Zauberwerk" class="lg:col-span-2">
       <div class="grid grid-cols-3 gap-2">
         <UFormField label="Spellcasting Ability">
-          <USelect
-            :model-value="sheet.spellcasting.ability"
-            :items="['', ...DND_ABILITIES]"
-            @update:model-value="setSpellcasting('ability', $event as DnDAbility | '')"
-          />
+          <div class="flex gap-2 items-center">
+            <USelect
+              :model-value="sheet.spellcasting.ability"
+              :items="DND_ABILITIES"
+              placeholder="—"
+              class="w-full"
+              @update:model-value="setSpellcastingAbility"
+            />
+            <UButton
+              v-if="sheet.spellcasting.ability"
+              size="xs"
+              variant="ghost"
+              icon="i-lucide-x"
+              @click="setSpellcasting('ability', '')"
+            />
+          </div>
         </UFormField>
         <StatBlock label="Spell Save DC" :value="spellSaveDC(sheet) ?? '–'" />
         <StatBlock label="Spell Atk" :value="spellAttackBonus(sheet) !== null ? formatMod(spellAttackBonus(sheet)!) : '–'" />
