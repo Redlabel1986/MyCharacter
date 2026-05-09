@@ -391,8 +391,8 @@ const resetProbe = () => {
             />
             <div
               class="col-span-2 text-center font-serif text-base"
-              :class="(entry.skill.spentPoints + htbahTalentValue(sheet, talent)) > HTBAH_SKILL_CAP ? 'text-red-700' : ''"
-              :title="(entry.skill.spentPoints + htbahTalentValue(sheet, talent)) > HTBAH_SKILL_CAP ? 'Grundwert über 100 — Cap greift, Modifikator wird darauf addiert' : ''"
+              :class="(entry.skill.spentPoints + htbahTalentValue(sheet, talent)) > HTBAH_SKILL_CAP ? 'text-amber-700' : ''"
+              :title="(entry.skill.spentPoints + htbahTalentValue(sheet, talent)) > HTBAH_SKILL_CAP ? 'Über Regelwerk-Richtwert von 100 — bewusst erlaubt' : ''"
             >
               {{ htbahSkillTotal(sheet, entry.skill) }}
             </div>
