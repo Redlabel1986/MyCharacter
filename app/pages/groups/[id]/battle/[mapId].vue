@@ -1,16 +1,14 @@
 <script setup lang="ts">
 /**
- * Battle-Map-Ansicht. Zeigt Hintergrundbild + Raster (Quadrat oder Hex) und
- * Token, die per Maus/Touch gezogen werden koennen. Aktualisierungen werden
- * per Polling synchronisiert (alle 2s).
- *
- * MVP-Approach: pure HTML/CSS/SVG, kein Canvas-Library.
- *  - Map als <img>
- *  - Grid-Overlay als SVG-Layer (Quadrat oder Hex je nach gridType)
- *  - Token als absolut positionierte <div>s
- *  - Drag via pointer events
- *  - Zoom via Buttons + Scroll-Container fuer Pan
+ * Battle-Map-Ansicht.
+ *  - Hauptbereich: Karten-Stage (SVG-Grid + Token, Drag-Drop, Zoom)
+ *  - Rechte Spalte (lg+): Map-Settings (DM only) + Gruppen-Chat
+ *  - Token-Modal: Anlegen / Bearbeiten mit Bild-Upload + Beschreibung
+ *  - Klick (einmal) auf Token: Info-Karte (Bild + Beschreibung)
+ *  - Doppelklick: schneller Edit
  */
+import GroupChat from '~/components/chat/GroupChat.vue'
+
 definePageMeta({ middleware: ['auth'] })
 
 interface BattleMap {
@@ -37,6 +35,7 @@ interface Token {
   hp: number | null
   hpMax: number | null
   statusText: string
+  description: string
 }
 interface CharacterSummary {
   id: number
@@ -61,11 +60,9 @@ const fetchMap = async () => {
     )
     map.value = res.map
     isDm.value = res.isDm
-    // Beim Drag NICHT überschreiben, sonst zuckelt der Token
     if (!draggingTokenId.value) {
       tokens.value = res.tokens
     } else {
-      // gezogenen Token nicht antasten, andere aktualisieren
       const dragId = draggingTokenId.value
       tokens.value = res.tokens.map((t) => {
         if (t.id === dragId) {
@@ -91,7 +88,7 @@ onUnmounted(() => {
   if (pollHandle) clearInterval(pollHandle)
 })
 
-// --- Bild-Dimensionen aus dem geladenen Bild ---
+// --- Bild-Dimensionen ---
 const imgW = ref(0)
 const imgH = ref(0)
 const onImgLoad = (e: Event) => {
@@ -106,7 +103,7 @@ const zoomIn = () => (zoom.value = Math.min(3, +(zoom.value + 0.1).toFixed(2)))
 const zoomOut = () => (zoom.value = Math.max(0.25, +(zoom.value - 0.1).toFixed(2)))
 const zoomReset = () => (zoom.value = 1)
 
-// --- Grid-Overlay als SVG ---
+// --- Grid-Overlay ---
 const gridSvg = computed(() => {
   if (!map.value || !imgW.value || !imgH.value) return ''
   const g = map.value.gridSize
@@ -121,12 +118,9 @@ const gridSvg = computed(() => {
       <rect width="100%" height="100%" fill="url(#grid)" />
     </svg>`
   }
-  // Hex (flat-top): Seitenlaenge s = gridSize/2 → Hex-Hoehe = s*√3
   const s = g / 2
-  const hexW = 2 * s
-  const hexH = Math.sqrt(3) * s
   const colStep = 1.5 * s
-  const rowStep = hexH
+  const rowStep = Math.sqrt(3) * s
   const cols = Math.ceil(imgW.value / colStep) + 1
   const rows = Math.ceil(imgH.value / rowStep) + 1
   const polys: string[] = []
@@ -148,14 +142,13 @@ const gridSvgUrl = computed(() =>
   gridSvg.value ? `url("data:image/svg+xml;utf8,${encodeURIComponent(gridSvg.value)}")` : 'none',
 )
 
-// --- Snap-to-grid ---
+// --- Snap ---
 const snap = (x: number, y: number) => {
   if (!map.value) return { x, y }
   const g = map.value.gridSize
   if (map.value.gridType === 'square') {
     return { x: Math.round(x / g) * g, y: Math.round(y / g) * g }
   }
-  // Hex: snap auf naechsten Hex-Mittelpunkt (vereinfacht)
   const s = g / 2
   const colStep = 1.5 * s
   const rowStep = Math.sqrt(3) * s
@@ -168,24 +161,35 @@ const snap = (x: number, y: number) => {
 // --- Drag ---
 const stageEl = ref<HTMLElement | null>(null)
 const draggingTokenId = ref<number | null>(null)
+const dragStarted = ref(false)
 const dragOffset = ref({ x: 0, y: 0 })
+const dragStartPx = ref({ x: 0, y: 0 })
 
 const canMoveToken = (t: Token) => isDm.value || t.ownerUserId === user.value?.id
 
 const startDrag = (e: PointerEvent, t: Token) => {
-  if (!canMoveToken(t)) return
+  if (!canMoveToken(t)) {
+    // Spieler kann fremde Token nur ansehen — Klick = Info-Karte
+    return
+  }
   if (!stageEl.value || !map.value) return
   e.preventDefault()
   const rect = stageEl.value.getBoundingClientRect()
   const localX = (e.clientX - rect.left) / zoom.value
   const localY = (e.clientY - rect.top) / zoom.value
   dragOffset.value = { x: localX - t.x, y: localY - t.y }
+  dragStartPx.value = { x: e.clientX, y: e.clientY }
   draggingTokenId.value = t.id
+  dragStarted.value = false
   ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
 }
 
 const onPointerMove = (e: PointerEvent) => {
   if (!draggingTokenId.value || !stageEl.value) return
+  const dx = e.clientX - dragStartPx.value.x
+  const dy = e.clientY - dragStartPx.value.y
+  if (!dragStarted.value && Math.hypot(dx, dy) < 4) return
+  dragStarted.value = true
   const rect = stageEl.value.getBoundingClientRect()
   const localX = (e.clientX - rect.left) / zoom.value
   const localY = (e.clientY - rect.top) / zoom.value
@@ -199,9 +203,15 @@ const onPointerUp = async (e: PointerEvent) => {
   if (!draggingTokenId.value) return
   const id = draggingTokenId.value
   const tk = tokens.value.find((x) => x.id === id)
+  const wasDragged = dragStarted.value
   draggingTokenId.value = null
+  dragStarted.value = false
   if (!tk) return
-  // Snap (Shift gedrueckt = nicht snappen)
+  if (!wasDragged) {
+    // Klick ohne Drag → Info-Karte oeffnen
+    infoTokenId.value = id
+    return
+  }
   if (!e.shiftKey) {
     const s = snap(tk.x, tk.y)
     tk.x = s.x
@@ -213,60 +223,109 @@ const onPointerUp = async (e: PointerEvent) => {
       body: { x: tk.x, y: tk.y },
     })
   } catch {
-    // bei Fehler einfach beim naechsten Poll auf Server-State zurueck
     await fetchMap()
   }
+}
+
+// --- Token-Klick (fuer Token, die ich nicht bewegen darf) ---
+const openInfoFromClick = (t: Token) => {
+  if (!canMoveToken(t)) infoTokenId.value = t.id
 }
 
 // --- Token hinzufuegen ---
 const showAddModal = ref(false)
 const myChars = ref<CharacterSummary[]>([])
-const newTokenName = ref('')
-const newTokenHidden = ref(false)
-const newTokenSize = ref(1)
-const newTokenCharacterId = ref<number | null>(null)
+const newToken = ref({
+  characterId: 0,
+  name: '',
+  description: '',
+  size: 1,
+  hidden: false,
+  imageFile: null as File | null,
+})
 
 const openAdd = async () => {
   showAddModal.value = true
-  newTokenName.value = ''
-  newTokenHidden.value = false
-  newTokenSize.value = 1
-  newTokenCharacterId.value = null
+  newToken.value = {
+    characterId: 0,
+    name: '',
+    description: '',
+    size: 1,
+    hidden: false,
+    imageFile: null,
+  }
   if (!myChars.value.length) {
     const res = await $fetch<{ characters: CharacterSummary[] }>('/api/characters')
     myChars.value = res.characters
   }
 }
+const onNewTokenFile = (e: Event) => {
+  const t = e.target as HTMLInputElement
+  newToken.value.imageFile = t.files?.[0] ?? null
+}
 const charOptions = computed(() => [
-  { label: '— ohne Charakter (NPC) —', value: 0 },
+  { label: '— ohne Charakter (NPC / Karte) —', value: 0 },
   ...myChars.value.map((c) => ({ label: `${c.name} (${c.system})`, value: c.id })),
 ])
 
+const addingToken = ref(false)
+const addTokenError = ref<string | null>(null)
 const addToken = async () => {
   if (!map.value) return
-  const body: Record<string, unknown> = {
-    x: Math.round(imgW.value / 2),
-    y: Math.round(imgH.value / 2),
-    sizeMultiplier: newTokenSize.value,
-    hidden: newTokenHidden.value && isDm.value,
+  addingToken.value = true
+  addTokenError.value = null
+  try {
+    const body: Record<string, unknown> = {
+      x: Math.round(imgW.value / 2),
+      y: Math.round(imgH.value / 2),
+      sizeMultiplier: newToken.value.size,
+      hidden: newToken.value.hidden && isDm.value,
+      description: newToken.value.description.trim() || undefined,
+    }
+    if (newToken.value.characterId) {
+      body.characterId = newToken.value.characterId
+    } else {
+      if (!newToken.value.name.trim()) {
+        addTokenError.value = 'Name fuer NPC erforderlich.'
+        addingToken.value = false
+        return
+      }
+      body.name = newToken.value.name.trim()
+    }
+    const created = await $fetch<{ token: Token }>(
+      `/api/groups/${groupId}/maps/${mapId}/tokens`,
+      { method: 'POST', body },
+    )
+    if (newToken.value.imageFile && created.token) {
+      const fd = new FormData()
+      fd.append('file', newToken.value.imageFile)
+      await $fetch(
+        `/api/groups/${groupId}/maps/${mapId}/tokens/${created.token.id}/image`,
+        { method: 'POST', body: fd },
+      )
+    }
+    showAddModal.value = false
+    await fetchMap()
+  } catch (e: unknown) {
+    addTokenError.value =
+      (e as { statusMessage?: string }).statusMessage ?? 'Token konnte nicht angelegt werden.'
+  } finally {
+    addingToken.value = false
   }
-  if (newTokenCharacterId.value) {
-    body.characterId = newTokenCharacterId.value
-  } else {
-    if (!newTokenName.value.trim()) return
-    body.name = newTokenName.value.trim()
-  }
-  await $fetch(`/api/groups/${groupId}/maps/${mapId}/tokens`, { method: 'POST', body })
-  showAddModal.value = false
-  await fetchMap()
 }
 
-// --- Token-Bearbeitung (HP, Status, Loeschen) ---
+// --- Token bearbeiten (HP / Status / Beschreibung / Bild / Groesse) ---
 const editingTokenId = ref<number | null>(null)
 const editing = computed(() => tokens.value.find((t) => t.id === editingTokenId.value) ?? null)
+const editImageFile = ref<File | null>(null)
+const onEditFile = (e: Event) => {
+  const t = e.target as HTMLInputElement
+  editImageFile.value = t.files?.[0] ?? null
+}
 const startEdit = (t: Token) => {
   if (!canMoveToken(t)) return
   editingTokenId.value = t.id
+  editImageFile.value = null
 }
 const saveEdit = async () => {
   const t = editing.value
@@ -277,11 +336,21 @@ const saveEdit = async () => {
       hp: t.hp,
       hpMax: t.hpMax,
       statusText: t.statusText,
+      description: t.description ?? '',
       sizeMultiplier: t.sizeMultiplier,
       hidden: isDm.value ? t.hidden : undefined,
     },
   })
+  if (editImageFile.value) {
+    const fd = new FormData()
+    fd.append('file', editImageFile.value)
+    await $fetch(`/api/groups/${groupId}/maps/${mapId}/tokens/${t.id}/image`, {
+      method: 'POST',
+      body: fd,
+    })
+  }
   editingTokenId.value = null
+  editImageFile.value = null
   await fetchMap()
 }
 const removeToken = async () => {
@@ -293,118 +362,226 @@ const removeToken = async () => {
   await fetchMap()
 }
 
-// --- Token-Bild ---
+// --- Info-Karte (NPC-Card) ---
+const infoTokenId = ref<number | null>(null)
+const infoToken = computed(() => tokens.value.find((t) => t.id === infoTokenId.value) ?? null)
+
+// --- Token-Bild-URL ---
+// Bild wird IMMER ueber den Token-Image-Endpoint geladen (auch fuer Charakter-
+// gebundene Token, dort liefert er das Charakter-Portrait). Cache-Bust per
+// updatedAt nicht noetig, weil wir bei Aenderungen neu mounten.
 const tokenImageSrc = (t: Token) => {
-  if (t.imageUrl) {
-    // Wenn wir eine Charakter-ID haben, nimm den geschuetzten Portrait-Endpoint
-    // (Blob-URLs sind privat).
-    if (t.characterId) return `/api/portrait/${t.characterId}`
+  if (t.imageUrl || t.characterId) {
+    return `/api/groups/${groupId}/maps/${mapId}/tokens/${t.id}/image`
   }
   return null
 }
+
+// --- Map-Settings (DM) ---
+const settingsOpen = ref(false)
+const settingsDraft = ref({
+  name: '',
+  gridType: 'square' as 'square' | 'hex',
+  gridSize: 50,
+  gridColor: 'rgba(0,0,0,0.35)',
+  visible: true,
+})
+watchEffect(() => {
+  if (map.value) {
+    settingsDraft.value = {
+      name: map.value.name,
+      gridType: map.value.gridType,
+      gridSize: map.value.gridSize,
+      gridColor: map.value.gridColor,
+      visible: map.value.visible,
+    }
+  }
+})
+const savingSettings = ref(false)
+const saveSettings = async () => {
+  if (!map.value) return
+  savingSettings.value = true
+  try {
+    await $fetch(`/api/groups/${groupId}/maps/${mapId}`, {
+      method: 'PUT',
+      body: settingsDraft.value,
+    })
+    await fetchMap()
+  } finally {
+    savingSettings.value = false
+  }
+}
+
+// --- Layout: Chat einklappbar ---
+const showChat = ref(true)
 </script>
 
 <template>
-  <div v-if="map" class="space-y-3">
-    <div class="flex items-center gap-3 flex-wrap">
-      <NuxtLink
-        :to="`/groups/${groupId}/battle`"
-        class="text-sm text-[var(--color-accent)] hover:underline"
-      >
-        ← Karten
-      </NuxtLink>
-      <h1 class="font-serif text-2xl flex-1">{{ map.name }}</h1>
-      <div class="flex items-center gap-2">
-        <UButton size="xs" variant="outline" icon="i-lucide-zoom-out" @click="zoomOut" />
-        <span class="text-xs tabular-nums w-12 text-center">{{ Math.round(zoom * 100) }}%</span>
-        <UButton size="xs" variant="outline" icon="i-lucide-zoom-in" @click="zoomIn" />
-        <UButton size="xs" variant="ghost" @click="zoomReset">100%</UButton>
-        <UButton color="primary" icon="i-lucide-plus" size="sm" @click="openAdd">
-          Token
+  <div v-if="map" class="grid gap-3 lg:grid-cols-[1fr_360px]">
+    <!-- Hauptbereich: Karte -->
+    <div class="space-y-3 min-w-0">
+      <div class="flex items-center gap-3 flex-wrap">
+        <NuxtLink
+          :to="`/groups/${groupId}/battle`"
+          class="text-sm text-[var(--color-accent)] hover:underline"
+        >
+          ← Karten
+        </NuxtLink>
+        <h1 class="font-serif text-2xl flex-1 truncate">{{ map.name }}</h1>
+        <div class="flex items-center gap-2 flex-wrap">
+          <UButton size="xs" variant="outline" icon="i-lucide-zoom-out" @click="zoomOut" />
+          <span class="text-xs tabular-nums w-12 text-center">{{ Math.round(zoom * 100) }}%</span>
+          <UButton size="xs" variant="outline" icon="i-lucide-zoom-in" @click="zoomIn" />
+          <UButton size="xs" variant="ghost" @click="zoomReset">100%</UButton>
+          <UButton
+            v-if="isDm"
+            size="sm"
+            variant="outline"
+            icon="i-lucide-settings"
+            @click="settingsOpen = !settingsOpen"
+          >
+            Karte
+          </UButton>
+          <UButton color="primary" icon="i-lucide-plus" size="sm" @click="openAdd">
+            Token
+          </UButton>
+          <UButton
+            class="lg:hidden"
+            size="sm"
+            variant="ghost"
+            :icon="showChat ? 'i-lucide-message-square-off' : 'i-lucide-message-square'"
+            @click="showChat = !showChat"
+          />
+        </div>
+      </div>
+
+      <!-- Karten-Settings-Panel (DM) -->
+      <div v-if="isDm && settingsOpen" class="parchment-card p-4 space-y-3">
+        <div class="grid sm:grid-cols-12 gap-3">
+          <UFormField label="Name" class="sm:col-span-4">
+            <UInput v-model="settingsDraft.name" />
+          </UFormField>
+          <UFormField label="Raster" class="sm:col-span-2">
+            <USelect
+              v-model="settingsDraft.gridType"
+              :items="[
+                { label: 'Quadrat', value: 'square' },
+                { label: 'Hex', value: 'hex' },
+              ]"
+              value-key="value"
+            />
+          </UFormField>
+          <UFormField label="Größe (px)" class="sm:col-span-2" help="50 ist normal für Karten in Originalgröße">
+            <UInput v-model.number="settingsDraft.gridSize" type="number" min="10" max="500" />
+          </UFormField>
+          <UFormField label="Raster-Farbe" class="sm:col-span-2">
+            <UInput v-model="settingsDraft.gridColor" placeholder="rgba(0,0,0,0.35)" />
+          </UFormField>
+          <UFormField label="Sichtbar für Spieler" class="sm:col-span-2">
+            <UCheckbox v-model="settingsDraft.visible" />
+          </UFormField>
+        </div>
+        <UButton color="primary" icon="i-lucide-save" :loading="savingSettings" @click="saveSettings">
+          Speichern
         </UButton>
       </div>
-    </div>
 
-    <div class="parchment-card p-2">
-      <!-- Scroll-Container fuer Pan -->
-      <div class="overflow-auto bg-black/5 rounded" style="max-height: 80vh">
-        <div
-          ref="stageEl"
-          class="relative origin-top-left"
-          :style="{
-            width: imgW + 'px',
-            height: imgH + 'px',
-            transform: `scale(${zoom})`,
-            backgroundImage: gridSvgUrl,
-            backgroundSize: 'contain',
-            backgroundRepeat: 'no-repeat',
-          }"
-          @pointermove="onPointerMove"
-          @pointerup="onPointerUp"
-          @pointercancel="onPointerUp"
-        >
-          <!-- Hintergrund-Bild -->
-          <img
-            :src="`/api/groups/${groupId}/maps/${mapId}/image`"
-            :alt="map.name"
-            class="absolute inset-0 select-none pointer-events-none"
-            :style="{ width: imgW ? imgW + 'px' : 'auto', height: imgH ? imgH + 'px' : 'auto' }"
-            draggable="false"
-            @load="onImgLoad"
-          >
-
-          <!-- Token -->
+      <div class="parchment-card p-2">
+        <div class="overflow-auto bg-black/5 rounded" style="max-height: 78vh">
           <div
-            v-for="t in tokens"
-            :key="t.id"
-            class="absolute border-2 rounded-full bg-white/80 shadow flex items-center justify-center text-xs font-semibold select-none"
-            :class="[
-              canMoveToken(t) ? 'cursor-move' : 'cursor-default',
-              t.hidden ? 'opacity-60 border-amber-500' : 'border-[var(--color-accent)]',
-            ]"
+            ref="stageEl"
+            class="relative origin-top-left"
             :style="{
-              left: t.x + 'px',
-              top: t.y + 'px',
-              width: (map.gridSize * t.sizeMultiplier) + 'px',
-              height: (map.gridSize * t.sizeMultiplier) + 'px',
-              transform: 'translate(-50%, -50%)',
-              touchAction: 'none',
+              width: imgW + 'px',
+              height: imgH + 'px',
+              transform: `scale(${zoom})`,
+              backgroundImage: gridSvgUrl,
+              backgroundSize: 'contain',
+              backgroundRepeat: 'no-repeat',
             }"
-            @pointerdown="startDrag($event, t)"
-            @dblclick="startEdit(t)"
+            @pointermove="onPointerMove"
+            @pointerup="onPointerUp"
+            @pointercancel="onPointerUp"
           >
             <img
-              v-if="tokenImageSrc(t)"
-              :src="tokenImageSrc(t) ?? ''"
-              :alt="t.name"
-              class="w-full h-full object-cover rounded-full pointer-events-none"
+              :src="`/api/groups/${groupId}/maps/${mapId}/image`"
+              :alt="map.name"
+              class="absolute inset-0 select-none pointer-events-none"
+              :style="{ width: imgW ? imgW + 'px' : 'auto', height: imgH ? imgH + 'px' : 'auto' }"
               draggable="false"
+              @load="onImgLoad"
             >
-            <span v-else class="text-center px-1 leading-tight pointer-events-none">
-              {{ t.name.slice(0, 8) }}
-            </span>
-            <!-- HP-Anzeige -->
+
             <div
-              v-if="t.hp !== null && t.hpMax"
-              class="absolute -bottom-3 left-1/2 -translate-x-1/2 text-[10px] bg-black/70 text-white px-1 rounded whitespace-nowrap"
+              v-for="t in tokens"
+              :key="t.id"
+              class="absolute border-2 rounded-full bg-white/80 shadow flex items-center justify-center text-xs font-semibold select-none"
+              :class="[
+                canMoveToken(t) ? 'cursor-move' : 'cursor-pointer',
+                t.hidden ? 'opacity-60 border-amber-500' : 'border-[var(--color-accent)]',
+              ]"
+              :style="{
+                left: t.x + 'px',
+                top: t.y + 'px',
+                width: (map.gridSize * t.sizeMultiplier) + 'px',
+                height: (map.gridSize * t.sizeMultiplier) + 'px',
+                transform: 'translate(-50%, -50%)',
+                touchAction: 'none',
+              }"
+              @pointerdown="startDrag($event, t)"
+              @click="openInfoFromClick(t)"
+              @dblclick="startEdit(t)"
             >
-              {{ t.hp }}/{{ t.hpMax }}
-            </div>
-            <!-- Status-Marker -->
-            <div
-              v-if="t.statusText"
-              class="absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] bg-amber-500 text-black px-1 rounded whitespace-nowrap"
-            >
-              {{ t.statusText }}
+              <img
+                v-if="tokenImageSrc(t)"
+                :src="tokenImageSrc(t) ?? ''"
+                :alt="t.name"
+                class="w-full h-full object-cover rounded-full pointer-events-none"
+                draggable="false"
+              >
+              <span v-else class="text-center px-1 leading-tight pointer-events-none">
+                {{ t.name.slice(0, 8) }}
+              </span>
+              <div
+                v-if="t.hp !== null && t.hpMax"
+                class="absolute -bottom-3 left-1/2 -translate-x-1/2 text-[10px] bg-black/70 text-white px-1 rounded whitespace-nowrap"
+              >
+                {{ t.hp }}/{{ t.hpMax }}
+              </div>
+              <div
+                v-if="t.statusText"
+                class="absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] bg-amber-500 text-black px-1 rounded whitespace-nowrap"
+              >
+                {{ t.statusText }}
+              </div>
             </div>
           </div>
         </div>
       </div>
+
+      <p class="text-xs text-ink-300">
+        Klick = Info-Karte. Ziehen = bewegen. Doppelklick = bearbeiten. Shift während Loslassen = nicht ans Raster snappen.
+      </p>
     </div>
 
-    <p class="text-xs text-ink-300">
-      Token ziehen mit Maus/Finger. Doppelklick öffnet HP/Status. Shift während Loslassen = nicht ans Raster snappen.
-    </p>
+    <!-- Rechte Spalte: Chat -->
+    <aside
+      class="parchment-card p-3 flex flex-col"
+      :class="showChat ? '' : 'hidden lg:flex'"
+      style="height: 80vh"
+    >
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="font-serif text-lg">Chat</h2>
+        <NuxtLink
+          :to="`/groups/${groupId}`"
+          class="text-xs text-ink-400 hover:text-[var(--color-accent)]"
+        >
+          → Gruppe
+        </NuxtLink>
+      </div>
+      <div class="accent-rule mb-3" />
+      <GroupChat :group-id="groupId" compact class="flex-1 min-h-0" />
+    </aside>
 
     <!-- Add-Token-Modal -->
     <UModal v-model:open="showAddModal" title="Token hinzufügen">
@@ -412,27 +589,39 @@ const tokenImageSrc = (t: Token) => {
         <div class="space-y-3">
           <UFormField label="Charakter">
             <USelect
-              v-model="newTokenCharacterId"
+              v-model="newToken.characterId"
               :items="charOptions"
               value-key="value"
               class="w-full"
             />
           </UFormField>
-          <UFormField v-if="!newTokenCharacterId" label="Name">
-            <UInput v-model="newTokenName" placeholder="z.B. Goblin #1" />
+          <UFormField v-if="!newToken.characterId" label="Name (NPC oder Karten-Marker)">
+            <UInput v-model="newToken.name" placeholder="z.B. Goblin #1" />
+          </UFormField>
+          <UFormField v-if="!newToken.characterId" label="Bild (optional)" help="JPEG/PNG/WEBP, max 4 MB">
+            <input type="file" accept="image/jpeg,image/png,image/webp" class="block w-full text-sm" @change="onNewTokenFile">
+          </UFormField>
+          <UFormField label="Beschreibung (NPC-Karte, optional)">
+            <UTextarea
+              v-model="newToken.description"
+              :rows="3"
+              placeholder="Was sehen die Spieler, wenn sie auf den Token klicken?"
+              :maxlength="4000"
+            />
           </UFormField>
           <UFormField label="Größe (Rasterzellen)">
-            <UInput v-model.number="newTokenSize" type="number" min="1" max="8" />
+            <UInput v-model.number="newToken.size" type="number" min="1" max="8" />
           </UFormField>
-          <UFormField v-if="isDm" label="Versteckt (nur DM)">
-            <UCheckbox v-model="newTokenHidden" />
+          <UFormField v-if="isDm" label="Versteckt (nur DM sieht)">
+            <UCheckbox v-model="newToken.hidden" />
           </UFormField>
+          <p v-if="addTokenError" class="text-sm text-red-700">{{ addTokenError }}</p>
         </div>
       </template>
       <template #footer>
         <div class="flex gap-2 justify-end">
           <UButton variant="ghost" @click="showAddModal = false">Abbrechen</UButton>
-          <UButton color="primary" @click="addToken">Hinzufügen</UButton>
+          <UButton color="primary" :loading="addingToken" @click="addToken">Hinzufügen</UButton>
         </div>
       </template>
     </UModal>
@@ -452,8 +641,14 @@ const tokenImageSrc = (t: Token) => {
           <UFormField label="Status (Komma-getrennt)">
             <UInput v-model="editing.statusText" placeholder="Vergiftet, Brennt" :maxlength="200" />
           </UFormField>
+          <UFormField label="Beschreibung (Info-Karte)">
+            <UTextarea v-model="editing.description" :rows="4" :maxlength="4000" />
+          </UFormField>
           <UFormField label="Größe (Rasterzellen)">
             <UInput v-model.number="editing.sizeMultiplier" type="number" min="1" max="8" />
+          </UFormField>
+          <UFormField label="Bild ersetzen (optional)" help="JPEG/PNG/WEBP, max 4 MB">
+            <input type="file" accept="image/jpeg,image/png,image/webp" class="block w-full text-sm" @change="onEditFile">
           </UFormField>
           <UFormField v-if="isDm" label="Versteckt (nur DM sieht)">
             <UCheckbox v-model="editing.hidden" />
@@ -467,6 +662,50 @@ const tokenImageSrc = (t: Token) => {
           </UButton>
           <UButton variant="ghost" @click="editingTokenId = null">Schließen</UButton>
           <UButton color="primary" @click="saveEdit">Speichern</UButton>
+        </div>
+      </template>
+    </UModal>
+
+    <!-- Info-Karte (NPC-Card) -->
+    <UModal v-model:open="infoTokenId" :title="infoToken?.name ?? ''">
+      <template #body>
+        <div v-if="infoToken" class="space-y-3">
+          <div v-if="tokenImageSrc(infoToken)" class="flex justify-center">
+            <img
+              :src="tokenImageSrc(infoToken) ?? ''"
+              :alt="infoToken.name"
+              class="max-h-80 max-w-full rounded-lg shadow-lg"
+            >
+          </div>
+          <div class="grid grid-cols-2 gap-3 text-sm">
+            <div v-if="infoToken.hp !== null && infoToken.hpMax">
+              <div class="text-[10px] uppercase text-ink-300">HP</div>
+              <div class="font-semibold">{{ infoToken.hp }}/{{ infoToken.hpMax }}</div>
+            </div>
+            <div v-if="infoToken.statusText">
+              <div class="text-[10px] uppercase text-ink-300">Status</div>
+              <div class="font-semibold">{{ infoToken.statusText }}</div>
+            </div>
+          </div>
+          <div v-if="infoToken.description" class="whitespace-pre-wrap text-sm leading-relaxed">
+            {{ infoToken.description }}
+          </div>
+          <div v-else class="text-sm italic text-ink-300">
+            Keine Beschreibung hinterlegt.
+          </div>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex gap-2 justify-end">
+          <UButton
+            v-if="infoToken && canMoveToken(infoToken)"
+            variant="outline"
+            icon="i-lucide-edit"
+            @click="(editingTokenId = infoToken.id, infoTokenId = null)"
+          >
+            Bearbeiten
+          </UButton>
+          <UButton variant="ghost" @click="infoTokenId = null">Schließen</UButton>
         </div>
       </template>
     </UModal>

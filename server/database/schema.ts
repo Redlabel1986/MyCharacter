@@ -249,6 +249,8 @@ export const battleTokens = pgTable(
     hpMax: integer('hp_max'),
     /** Frei-Notiz / Statusmarker als CSV: "Vergiftet,Brennt". */
     statusText: text('status_text').notNull().default(''),
+    /** Lange Beschreibung — wird beim Klick auf den Token als Info-Karte gezeigt. */
+    description: text('description').notNull().default(''),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

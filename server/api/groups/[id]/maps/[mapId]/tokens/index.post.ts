@@ -27,6 +27,7 @@ const bodySchema = z.object({
   hp: z.number().int().min(0).max(100000).optional(),
   hpMax: z.number().int().min(0).max(100000).optional(),
   statusText: z.string().max(200).optional(),
+  description: z.string().max(4000).optional(),
 })
 
 export default defineEventHandler(async (event) => {
@@ -97,6 +98,7 @@ export default defineEventHandler(async (event) => {
       hp: body.hp,
       hpMax: body.hpMax,
       statusText: body.statusText ?? '',
+      description: body.description ?? '',
     })
     .returning()
 

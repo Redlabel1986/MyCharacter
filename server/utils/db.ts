@@ -181,6 +181,10 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_battle_tokens_map ON battle_tokens(map_id)
   `)
+  // Beschreibung fuer NPC-Karten (idempotent)
+  await db.execute(sql`
+    ALTER TABLE battle_tokens ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''
+  `)
 
   await db.execute(sql`
     UPDATE users SET role = 'admin' WHERE email = ${ADMIN_EMAIL} AND role <> 'admin'
