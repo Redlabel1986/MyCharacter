@@ -145,8 +145,16 @@ export async function translateLibrary(opts: TranslateOptions = {}): Promise<{
     log(`\n=== ${entry.title} (${entry.slug}) ===`)
 
     const existing = opts.force ? null : await loadTranslation(entry.slug)
-    if (existing && !opts.pageLimit) {
-      log(`  bereits uebersetzt (${existing.pages.length} Seiten) — uebersprungen`)
+
+    // Frueher Skip nur, wenn das Dokument vollstaendig durchuebersetzt ist
+    // (existing.totalPages bekannt UND alle Seiten enthalten). Sonst weitermachen.
+    if (
+      existing &&
+      !opts.pageLimit &&
+      existing.totalPages &&
+      existing.pages.length >= existing.totalPages
+    ) {
+      log(`  bereits vollstaendig uebersetzt (${existing.pages.length}/${existing.totalPages} Seiten) — uebersprungen`)
       skipped.push(entry.slug)
       continue
     }
@@ -154,15 +162,18 @@ export async function translateLibrary(opts: TranslateOptions = {}): Promise<{
     log('  extrahiere Text …')
     const pages = await extractPagesText(entry)
     const limited = opts.pageLimit ? pages.slice(0, opts.pageLimit) : pages
-    log(`  ${limited.length} Seiten.`)
+    log(`  ${limited.length} von ${pages.length} Seiten.`)
 
     const doc: TranslationDoc = existing ?? {
       slug: entry.slug,
       sourceLang: 'en',
       targetLang: 'de',
       generatedAt: new Date().toISOString(),
+      totalPages: pages.length,
       pages: [],
     }
+    // Bei resumiertem Lauf: totalPages aktualisieren, falls vorher nicht gesetzt
+    doc.totalPages = pages.length
     const haveSet = new Set(doc.pages.map((p) => p.page))
 
     for (const p of limited) {

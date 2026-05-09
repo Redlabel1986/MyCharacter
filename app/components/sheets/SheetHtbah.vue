@@ -25,7 +25,12 @@ import type { GameSystem } from '~~/shared/systems'
 import SheetSection from '~/components/ui/SheetSection.vue'
 import StatBlock from '~/components/ui/StatBlock.vue'
 
-const props = defineProps<{ data: Record<string, unknown>; system: GameSystem }>()
+const props = defineProps<{
+  data: Record<string, unknown>
+  system: GameSystem
+  /** Charakter-ID. Wenn gesetzt, kann „An Gruppe wuerfeln" benutzt werden. */
+  characterId?: number
+}>()
 const emit = defineEmits<{ (e: 'update:data', v: Record<string, unknown>): void }>()
 
 // Mit Blank mergen — schützt alte Charaktere und ignoriert deprecated Felder.
@@ -249,6 +254,72 @@ const rollDice = () => {
 }
 const resetProbe = () => {
   probeRoll.value = null
+}
+
+// — An Gruppe wuerfeln —
+interface GroupListItem { id: number; name: string }
+const groupsForRoll = ref<GroupListItem[]>([])
+const selectedGroupId = ref<number | null>(null)
+const rollModifier = ref<number>(0)
+const rollNote = ref<string>('')
+const groupRollSending = ref(false)
+const groupRollError = ref<string | null>(null)
+const groupRollSuccess = ref(false)
+
+const loadGroups = async () => {
+  if (!props.characterId) return
+  try {
+    const res = await $fetch<{ groups: GroupListItem[] }>('/api/groups')
+    groupsForRoll.value = res.groups ?? []
+    if (!selectedGroupId.value && groupsForRoll.value[0]) {
+      selectedGroupId.value = groupsForRoll.value[0].id
+    }
+  } catch {
+    // still — Spieler ist evtl. in keiner Gruppe
+  }
+}
+onMounted(loadGroups)
+
+const groupOptions = computed(() =>
+  groupsForRoll.value.map((g) => ({ label: g.name, value: g.id })),
+)
+
+const postRollToGroup = async () => {
+  if (!props.characterId || !selectedGroupId.value || !probeTargetId.value) return
+  groupRollSending.value = true
+  groupRollError.value = null
+  groupRollSuccess.value = false
+  try {
+    const [type, id] = probeTargetId.value.split(':')
+    const body =
+      type === 'skill'
+        ? {
+            kind: 'htbahSkill' as const,
+            characterId: props.characterId,
+            skillId: id,
+            modifier: rollModifier.value || undefined,
+            note: rollNote.value.trim() || undefined,
+          }
+        : {
+            kind: 'htbahTalent' as const,
+            characterId: props.characterId,
+            talent: id as HtbahTalent,
+            modifier: rollModifier.value || undefined,
+            note: rollNote.value.trim() || undefined,
+          }
+    await $fetch(`/api/groups/${selectedGroupId.value}/rolls`, {
+      method: 'POST',
+      body,
+    })
+    groupRollSuccess.value = true
+    rollNote.value = ''
+    setTimeout(() => (groupRollSuccess.value = false), 2500)
+  } catch (e: unknown) {
+    groupRollError.value =
+      (e as { statusMessage?: string }).statusMessage ?? 'Wurf konnte nicht gepostet werden.'
+  } finally {
+    groupRollSending.value = false
+  }
 }
 </script>
 
@@ -601,6 +672,67 @@ const resetProbe = () => {
       </div>
       <p v-else class="text-xs text-ink-300 mt-3 text-center">
         Wähle eine Fähigkeit oder Begabung und gib das Würfelergebnis ein (oder klick auf <em>W100 würfeln</em>).
+      </p>
+
+      <!-- An Gruppe wuerfeln -->
+      <div
+        v-if="characterId && groupsForRoll.length"
+        class="mt-4 pt-4 border-t border-parchment-700/20"
+      >
+        <div class="text-xs uppercase tracking-widest text-ink-300 mb-2">
+          An Gruppen-Chat würfeln (Server würfelt, Ergebnis im Chat)
+        </div>
+        <div class="grid sm:grid-cols-12 gap-3 items-end">
+          <UFormField label="Gruppe" class="sm:col-span-4">
+            <USelect
+              v-model="selectedGroupId"
+              :items="groupOptions"
+              value-key="value"
+              class="w-full"
+            />
+          </UFormField>
+          <UFormField
+            label="Mod. (situativ)"
+            class="sm:col-span-2"
+            help="±10 = Erleichterung/Erschwernis"
+          >
+            <UInput
+              v-model.number="rollModifier"
+              type="number"
+              min="-100"
+              max="100"
+            />
+          </UFormField>
+          <UFormField label="Notiz (optional)" class="sm:col-span-4">
+            <UInput
+              v-model="rollNote"
+              placeholder="z.B. „klettert die Wand hoch"
+              :maxlength="200"
+            />
+          </UFormField>
+          <UButton
+            color="primary"
+            icon="i-lucide-send"
+            class="sm:col-span-2"
+            :disabled="!probeTargetId || !selectedGroupId"
+            :loading="groupRollSending"
+            @click="postRollToGroup"
+          >
+            An Gruppe
+          </UButton>
+        </div>
+        <div v-if="groupRollError" class="text-xs text-red-700 mt-2">
+          {{ groupRollError }}
+        </div>
+        <div v-if="groupRollSuccess" class="text-xs text-emerald-700 mt-2">
+          ✓ Wurf an Gruppe gesendet.
+        </div>
+      </div>
+      <p
+        v-else-if="characterId && !groupsForRoll.length"
+        class="text-[10px] text-ink-300 mt-3 text-center"
+      >
+        Du bist in keiner Gruppe — tritt einer Gruppe bei, um Würfe an einen Chat zu schicken.
       </p>
     </SheetSection>
 

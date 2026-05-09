@@ -1,4 +1,4 @@
-import { and, asc, eq, gt } from 'drizzle-orm'
+import { and, asc, eq, gt, inArray } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
 import { messages, users } from '~~/server/database/schema'
@@ -18,7 +18,9 @@ export default defineEventHandler(async (event) => {
   const rows = await db
     .select({
       id: messages.id,
+      type: messages.type,
       content: messages.content,
+      payload: messages.payload,
       createdAt: messages.createdAt,
       user: { id: users.id, username: users.username, role: users.role },
     })
@@ -29,9 +31,9 @@ export default defineEventHandler(async (event) => {
         ? and(
             eq(messages.groupId, groupId),
             gt(messages.id, sinceId),
-            eq(messages.type, 'text'),
+            inArray(messages.type, ['text', 'roll']),
           )
-        : and(eq(messages.groupId, groupId), eq(messages.type, 'text')),
+        : and(eq(messages.groupId, groupId), inArray(messages.type, ['text', 'roll'])),
     )
     .orderBy(asc(messages.createdAt))
     .limit(500)

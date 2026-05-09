@@ -141,6 +141,47 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_group_shared_group ON group_shared_characters(group_id)
   `)
+  // Battle Maps + Tokens
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS battle_maps (
+      id SERIAL PRIMARY KEY,
+      group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      image_url TEXT NOT NULL,
+      grid_type TEXT NOT NULL DEFAULT 'square',
+      grid_size INTEGER NOT NULL DEFAULT 50,
+      grid_color TEXT NOT NULL DEFAULT 'rgba(0,0,0,0.35)',
+      visible BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_battle_maps_group ON battle_maps(group_id)
+  `)
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS battle_tokens (
+      id SERIAL PRIMARY KEY,
+      map_id INTEGER NOT NULL REFERENCES battle_maps(id) ON DELETE CASCADE,
+      owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL,
+      name TEXT NOT NULL,
+      image_url TEXT,
+      x INTEGER NOT NULL DEFAULT 0,
+      y INTEGER NOT NULL DEFAULT 0,
+      size_multiplier INTEGER NOT NULL DEFAULT 1,
+      hidden BOOLEAN NOT NULL DEFAULT FALSE,
+      hp INTEGER,
+      hp_max INTEGER,
+      status_text TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_battle_tokens_map ON battle_tokens(map_id)
+  `)
+
   await db.execute(sql`
     UPDATE users SET role = 'admin' WHERE email = ${ADMIN_EMAIL} AND role <> 'admin'
   `)

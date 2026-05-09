@@ -24,6 +24,8 @@ export interface TranslationDoc {
   sourceLang: string
   targetLang: 'de'
   generatedAt: string
+  /** Gesamtseitenzahl des Quell-PDFs — gesetzt sobald einmal extrahiert. */
+  totalPages?: number
   pages: Array<{
     page: number
     sourceExcerpt?: string

@@ -9,9 +9,25 @@ interface Member {
   role: 'player' | 'dm' | 'admin'
   joinedAt: string
 }
+interface RollPayload {
+  system: 'dnd5e' | 'dnd2024' | 'dsa5' | 'dsa41' | 'htbah'
+  label: string
+  characterId?: number
+  characterName?: string
+  target: number
+  modifier?: number
+  dice: number[]
+  success: boolean
+  critical?: boolean
+  fumble?: boolean
+  qualityStep?: number
+  note?: string
+}
 interface ChatMessage {
   id: number
+  type?: 'text' | 'roll' | 'character_share'
   content: string
+  payload?: RollPayload | null
   createdAt: string
   user: { id: number; username: string; role: 'player' | 'dm' | 'admin' }
 }
@@ -141,6 +157,13 @@ const roleBadge = (r: 'player' | 'dm' | 'admin') =>
           </NuxtLink>
           <h1 class="font-serif text-2xl">{{ groupData.group.name }}</h1>
         </div>
+        <NuxtLink
+          :to="`/groups/${id}/battle`"
+          class="text-sm text-[var(--color-accent)] hover:underline flex items-center gap-1"
+        >
+          <UIcon name="i-lucide-map" />
+          Battle Maps
+        </NuxtLink>
       </div>
       <div class="accent-rule my-3" />
 
@@ -154,18 +177,24 @@ const roleBadge = (r: 'player' | 'dm' | 'admin') =>
           class="flex flex-col"
           :class="m.user.id === user?.id ? 'items-end' : 'items-start'"
         >
+          <div class="text-[10px] uppercase tracking-widest text-[var(--color-accent)] font-semibold mb-0.5 px-1">
+            {{ m.user.username }} <span class="text-ink-300">· {{ roleBadge(m.user.role) }}</span>
+          </div>
+          <RollCard
+            v-if="m.type === 'roll' && m.payload"
+            :payload="(m.payload as RollPayload)"
+            :mine="m.user.id === user?.id"
+          />
           <div
+            v-else
             class="max-w-[80%] px-3 py-2 rounded-lg"
             :class="m.user.id === user?.id
               ? 'bg-[var(--color-accent-soft)] text-ink-700'
               : 'bg-white/60 text-ink-500 border border-parchment-700/20'"
           >
-            <div class="text-[10px] uppercase tracking-widest text-[var(--color-accent)] font-semibold">
-              {{ m.user.username }} <span class="text-ink-300">· {{ roleBadge(m.user.role) }}</span>
-            </div>
             <div class="whitespace-pre-wrap text-sm">{{ m.content }}</div>
-            <div class="text-[10px] text-ink-300 mt-1">{{ formatTime(m.createdAt) }}</div>
           </div>
+          <div class="text-[10px] text-ink-300 mt-1 px-1">{{ formatTime(m.createdAt) }}</div>
         </div>
       </div>
 

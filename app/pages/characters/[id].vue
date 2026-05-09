@@ -151,6 +151,7 @@ const sheetComponent = computed(() => {
       v-if="sheetComponent"
       v-model:data="draftData"
       :system="character.system"
+      :character-id="character.id"
     />
 
     <DmAccessManager
