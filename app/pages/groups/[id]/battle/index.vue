@@ -21,12 +21,40 @@ interface BattleMap {
 const route = useRoute()
 const groupId = Number(route.params.id)
 
-const { data, refresh, pending } = await useFetch<{ maps: BattleMap[]; isDm: boolean }>(
+const { data, refresh, pending } = await useFetch<{
+  maps: BattleMap[]
+  isDm: boolean
+  activeMapId: number | null
+}>(
   `/api/groups/${groupId}/maps`,
-  { default: () => ({ maps: [], isDm: false }) },
+  { default: () => ({ maps: [], isDm: false, activeMapId: null }) },
 )
 
 const isDm = computed(() => !!data.value?.isDm)
+const activeMapId = computed(() => data.value?.activeMapId ?? null)
+
+// Auto-Redirect fuer Spieler: wenn der DM eine Karte aktiv gesetzt hat,
+// direkt dorthin springen — kein „Liste"-Schritt fuer den Spieler.
+onMounted(() => {
+  if (!isDm.value && activeMapId.value) {
+    navigateTo(`/groups/${groupId}/battle/${activeMapId.value}`)
+  }
+})
+
+const setActive = async (map: BattleMap) => {
+  await $fetch(`/api/groups/${groupId}/active-map`, {
+    method: 'PUT',
+    body: { mapId: map.id },
+  })
+  await refresh()
+}
+const clearActive = async () => {
+  await $fetch(`/api/groups/${groupId}/active-map`, {
+    method: 'PUT',
+    body: { mapId: null },
+  })
+  await refresh()
+}
 
 // Upload-Form
 const uploadFile = ref<File | null>(null)
@@ -144,14 +172,21 @@ const removeMap = async (map: BattleMap) => {
           v-for="m in data.maps"
           :key="m.id"
           class="parchment-card p-3 flex flex-col"
+          :class="m.id === activeMapId ? 'ring-2 ring-[var(--color-accent)]' : ''"
         >
-          <div class="aspect-video bg-black/10 rounded overflow-hidden flex items-center justify-center">
+          <div class="relative aspect-video bg-black/10 rounded overflow-hidden flex items-center justify-center">
             <img
               :src="`/api/groups/${groupId}/maps/${m.id}/image`"
               :alt="m.name"
               class="w-full h-full object-cover"
               loading="lazy"
             >
+            <span
+              v-if="m.id === activeMapId"
+              class="absolute top-1 left-1 text-[10px] uppercase tracking-widest font-semibold bg-[var(--color-accent)] text-white px-2 py-0.5 rounded shadow"
+            >
+              Aktiv
+            </span>
           </div>
           <div class="flex items-baseline justify-between mt-2 gap-2">
             <NuxtLink
@@ -171,7 +206,25 @@ const removeMap = async (map: BattleMap) => {
           <div class="text-xs text-ink-300 mt-1">
             {{ m.gridType === 'hex' ? 'Hex' : 'Quadrat' }} · {{ m.gridSize }} px
           </div>
-          <div v-if="isDm" class="flex gap-2 mt-3">
+          <div v-if="isDm" class="flex flex-wrap gap-2 mt-3">
+            <UButton
+              v-if="m.id !== activeMapId"
+              size="xs"
+              color="primary"
+              icon="i-lucide-play"
+              @click="setActive(m)"
+            >
+              Aktiv setzen
+            </UButton>
+            <UButton
+              v-else
+              size="xs"
+              variant="outline"
+              icon="i-lucide-square"
+              @click="clearActive"
+            >
+              Aktiv entfernen
+            </UButton>
             <UButton size="xs" variant="outline" :icon="m.visible ? 'i-lucide-eye-off' : 'i-lucide-eye'" @click="toggleVisible(m)">
               {{ m.visible ? 'Verstecken' : 'Freigeben' }}
             </UButton>

@@ -41,5 +41,5 @@ export default defineEventHandler(async (event) => {
   // Versteckte Token sieht nur DM
   const tokens = isDm ? tokensRaw : tokensRaw.filter((t) => !t.hidden)
 
-  return { map, tokens, isDm }
+  return { map, tokens, isDm, activeMapId: g?.activeMapId ?? null }
 })

@@ -185,6 +185,10 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     ALTER TABLE battle_tokens ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''
   `)
+  // Aktive Map pro Gruppe (idempotent)
+  await db.execute(sql`
+    ALTER TABLE groups ADD COLUMN IF NOT EXISTS active_map_id INTEGER
+  `)
 
   await db.execute(sql`
     UPDATE users SET role = 'admin' WHERE email = ${ADMIN_EMAIL} AND role <> 'admin'

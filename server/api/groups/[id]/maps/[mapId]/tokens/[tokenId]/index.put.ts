@@ -13,8 +13,10 @@ import { battleMaps, battleTokens, groups } from '~~/server/database/schema'
 const bodySchema = z.object({
   name: z.string().min(1).max(80).optional(),
   imageUrl: z.string().url().nullable().optional(),
-  x: z.number().int().min(-50000).max(50000).optional(),
-  y: z.number().int().min(-50000).max(50000).optional(),
+  // x/y akzeptieren Floats und werden vor dem Speichern gerundet (Hex-Snap
+  // erzeugt z.B. 37.5er-Schritte, INTEGER-Spalte braucht ganze Zahlen).
+  x: z.number().min(-50000).max(50000).optional(),
+  y: z.number().min(-50000).max(50000).optional(),
   sizeMultiplier: z.number().int().min(1).max(8).optional(),
   hidden: z.boolean().optional(),
   hp: z.number().int().min(0).max(100000).nullable().optional(),
@@ -71,9 +73,14 @@ export default defineEventHandler(async (event) => {
     })
   }
 
+  // x/y vor dem Update auf Integer runden (DB-Spalte ist INTEGER).
+  const patch: Record<string, unknown> = { ...body, updatedAt: new Date() }
+  if (typeof body.x === 'number') patch.x = Math.round(body.x)
+  if (typeof body.y === 'number') patch.y = Math.round(body.y)
+
   const [updated] = await db
     .update(battleTokens)
-    .set({ ...body, updatedAt: new Date() })
+    .set(patch)
     .where(eq(battleTokens.id, tokenId))
     .returning()
 

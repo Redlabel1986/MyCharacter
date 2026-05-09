@@ -66,6 +66,8 @@ export const groups = pgTable('groups', {
   ownerUserId: integer('owner_user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
+  /** Aktuell vom DM aktivierte Battle-Map (Spieler werden auf diese geleitet). */
+  activeMapId: integer('active_map_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 

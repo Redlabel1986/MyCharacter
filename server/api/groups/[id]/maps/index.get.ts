@@ -30,5 +30,5 @@ export default defineEventHandler(async (event) => {
     )
     .orderBy(desc(battleMaps.updatedAt))
 
-  return { maps: list, isDm }
+  return { maps: list, isDm, activeMapId: g?.activeMapId ?? null }
 })
