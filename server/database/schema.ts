@@ -4,6 +4,7 @@ import {
   integer,
   text,
   jsonb,
+  boolean,
   timestamp,
   index,
   unique,
@@ -123,6 +124,37 @@ export const messages = pgTable(
     groupCreatedIdx: index('idx_messages_group_created').on(table.groupId, table.createdAt),
   }),
 )
+
+/**
+ * "Geteilter Bogen" pro (Gruppe, Spieler) — laufender Zustand, der im
+ * Seitenpanel rechts neben dem Chat angezeigt wird. Genau ein Eintrag pro
+ * Spieler je Gruppe; erneutes Teilen ersetzt den vorherigen Eintrag.
+ */
+export const groupSharedCharacters = pgTable(
+  'group_shared_characters',
+  {
+    id: serial('id').primaryKey(),
+    groupId: integer('group_id')
+      .notNull()
+      .references(() => groups.id, { onDelete: 'cascade' }),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    characterId: integer('character_id')
+      .notNull()
+      .references(() => characters.id, { onDelete: 'cascade' }),
+    visibleSkillIds: jsonb('visible_skill_ids').notNull().$type<string[]>().default([]),
+    showStory: boolean('show_story').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    unq: unique('uniq_group_share').on(table.groupId, table.userId),
+    groupIdx: index('idx_group_shared_group').on(table.groupId),
+  }),
+)
+
+export type GroupSharedCharacter = typeof groupSharedCharacters.$inferSelect
 
 export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert

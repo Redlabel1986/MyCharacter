@@ -124,6 +124,23 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS payload JSONB
   `)
+  // Geteilte Charakterboegen — laufender Zustand pro (Gruppe, Spieler)
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS group_shared_characters (
+      id SERIAL PRIMARY KEY,
+      group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      visible_skill_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+      show_story BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT uniq_group_share UNIQUE (group_id, user_id)
+    )
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_group_shared_group ON group_shared_characters(group_id)
+  `)
   await db.execute(sql`
     UPDATE users SET role = 'admin' WHERE email = ${ADMIN_EMAIL} AND role <> 'admin'
   `)

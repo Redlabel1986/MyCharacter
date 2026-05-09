@@ -11,9 +11,7 @@ interface Member {
 }
 interface ChatMessage {
   id: number
-  type: 'text' | 'character_share'
   content: string
-  payload: unknown
   createdAt: string
   user: { id: number; username: string; role: 'player' | 'dm' | 'admin' }
 }
@@ -123,6 +121,7 @@ const deleteGroup = async () => {
 }
 
 const shareModalOpen = ref(false)
+const sharesPanelEl = ref<{ refresh: () => Promise<void> } | null>(null)
 
 const formatTime = (iso: string) =>
   new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
@@ -132,7 +131,7 @@ const roleBadge = (r: 'player' | 'dm' | 'admin') =>
 </script>
 
 <template>
-  <div v-if="groupData" class="grid lg:grid-cols-3 gap-5">
+  <div v-if="groupData" class="grid gap-5 lg:grid-cols-4">
     <!-- Chat -->
     <section class="parchment-card p-5 lg:col-span-2 flex flex-col" style="height: 70vh">
       <div class="flex items-center justify-between gap-3 flex-wrap">
@@ -164,26 +163,13 @@ const roleBadge = (r: 'player' | 'dm' | 'admin') =>
             <div class="text-[10px] uppercase tracking-widest text-[var(--color-accent)] font-semibold">
               {{ m.user.username }} <span class="text-ink-300">· {{ roleBadge(m.user.role) }}</span>
             </div>
-            <SharedSheetCard
-              v-if="m.type === 'character_share'"
-              :group-id="id"
-              :message-id="m.id"
-              class="mt-1"
-            />
-            <div v-else class="whitespace-pre-wrap text-sm">{{ m.content }}</div>
+            <div class="whitespace-pre-wrap text-sm">{{ m.content }}</div>
             <div class="text-[10px] text-ink-300 mt-1">{{ formatTime(m.createdAt) }}</div>
           </div>
         </div>
       </div>
 
       <form class="mt-3 flex gap-2" @submit.prevent="send">
-        <UButton
-          type="button"
-          variant="outline"
-          icon="i-lucide-scroll-text"
-          title="Charakterbogen teilen"
-          @click="shareModalOpen = true"
-        />
         <UInput
           v-model="composer"
           class="flex-1"
@@ -194,9 +180,23 @@ const roleBadge = (r: 'player' | 'dm' | 'admin') =>
           Senden
         </UButton>
       </form>
-
-      <ShareSheetModal v-model:open="shareModalOpen" :group-id="id" @shared="fetchNew" />
     </section>
+
+    <!-- Geteilte Boegen -->
+    <aside class="parchment-card p-5 space-y-3">
+      <h2 class="font-serif text-xl">Geteilte Boegen</h2>
+      <div class="accent-rule" />
+      <SharedSheetsPanel
+        ref="sharesPanelEl"
+        :group-id="id"
+        @open-share-modal="shareModalOpen = true"
+      />
+      <ShareSheetModal
+        v-model:open="shareModalOpen"
+        :group-id="id"
+        @shared="sharesPanelEl?.refresh()"
+      />
+    </aside>
 
     <!-- Mitglieder -->
     <aside class="parchment-card p-5 space-y-3">

@@ -106,7 +106,7 @@ const toggleTalentAll = (talent: HtbahTalent) => {
 const canSubmit = computed(() => {
   if (!selectedCharacterId.value) return false
   if (submitting.value) return false
-  return checkedSkillIds.value.size > 0 || showStory.value
+  return true
 })
 
 const submit = async () => {
@@ -114,10 +114,9 @@ const submit = async () => {
   submitting.value = true
   errorMsg.value = null
   try {
-    await $fetch(`/api/groups/${props.groupId}/messages`, {
-      method: 'POST',
+    await $fetch(`/api/groups/${props.groupId}/shares`, {
+      method: 'PUT',
       body: {
-        type: 'character_share',
         characterId: selectedCharacterId.value,
         visibleSkillIds: [...checkedSkillIds.value],
         showStory: showStory.value,

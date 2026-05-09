@@ -18,9 +18,7 @@ export default defineEventHandler(async (event) => {
   const rows = await db
     .select({
       id: messages.id,
-      type: messages.type,
       content: messages.content,
-      payload: messages.payload,
       createdAt: messages.createdAt,
       user: { id: users.id, username: users.username, role: users.role },
     })
@@ -28,8 +26,12 @@ export default defineEventHandler(async (event) => {
     .innerJoin(users, eq(users.id, messages.userId))
     .where(
       sinceId > 0
-        ? and(eq(messages.groupId, groupId), gt(messages.id, sinceId))
-        : eq(messages.groupId, groupId),
+        ? and(
+            eq(messages.groupId, groupId),
+            gt(messages.id, sinceId),
+            eq(messages.type, 'text'),
+          )
+        : and(eq(messages.groupId, groupId), eq(messages.type, 'text')),
     )
     .orderBy(asc(messages.createdAt))
     .limit(500)
