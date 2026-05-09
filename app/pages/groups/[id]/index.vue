@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import RollCard from '~/components/chat/RollCard.vue'
+
 definePageMeta({ middleware: ['auth'] })
 
 interface Member {
