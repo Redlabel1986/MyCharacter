@@ -9,6 +9,37 @@ import { and, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
 import { battleMaps, battleTokens, groups } from '~~/server/database/schema'
+import { DSA_ABILITIES } from '~~/shared/engines/dsa5'
+
+const npcAbilityHtbahSchema = z.object({
+  id: z.string().min(1).max(40),
+  system: z.literal('htbah'),
+  label: z.string().min(1).max(60),
+  value: z.number().int().min(0).max(100),
+})
+const npcAbilityDndSchema = z.object({
+  id: z.string().min(1).max(40),
+  system: z.literal('dnd'),
+  label: z.string().min(1).max(60),
+  mod: z.number().int().min(-30).max(30),
+})
+const npcAbilityDsa5Schema = z.object({
+  id: z.string().min(1).max(40),
+  system: z.literal('dsa5'),
+  label: z.string().min(1).max(60),
+  probe: z.tuple([z.enum(DSA_ABILITIES), z.enum(DSA_ABILITIES), z.enum(DSA_ABILITIES)]),
+  abilityValues: z.tuple([
+    z.number().int().min(0).max(30),
+    z.number().int().min(0).max(30),
+    z.number().int().min(0).max(30),
+  ]),
+  fw: z.number().int().min(0).max(25),
+})
+const npcAbilitySchema = z.discriminatedUnion('system', [
+  npcAbilityHtbahSchema,
+  npcAbilityDndSchema,
+  npcAbilityDsa5Schema,
+])
 
 const bodySchema = z.object({
   name: z.string().min(1).max(80).optional(),
@@ -23,6 +54,8 @@ const bodySchema = z.object({
   hpMax: z.number().int().min(0).max(100000).nullable().optional(),
   statusText: z.string().max(200).optional(),
   description: z.string().max(4000).optional(),
+  system: z.enum(['htbah', 'dnd', 'dsa5']).nullable().optional(),
+  npcAbilities: z.array(npcAbilitySchema).max(40).optional(),
 })
 
 export default defineEventHandler(async (event) => {
@@ -70,6 +103,19 @@ export default defineEventHandler(async (event) => {
     throw createError({
       statusCode: 403,
       statusMessage: 'Versteckt-Status darf nur der DM aendern.',
+    })
+  }
+  // NPC-Wuerfler-Felder darf nur der DM und nur fuer Tokens ohne Charakter pflegen.
+  if ((body.system !== undefined || body.npcAbilities !== undefined) && !isDm) {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'NPC-Faehigkeiten darf nur der DM aendern.',
+    })
+  }
+  if ((body.system !== undefined || body.npcAbilities !== undefined) && tok.characterId !== null) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'NPC-Faehigkeiten gibt es nur fuer Tokens ohne Charakter.',
     })
   }
 

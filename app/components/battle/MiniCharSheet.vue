@@ -34,6 +34,7 @@ import {
   type DsaAbility,
 } from '~~/shared/engines/dsa5'
 import type { GameSystem } from '~~/shared/systems'
+import type { NpcAbility } from '~~/shared/npc'
 
 interface Token {
   id: number
@@ -44,6 +45,8 @@ interface Token {
   hp: number | null
   hpMax: number | null
   description: string
+  system: 'htbah' | 'dnd' | 'dsa5' | null
+  npcAbilities: NpcAbility[]
 }
 
 interface CharacterFull {
@@ -197,6 +200,9 @@ type RollKind =
   | 'dndAbility'
   | 'dsa5Skill'
   | 'dsa5Ability'
+  | 'npcHtbah'
+  | 'npcDnd'
+  | 'npcDsa5'
 
 interface RollTarget {
   kind: RollKind
@@ -205,6 +211,13 @@ interface RollTarget {
   value: number | string
   source?: 'skill' | 'spell' | 'liturgy'
 }
+
+// NPC-Roller (Token ohne Charakter, mit eigenem Stat-Block)
+const isNpcRoller = computed(() => {
+  const t = activeToken.value
+  return !!t && t.characterId === null && !!t.system && (t.npcAbilities?.length ?? 0) > 0
+})
+const isNpcDnd = computed(() => isNpcRoller.value && activeToken.value?.system === 'dnd')
 
 const rollOptions = computed<RollTarget[]>(() => {
   if (htbahData.value) {
@@ -304,6 +317,30 @@ const rollOptions = computed<RollTarget[]>(() => {
     }
     return items
   }
+  // NPC: Stat-Block aus dem Token, wenn kein Charakter gekoppelt ist.
+  if (isNpcRoller.value && activeToken.value) {
+    const items: RollTarget[] = []
+    for (const a of activeToken.value.npcAbilities) {
+      if (a.system === 'htbah') {
+        items.push({ kind: 'npcHtbah', id: a.id, label: a.label || '(unbenannt)', value: a.value })
+      } else if (a.system === 'dnd') {
+        items.push({
+          kind: 'npcDnd',
+          id: a.id,
+          label: a.label || '(unbenannt)',
+          value: a.mod >= 0 ? `+${a.mod}` : `${a.mod}`,
+        })
+      } else {
+        items.push({
+          kind: 'npcDsa5',
+          id: a.id,
+          label: `${a.label || '(unbenannt)'} (${a.probe.join('/')})`,
+          value: `FW ${a.fw}`,
+        })
+      }
+    }
+    return items
+  }
   return []
 })
 
@@ -333,13 +370,16 @@ const pickedRollOption = computed(() =>
 )
 
 const rollIt = async () => {
-  if (!pickedRollOption.value || !character.value) return
+  if (!pickedRollOption.value) return
+  // Charakter-Wuerfe brauchen Charakter; NPC-Wuerfe brauchen einen NPC-Token.
+  if (!character.value && !isNpcRoller.value) return
   rollSending.value = true
   rollError.value = null
   rollSuccess.value = false
   try {
     const opt = pickedRollOption.value
-    const characterId = character.value.id
+    const characterId = character.value?.id ?? 0
+    const tokenId = activeToken.value?.id ?? 0
     const modifier = rollMod.value || undefined
     const note = rollNote.value.trim() || undefined
     const dc = rollDc.value || undefined
@@ -404,6 +444,23 @@ const rollIt = async () => {
           note,
         }
         break
+      case 'npcHtbah':
+        body = { kind: 'npcHtbah', tokenId, abilityId: opt.id, modifier, note }
+        break
+      case 'npcDnd':
+        body = {
+          kind: 'npcDnd',
+          tokenId,
+          abilityId: opt.id,
+          modifier,
+          dc,
+          rollMode: mode === 'normal' ? undefined : mode,
+          note,
+        }
+        break
+      case 'npcDsa5':
+        body = { kind: 'npcDsa5', tokenId, abilityId: opt.id, modifier, note }
+        break
     }
     await $fetch(`/api/groups/${props.groupId}/rolls`, { method: 'POST', body })
     rollSuccess.value = true
@@ -417,11 +474,19 @@ const rollIt = async () => {
   }
 }
 
-const supportsRoller = computed(() => isHtbah.value || isDnd.value || isDsa5.value)
+const supportsRoller = computed(
+  () => isHtbah.value || isDnd.value || isDsa5.value || isNpcRoller.value,
+)
 const rollPanelTitle = computed(() => {
   if (isHtbah.value) return 'Probe würfeln (HtbaH)'
   if (isDnd.value) return 'Probe würfeln (D&D)'
   if (isDsa5.value) return 'Probe würfeln (DSA 5)'
+  if (isNpcRoller.value) {
+    const sys = activeToken.value?.system
+    if (sys === 'htbah') return 'NPC-Probe (HtbaH)'
+    if (sys === 'dnd') return 'NPC-Probe (D&D)'
+    if (sys === 'dsa5') return 'NPC-Probe (DSA 5)'
+  }
   return 'Probe würfeln'
 })
 
@@ -591,7 +656,7 @@ const onImageError = (tokenId: number) => {
             class="w-full"
           />
         </UFormField>
-        <div v-if="isDnd" class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+        <div v-if="isDnd || isNpcDnd" class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
           <UFormField label="Modus" class="sm:col-span-4">
             <USelect
               v-model="rollMode"
@@ -621,7 +686,7 @@ const onImageError = (tokenId: number) => {
           </UFormField>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
-          <UFormField label="Notiz (optional)" class="sm:col-span-9">
+          <UFormField label="Notiz (optional)" class="sm:col-span-7">
             <UInput
               v-model="rollNote"
               placeholder="z.B. „klettert hoch“ oder „mit Anlauf“"
@@ -635,8 +700,8 @@ const onImageError = (tokenId: number) => {
             icon="i-lucide-dices"
             :disabled="!pickedRollOption"
             :loading="rollSending"
-            class="sm:col-span-3"
-            size="sm"
+            class="sm:col-span-5 roll-cta"
+            size="lg"
             block
             @click="rollIt"
           >
@@ -683,3 +748,25 @@ const onImageError = (tokenId: number) => {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Wuerfeln-Button: prominenter, mit Akzent-Glow und groesserer Schrift. */
+.roll-cta :deep(button) {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  box-shadow:
+    0 0 0 1px var(--color-accent),
+    0 0 12px 2px color-mix(in srgb, var(--color-accent) 50%, transparent);
+  transition: box-shadow 120ms ease, transform 60ms ease;
+}
+.roll-cta :deep(button:hover:not(:disabled)) {
+  box-shadow:
+    0 0 0 1px var(--color-accent),
+    0 0 18px 4px color-mix(in srgb, var(--color-accent) 70%, transparent);
+}
+.roll-cta :deep(button:active:not(:disabled)) {
+  transform: translateY(1px);
+}
+</style>

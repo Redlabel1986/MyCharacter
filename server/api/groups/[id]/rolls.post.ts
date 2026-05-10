@@ -9,7 +9,7 @@ import { z } from 'zod'
 import { eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
-import { characters, messages, type RollPayload } from '~~/server/database/schema'
+import { battleTokens, characters, messages, type RollPayload } from '~~/server/database/schema'
 import {
   rollDndAbility,
   rollDndSave,
@@ -19,10 +19,19 @@ import {
   rollFree,
   rollHtbahSkill,
   rollHtbahTalent,
+  rollNpcDnd,
+  rollNpcDsa5,
+  rollNpcHtbah,
 } from '~~/server/utils/dice'
 import { HTBAH_TALENTS } from '~~/shared/engines/htbah'
 import { DND_ABILITIES } from '~~/shared/engines/dnd'
 import { DSA_ABILITIES } from '~~/shared/engines/dsa5'
+import type {
+  NpcAbility,
+  NpcAbilityDnd,
+  NpcAbilityDsa5,
+  NpcAbilityHtbah,
+} from '~~/shared/npc'
 
 const baseSchema = z.object({
   characterId: z.number().int().positive().optional(),
@@ -89,6 +98,26 @@ const freeSchema = baseSchema.extend({
   system: z.enum(['dnd5e', 'dnd2024', 'dsa5', 'dsa41', 'htbah']),
 })
 
+const npcHtbahSchema = baseSchema.extend({
+  kind: z.literal('npcHtbah'),
+  tokenId: z.number().int().positive(),
+  abilityId: z.string().min(1),
+})
+
+const npcDndSchema = baseSchema.extend({
+  kind: z.literal('npcDnd'),
+  tokenId: z.number().int().positive(),
+  abilityId: z.string().min(1),
+  dc: z.number().int().min(1).max(40).optional(),
+  rollMode: dndRollMode,
+})
+
+const npcDsa5Schema = baseSchema.extend({
+  kind: z.literal('npcDsa5'),
+  tokenId: z.number().int().positive(),
+  abilityId: z.string().min(1),
+})
+
 const bodySchema = z.discriminatedUnion('kind', [
   htbahSkillSchema,
   htbahTalentSchema,
@@ -98,6 +127,9 @@ const bodySchema = z.discriminatedUnion('kind', [
   dsa5SkillSchema,
   dsa5AbilitySchema,
   freeSchema,
+  npcHtbahSchema,
+  npcDndSchema,
+  npcDsa5Schema,
 ])
 
 async function loadCharacterOrThrow(db: ReturnType<typeof useDb>, id: number, userId: number) {
@@ -110,6 +142,33 @@ async function loadCharacterOrThrow(db: ReturnType<typeof useDb>, id: number, us
     throw createError({ statusCode: 403, statusMessage: 'Nicht dein Charakter.' })
   }
   return char
+}
+
+async function loadOwnedTokenOrThrow(
+  db: ReturnType<typeof useDb>,
+  tokenId: number,
+  userId: number,
+) {
+  const [tok] = await db.select().from(battleTokens).where(eq(battleTokens.id, tokenId)).limit(1)
+  if (!tok) {
+    throw createError({ statusCode: 404, statusMessage: 'Token nicht gefunden.' })
+  }
+  if (tok.ownerUserId !== userId) {
+    throw createError({ statusCode: 403, statusMessage: 'Nicht dein Token.' })
+  }
+  return tok
+}
+
+function findNpcAbility(
+  abilities: NpcAbility[] | null | undefined,
+  abilityId: string,
+): NpcAbility {
+  const list = abilities ?? []
+  const a = list.find((x) => x.id === abilityId)
+  if (!a) {
+    throw createError({ statusCode: 404, statusMessage: 'NPC-Faehigkeit nicht gefunden.' })
+  }
+  return a
 }
 
 export default defineEventHandler(async (event) => {
@@ -184,6 +243,44 @@ export default defineEventHandler(async (event) => {
     payload = rollDsa5Ability({
       character: char,
       ability: body.ability,
+      modifier: body.modifier,
+      note: body.note,
+    })
+  } else if (body.kind === 'npcHtbah') {
+    const tok = await loadOwnedTokenOrThrow(db, body.tokenId, user.id)
+    const a = findNpcAbility(tok.npcAbilities, body.abilityId)
+    if (a.system !== 'htbah') {
+      throw createError({ statusCode: 400, statusMessage: 'Faehigkeit ist nicht im HtbaH-Format.' })
+    }
+    payload = rollNpcHtbah({
+      ability: a as NpcAbilityHtbah,
+      tokenName: tok.name,
+      modifier: body.modifier,
+      note: body.note,
+    })
+  } else if (body.kind === 'npcDnd') {
+    const tok = await loadOwnedTokenOrThrow(db, body.tokenId, user.id)
+    const a = findNpcAbility(tok.npcAbilities, body.abilityId)
+    if (a.system !== 'dnd') {
+      throw createError({ statusCode: 400, statusMessage: 'Faehigkeit ist nicht im D&D-Format.' })
+    }
+    payload = rollNpcDnd({
+      ability: a as NpcAbilityDnd,
+      tokenName: tok.name,
+      modifier: body.modifier,
+      dc: body.dc,
+      rollMode: body.rollMode,
+      note: body.note,
+    })
+  } else if (body.kind === 'npcDsa5') {
+    const tok = await loadOwnedTokenOrThrow(db, body.tokenId, user.id)
+    const a = findNpcAbility(tok.npcAbilities, body.abilityId)
+    if (a.system !== 'dsa5') {
+      throw createError({ statusCode: 400, statusMessage: 'Faehigkeit ist nicht im DSA-5-Format.' })
+    }
+    payload = rollNpcDsa5({
+      ability: a as NpcAbilityDsa5,
+      tokenName: tok.name,
       modifier: body.modifier,
       note: body.note,
     })

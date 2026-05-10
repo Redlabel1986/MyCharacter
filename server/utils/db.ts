@@ -251,6 +251,13 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS target_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
   `)
+  // NPC-Regelwerk + NPC-Faehigkeiten am Battle-Token (DM-Stat-Block).
+  await db.execute(sql`
+    ALTER TABLE battle_tokens ADD COLUMN IF NOT EXISTS system TEXT
+  `)
+  await db.execute(sql`
+    ALTER TABLE battle_tokens ADD COLUMN IF NOT EXISTS npc_abilities JSONB NOT NULL DEFAULT '[]'::jsonb
+  `)
 
   await db.execute(sql`
     UPDATE users SET role = 'admin' WHERE email = ${ADMIN_EMAIL} AND role <> 'admin'

@@ -9,6 +9,7 @@
  */
 import GroupChat from '~/components/chat/GroupChat.vue'
 import MiniCharSheet from '~/components/battle/MiniCharSheet.vue'
+import NpcAbilitiesEditor from '~/components/battle/NpcAbilitiesEditor.vue'
 import {
   TOKEN_CONDITIONS,
   conditionStyle,
@@ -18,6 +19,7 @@ import {
 } from '~~/shared/conditions'
 import { audioEmbedUrl, parseAudioUrl, YOUTUBE_NOCOOKIE_HOST } from '~~/shared/audio'
 import { loadYouTubeApi, type YouTubePlayer } from '~/composables/useYouTubeApi'
+import type { NpcAbility } from '~~/shared/npc'
 
 definePageMeta({ middleware: ['auth'], layout: 'wide' })
 
@@ -46,6 +48,8 @@ interface Token {
   hpMax: number | null
   statusText: string
   description: string
+  system: 'htbah' | 'dnd' | 'dsa5' | null
+  npcAbilities: NpcAbility[]
 }
 interface Drawing {
   id: number
@@ -385,6 +389,8 @@ const newToken = ref({
   size: 1,
   hidden: false,
   imageFile: null as File | null,
+  npcSystem: null as 'htbah' | 'dnd' | 'dsa5' | null,
+  npcAbilities: [] as NpcAbility[],
 })
 
 const openAdd = async () => {
@@ -396,6 +402,8 @@ const openAdd = async () => {
     size: 1,
     hidden: false,
     imageFile: null,
+    npcSystem: null,
+    npcAbilities: [],
   }
   if (!myChars.value.length) {
     const res = await $fetch<{ characters: CharacterSummary[] }>('/api/characters')
@@ -434,6 +442,11 @@ const addToken = async () => {
         return
       }
       body.name = newToken.value.name.trim()
+      // NPC-Wuerfler-Felder nur fuer DM-NPCs ohne Charakter mitschicken.
+      if (isDm.value && newToken.value.npcSystem) {
+        body.system = newToken.value.npcSystem
+        body.npcAbilities = newToken.value.npcAbilities
+      }
     }
     const created = await $fetch<{ token: Token }>(
       `/api/groups/${groupId}/maps/${mapId}/tokens`,
@@ -473,6 +486,11 @@ const startEdit = (t: Token) => {
 const saveEdit = async () => {
   const t = editing.value
   if (!t) return
+  // NPC-Wuerfler nur fuer DM und nur fuer Tokens ohne Charakter mitschicken.
+  const isNpcEditable = isDm.value && t.characterId === null
+  const npcPatch = isNpcEditable
+    ? { system: t.system ?? null, npcAbilities: t.npcAbilities ?? [] }
+    : {}
   await $fetch(`/api/groups/${groupId}/maps/${mapId}/tokens/${t.id}`, {
     method: 'PUT',
     body: {
@@ -482,6 +500,7 @@ const saveEdit = async () => {
       description: t.description ?? '',
       sizeMultiplier: t.sizeMultiplier,
       hidden: isDm.value ? t.hidden : undefined,
+      ...npcPatch,
     },
   })
   if (editImageFile.value) {
@@ -1717,6 +1736,7 @@ const endResize = () => {
                   ? 'cursor-default'
                   : canMoveToken(t) ? 'cursor-move' : 'cursor-pointer',
                 t.hidden ? 'opacity-60 border-amber-500' : 'border-[var(--color-accent)]',
+                t.characterId !== null && !t.hidden ? 'token-player-glow' : '',
               ]"
               :style="{
                 left: t.x + 'px',
@@ -2312,6 +2332,13 @@ const endResize = () => {
           <UFormField v-if="isDm" label="Versteckt (nur DM sieht)">
             <UCheckbox v-model="newToken.hidden" />
           </UFormField>
+          <!-- NPC-Wuerfler: nur DM, nur fuer Tokens ohne Charakter -->
+          <div v-if="isDm && !newToken.characterId" class="border-t border-parchment-700/30 pt-3">
+            <NpcAbilitiesEditor
+              v-model:system="newToken.npcSystem"
+              v-model:abilities="newToken.npcAbilities"
+            />
+          </div>
           <p v-if="addTokenError" class="text-sm text-red-700">{{ addTokenError }}</p>
         </div>
       </template>
@@ -2370,6 +2397,13 @@ const endResize = () => {
           <UFormField v-if="isDm" label="Versteckt (nur DM sieht)">
             <UCheckbox v-model="editing.hidden" />
           </UFormField>
+          <!-- NPC-Wuerfler: nur DM, nur fuer Tokens ohne Charakter -->
+          <div v-if="isDm && editing.characterId === null" class="border-t border-parchment-700/30 pt-3">
+            <NpcAbilitiesEditor
+              v-model:system="editing.system"
+              v-model:abilities="editing.npcAbilities"
+            />
+          </div>
         </div>
       </template>
       <template #footer>
@@ -2450,3 +2484,13 @@ const endResize = () => {
     </UModal>
   </div>
 </template>
+
+<style scoped>
+/* Spieler-Tokens (mit gekoppeltem Charakter) bekommen einen sanften Glow,
+   damit sie auf der Karte sofort von NPCs zu unterscheiden sind. */
+.token-player-glow {
+  box-shadow:
+    0 0 0 2px var(--color-accent),
+    0 0 14px 4px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+</style>

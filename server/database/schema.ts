@@ -259,6 +259,13 @@ export const battleTokens = pgTable(
     statusText: text('status_text').notNull().default(''),
     /** Lange Beschreibung — wird beim Klick auf den Token als Info-Karte gezeigt. */
     description: text('description').notNull().default(''),
+    /** NPC-Regelwerk fuer den Token-eigenen Wuerfler (nur ohne characterId relevant). */
+    system: text('system').$type<'htbah' | 'dnd' | 'dsa5' | null>(),
+    /** NPC-Faehigkeiten als JSON-Array (siehe shared/npc.ts). */
+    npcAbilities: jsonb('npc_abilities')
+      .notNull()
+      .$type<import('~~/shared/npc').NpcAbility[]>()
+      .default([]),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

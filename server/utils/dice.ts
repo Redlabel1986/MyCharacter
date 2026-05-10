@@ -31,6 +31,11 @@ import {
   type Dsa5CharacterData,
   type DsaAbility,
 } from '~~/shared/engines/dsa5'
+import type {
+  NpcAbilityHtbah,
+  NpcAbilityDnd,
+  NpcAbilityDsa5,
+} from '~~/shared/npc'
 import type { Character } from '~~/server/database/schema'
 import type { RollPayload } from '~~/server/database/schema'
 
@@ -391,6 +396,101 @@ export function rollDsa5Ability(input: Dsa5AbilityCheckInput): RollPayload {
     success,
     critical: critical || undefined,
     fumble: fumble || undefined,
+    note: input.note?.trim() || undefined,
+  }
+}
+
+/* ==================================================================== */
+/*  NPC-Wuerfler (Token-eigene Stat-Bloecke ohne Charakter)              */
+/* ==================================================================== */
+
+export interface NpcHtbahRollInput {
+  ability: NpcAbilityHtbah
+  tokenName: string
+  modifier?: number
+  note?: string
+}
+
+export function rollNpcHtbah(input: NpcHtbahRollInput): RollPayload {
+  const mod = input.modifier ?? 0
+  const target = input.ability.value + mod
+  const roll = rand1to100()
+  const probe = htbahRollProbe({ roll, target, isTalentOnly: false })
+  return {
+    system: 'htbah',
+    label: `${input.tokenName} — ${input.ability.label}`,
+    characterName: input.tokenName,
+    target,
+    modifier: mod || undefined,
+    dice: [roll],
+    success: probe.success,
+    critical: probe.critical || undefined,
+    fumble: probe.fumble || undefined,
+    qualityStep: probe.qualityStep,
+    note: input.note?.trim() || undefined,
+  }
+}
+
+export interface NpcDndRollInput {
+  ability: NpcAbilityDnd
+  tokenName: string
+  modifier?: number
+  dc?: number
+  rollMode?: DndRollMode
+  note?: string
+}
+
+export function rollNpcDnd(input: NpcDndRollInput): RollPayload {
+  const mod = input.modifier ?? 0
+  const mode = input.rollMode ?? 'normal'
+  const { final, rolls } = rollD20(mode)
+  const total = final + input.ability.mod + mod
+  const success = input.dc !== undefined ? total >= input.dc : true
+  const critical = final === 20
+  const fumble = final === 1
+  const labelMode = mode === 'advantage' ? ' (Vorteil)' : mode === 'disadvantage' ? ' (Nachteil)' : ''
+  return {
+    system: 'dnd5e',
+    label: `${input.tokenName} — ${input.ability.label}${labelMode}`,
+    characterName: input.tokenName,
+    target: input.dc ?? total,
+    modifier: input.ability.mod + mod || undefined,
+    dice: rolls,
+    success,
+    critical: critical || undefined,
+    fumble: fumble || undefined,
+    note: input.note?.trim() || undefined,
+  }
+}
+
+export interface NpcDsa5RollInput {
+  ability: NpcAbilityDsa5
+  tokenName: string
+  modifier?: number
+  note?: string
+}
+
+export function rollNpcDsa5(input: NpcDsa5RollInput): RollPayload {
+  const a = input.ability
+  const rolls: [number, number, number] = [rand1to(20), rand1to(20), rand1to(20)]
+  const probe = dsa5RollProbe({
+    rolls,
+    abilities: a.abilityValues,
+    fw: a.fw,
+    modifier: input.modifier ?? 0,
+  })
+  const probeLabel = `${a.probe[0]}/${a.probe[1]}/${a.probe[2]}`
+  return {
+    system: 'dsa5',
+    label: `${input.tokenName} — ${a.label} — ${probeLabel} (FW ${a.fw})`,
+    characterName: input.tokenName,
+    target: a.fw,
+    modifier: input.modifier || undefined,
+    dice: rolls,
+    success: probe.success,
+    critical: probe.spectacular || undefined,
+    fumble: probe.fumble || undefined,
+    qualityStep: probe.qs || undefined,
     note: input.note?.trim() || undefined,
   }
 }

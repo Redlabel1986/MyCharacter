@@ -14,6 +14,37 @@ import {
   characters,
   groups,
 } from '~~/server/database/schema'
+import { DSA_ABILITIES } from '~~/shared/engines/dsa5'
+
+const npcAbilityHtbahSchema = z.object({
+  id: z.string().min(1).max(40),
+  system: z.literal('htbah'),
+  label: z.string().min(1).max(60),
+  value: z.number().int().min(0).max(100),
+})
+const npcAbilityDndSchema = z.object({
+  id: z.string().min(1).max(40),
+  system: z.literal('dnd'),
+  label: z.string().min(1).max(60),
+  mod: z.number().int().min(-30).max(30),
+})
+const npcAbilityDsa5Schema = z.object({
+  id: z.string().min(1).max(40),
+  system: z.literal('dsa5'),
+  label: z.string().min(1).max(60),
+  probe: z.tuple([z.enum(DSA_ABILITIES), z.enum(DSA_ABILITIES), z.enum(DSA_ABILITIES)]),
+  abilityValues: z.tuple([
+    z.number().int().min(0).max(30),
+    z.number().int().min(0).max(30),
+    z.number().int().min(0).max(30),
+  ]),
+  fw: z.number().int().min(0).max(25),
+})
+const npcAbilitySchema = z.discriminatedUnion('system', [
+  npcAbilityHtbahSchema,
+  npcAbilityDndSchema,
+  npcAbilityDsa5Schema,
+])
 
 const bodySchema = z.object({
   characterId: z.number().int().positive().optional(),
@@ -28,6 +59,10 @@ const bodySchema = z.object({
   hpMax: z.number().int().min(0).max(100000).optional(),
   statusText: z.string().max(200).optional(),
   description: z.string().max(4000).optional(),
+  /** NPC-Wuerfler-Regelwerk fuer Token ohne Charakter. */
+  system: z.enum(['htbah', 'dnd', 'dsa5']).nullable().optional(),
+  /** Stat-Block-Eintraege fuer den Token-eigenen Wuerfler. */
+  npcAbilities: z.array(npcAbilitySchema).max(40).optional(),
 })
 
 export default defineEventHandler(async (event) => {
@@ -83,6 +118,11 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 403, statusMessage: 'Versteckte Token darf nur der DM setzen.' })
   }
 
+  // NPC-Wuerfler-Felder nur fuer DM und nur fuer Tokens ohne Charakter sinnvoll.
+  const allowNpcStat = isDm && !body.characterId
+  const npcSystem = allowNpcStat ? body.system ?? null : null
+  const npcAbilities = allowNpcStat ? body.npcAbilities ?? [] : []
+
   const [inserted] = await db
     .insert(battleTokens)
     .values({
@@ -99,6 +139,8 @@ export default defineEventHandler(async (event) => {
       hpMax: body.hpMax,
       statusText: body.statusText ?? '',
       description: body.description ?? '',
+      system: npcSystem,
+      npcAbilities,
     })
     .returning()
 
