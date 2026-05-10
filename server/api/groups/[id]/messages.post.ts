@@ -18,44 +18,4 @@ export default defineEventHandler(async (event) => {
   }
   const body = await readValidatedBody(event, bodySchema.parse)
   const db = useDb()
-  await requireGroupMember(db, groupId, user.id)
-
-  // Whisper-Empfaenger muss Mitglied der Gruppe sein
-  if (body.targetUserId) {
-    if (body.targetUserId === user.id) {
-      throw createError({
-        statusCode: 400,
-        statusMessage: 'Du kannst dir nicht selbst flüstern.',
-      })
-    }
-    const [m] = await db
-      .select()
-      .from(groupMembers)
-      .where(
-        and(
-          eq(groupMembers.groupId, groupId),
-          eq(groupMembers.userId, body.targetUserId),
-        ),
-      )
-      .limit(1)
-    if (!m) {
-      throw createError({
-        statusCode: 400,
-        statusMessage: 'Empfänger ist nicht Mitglied dieser Gruppe.',
-      })
-    }
-  }
-
-  const [inserted] = await db
-    .insert(messages)
-    .values({
-      groupId,
-      userId: user.id,
-      type: 'text',
-      content: body.content.trim(),
-      targetUserId: body.targetUserId ?? null,
-    })
-    .returning()
-
-  return { message: inserted }
-})
+  await requireGroupMember(db, groupId, user

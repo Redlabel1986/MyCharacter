@@ -97,10 +97,4 @@ export default defineEventHandler(async (event) => {
       hidden: body.hidden,
       hp: body.hp,
       hpMax: body.hpMax,
-      statusText: body.statusText ?? '',
-      description: body.description ?? '',
-    })
-    .returning()
-
-  return { token: inserted }
-})
+      statusText: body.statusText ?? '

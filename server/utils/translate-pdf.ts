@@ -185,22 +185,4 @@ export async function translateLibrary(opts: TranslateOptions = {}): Promise<{
       const chunks = chunkText(p.text, MAX_CHARS_PER_REQUEST)
       const out: string[] = []
       for (const c of chunks) {
-        const t = await translateOne(client, model, c)
-        out.push(t)
-      }
-      doc.pages.push({
-        page: p.page,
-        sourceExcerpt: p.text.slice(0, 200),
-        text: out.join('\n\n'),
-      })
-      doc.pages.sort((a, b) => a.page - b.page)
-      doc.generatedAt = new Date().toISOString()
-      await saveTranslation(doc)
-      log(`  Seite ${p.page}/${limited.length} ✓`)
-    }
-
-    translated.push(entry.slug)
-  }
-
-  return { translated, skipped }
-}
+        co
