@@ -73,4 +73,16 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  // x/y vor dem Update auf Integer runden (DB-Spalte
+  // x/y vor dem Update auf Integer runden (DB-Spalte ist INTEGER).
+  const patch: Record<string, unknown> = { ...body, updatedAt: new Date() }
+  if (typeof body.x === 'number') patch.x = Math.round(body.x)
+  if (typeof body.y === 'number') patch.y = Math.round(body.y)
+
+  const [updated] = await db
+    .update(battleTokens)
+    .set(patch)
+    .where(eq(battleTokens.id, tokenId))
+    .returning()
+
+  return { token: updated }
+})
