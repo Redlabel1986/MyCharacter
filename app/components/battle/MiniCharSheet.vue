@@ -313,7 +313,9 @@ const rollNote = ref<string>('')
 const rollDc = ref<number | null>(null)
 const rollMode = ref<'normal' | 'advantage' | 'disadvantage'>('normal')
 
-watch(activeToken, () => {
+// Auswahl NUR beim echten Tab-Wechsel zuruecksetzen, nicht bei jedem 2s-Poll
+// (sonst verliert der Spieler mitten im Wurf seine ausgewaehlte Probe).
+watch(selectedTokenId, () => {
   pickedRollId.value = ''
   rollMod.value = 0
   rollNote.value = ''
