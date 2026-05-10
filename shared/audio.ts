@@ -55,17 +55,22 @@ export function parseAudioUrl(raw: string): ParsedAudioUrl {
 /**
  * Wandelt eine Original-URL in eine Embed-URL um — fuer das iframe.
  * Bei YouTube wird Auto-Play + (bei Single-Video) Loop aktiviert.
+ *
+ * Wir benutzen `youtube-nocookie.com`, damit der Embed keine YouTube-
+ * Cookies des Users erbt — sonst pausiert YouTube die Wiedergabe mit
+ * „Konto wird an einem anderen Ort verwendet", wenn der Spieler in einem
+ * anderen Tab YouTube schaut oder die App offen hat.
  */
+export const YOUTUBE_NOCOOKIE_HOST = 'https://www.youtube-nocookie.com'
+
 export function audioEmbedUrl(raw: string, options?: { autoplay?: boolean }): string {
   const p = parseAudioUrl(raw)
   const autoplay = options?.autoplay ?? true
   if (p.provider === 'youtube') {
     if (p.playlistId) {
-      // Playlist: list=PL... Loop wirkt automatisch
-      return `https://www.youtube.com/embed/videoseries?list=${p.playlistId}${autoplay ? '&autoplay=1' : ''}`
+      return `${YOUTUBE_NOCOOKIE_HOST}/embed/videoseries?list=${p.playlistId}${autoplay ? '&autoplay=1' : ''}`
     }
-    // Einzelvideo: Loop braucht playlist=ID-Trick
-    return `https://www.youtube.com/embed/${p.id}?${autoplay ? 'autoplay=1&' : ''}loop=1&playlist=${p.id}`
+    return `${YOUTUBE_NOCOOKIE_HOST}/embed/${p.id}?${autoplay ? 'autoplay=1&' : ''}loop=1&playlist=${p.id}`
   }
   // Spotify
   const t = p.spotifyType ?? 'track'

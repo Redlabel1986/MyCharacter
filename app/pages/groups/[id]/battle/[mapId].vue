@@ -15,7 +15,7 @@ import {
   buildStatusText,
   type TokenCondition,
 } from '~~/shared/conditions'
-import { audioEmbedUrl, parseAudioUrl } from '~~/shared/audio'
+import { audioEmbedUrl, parseAudioUrl, YOUTUBE_NOCOOKIE_HOST } from '~~/shared/audio'
 import { loadYouTubeApi, type YouTubePlayer } from '~/composables/useYouTubeApi'
 
 definePageMeta({ middleware: ['auth'], layout: 'wide' })
@@ -795,6 +795,9 @@ watch(activeYouTubeTrack, async (t) => {
   try {
     const YT = await loadYouTubeApi()
     ytPlayer.value = new YT.Player(container, {
+      // nocookie-Domain — YouTube erkennt den Embed nicht als „angemeldeter
+      // User", wodurch das „dein Konto wird woanders verwendet"-Problem wegfaellt.
+      host: YOUTUBE_NOCOOKIE_HOST,
       videoId: parsed.playlistId ? undefined : parsed.id,
       playerVars: {
         autoplay: 1,
@@ -1968,6 +1971,44 @@ const endResize = () => {
         >
           <div ref="ytPlayerContainer" class="w-full h-full" />
         </div>
+
+        <!-- Großer Lautstärke-Slider direkt am Player.
+             Wirkt fuer YouTube + Uploads. Bei Spotify ist er deaktiviert
+             mit Hinweis, weil Spotify keine externe Steuerung erlaubt. -->
+        <div
+          v-if="audioState?.isPlaying && currentTrack"
+          class="flex items-center gap-3 mt-2 px-3 py-2 rounded bg-white/70 border border-parchment-700/30"
+        >
+          <UButton
+            size="sm"
+            variant="ghost"
+            :icon="audioMuted ? 'i-lucide-volume-x' : audioVolume < 0.05 ? 'i-lucide-volume' : audioVolume < 0.5 ? 'i-lucide-volume-1' : 'i-lucide-volume-2'"
+            :title="audioMuted ? 'Stummschaltung aufheben' : 'Stumm schalten'"
+            :disabled="currentTrack.provider === 'spotify'"
+            @click="audioMuted = !audioMuted"
+          />
+          <input
+            v-model.number="audioVolume"
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            class="flex-1 accent-[var(--color-accent)]"
+            :disabled="audioMuted || currentTrack.provider === 'spotify'"
+            aria-label="Lautstärke"
+          >
+          <span class="text-xs tabular-nums w-10 text-right text-ink-400">
+            {{ currentTrack.provider === 'spotify'
+              ? 'SP'
+              : audioMuted ? '—' : Math.round(audioVolume * 100) + '%' }}
+          </span>
+        </div>
+        <p
+          v-if="audioState?.isPlaying && currentTrack?.provider === 'spotify'"
+          class="text-[10px] text-ink-400 italic px-2"
+        >
+          Spotify-Lautstärke regelst du im Spotify-Player oben (kein Zugriff von außen möglich).
+        </p>
         <!-- Spotify-Embed (kann von außen nicht in der Lautstärke gesteuert werden) -->
         <div v-if="activeMusicEmbedUrl" class="rounded overflow-hidden bg-black/5">
           <iframe

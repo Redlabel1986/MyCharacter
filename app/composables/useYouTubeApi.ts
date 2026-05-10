@@ -11,6 +11,8 @@ declare global {
       Player: new (
         el: HTMLElement | string,
         opts: {
+          /** Domain — z.B. https://www.youtube-nocookie.com fuer cookieless Embed. */
+          host?: string
           videoId?: string
           playerVars?: Record<string, unknown>
           events?: {
