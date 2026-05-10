@@ -219,10 +219,41 @@ const onImgLoad = (e: Event) => {
 }
 
 // --- Zoom ---
+const ZOOM_MIN = 0.25
+const ZOOM_MAX = 3
 const zoom = ref(1)
-const zoomIn = () => (zoom.value = Math.min(3, +(zoom.value + 0.1).toFixed(2)))
-const zoomOut = () => (zoom.value = Math.max(0.25, +(zoom.value - 0.1).toFixed(2)))
+const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, +z.toFixed(3)))
+const zoomIn = () => (zoom.value = clampZoom(zoom.value + 0.1))
+const zoomOut = () => (zoom.value = clampZoom(zoom.value - 0.1))
 const zoomReset = () => (zoom.value = 1)
+
+// Maus-Rad zoomt zentriert auf die Cursor-Position; der Punkt unter dem Cursor
+// bleibt visuell stehen, indem wir scrollLeft/Top entsprechend nachziehen.
+const onStageWheel = (e: WheelEvent) => {
+  const wrapper = stageWrapperEl.value
+  if (!wrapper) return
+  e.preventDefault()
+  const rect = wrapper.getBoundingClientRect()
+  const mx = e.clientX - rect.left
+  const my = e.clientY - rect.top
+  const cx = wrapper.scrollLeft + mx
+  const cy = wrapper.scrollTop + my
+  const oldZoom = zoom.value
+  // deltaY > 0 = nach unten scrollen = rauszoomen. Faktor exponentiell, damit
+  // sich die Schritte unabhaengig vom Geraet (Trackpad vs. Maus) gleich anfuehlen.
+  const factor = Math.exp(-e.deltaY * 0.0015)
+  const newZoom = clampZoom(oldZoom * factor)
+  if (newZoom === oldZoom) return
+  zoom.value = newZoom
+  const ratio = newZoom / oldZoom
+  // Nach Reflow durch das geaenderte Layout den Scroll so setzen, dass der
+  // Welt-Punkt unter dem Cursor an Ort und Stelle bleibt.
+  nextTick(() => {
+    if (!stageWrapperEl.value) return
+    stageWrapperEl.value.scrollLeft = cx * ratio - mx
+    stageWrapperEl.value.scrollTop = cy * ratio - my
+  })
+}
 
 // --- Grid-Overlay ---
 const gridSvg = computed(() => {
@@ -1635,6 +1666,7 @@ const endResize = () => {
           ref="stageWrapperEl"
           class="overflow-auto bg-black/5 rounded flex"
           style="max-height: 78vh; place-content: safe center; place-items: safe center;"
+          @wheel="onStageWheel"
         >
           <!-- Aeusserer Wrapper hat die SKALIERTEN Dimensionen, damit das
                Layout die echte sichtbare Groesse kennt und Flex-Center
