@@ -221,19 +221,24 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_battle_pings_map ON battle_pings(map_id)
   `)
-  // Audio-Tracks (Musik + SFX) pro Gruppe
+  // Audio-Tracks (Musik + SFX) pro Gruppe — speichert YouTube/Spotify-URLs
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS battle_audio_tracks (
       id SERIAL PRIMARY KEY,
       group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
       kind TEXT NOT NULL DEFAULT 'music',
+      provider TEXT NOT NULL DEFAULT 'youtube',
       audio_url TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `)
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_battle_audio_tracks_group ON battle_audio_tracks(group_id)
+  `)
+  // Provider-Spalte fuer bestehende Tabellen
+  await db.execute(sql`
+    ALTER TABLE battle_audio_tracks ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'youtube'
   `)
   // Initiative + Audio State auf groups
   await db.execute(sql`

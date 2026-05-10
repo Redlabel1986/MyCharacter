@@ -15,6 +15,7 @@ import {
   buildStatusText,
   type TokenCondition,
 } from '~~/shared/conditions'
+import { audioEmbedUrl, parseAudioUrl } from '~~/shared/audio'
 
 definePageMeta({ middleware: ['auth'], layout: 'wide' })
 
@@ -83,6 +84,7 @@ interface AudioTrack {
   groupId: number
   name: string
   kind: 'music' | 'sfx'
+  provider: 'youtube' | 'spotify'
   audioUrl: string
 }
 interface AudioState {
@@ -351,6 +353,25 @@ const openInfoFromClick = (t: Token) => {
 // --- Conditions ---
 const tokenConditions = (t: Token) => parseStatusText(t.statusText ?? '').conditions
 const tokenCustomLabels = (t: Token) => parseStatusText(t.statusText ?? '').customLabels
+
+/**
+ * Verwundungs-Schleier auf dem Token.
+ * Stufen:
+ *   0–24% Schaden    -> kein Overlay
+ *   25–49%           -> leichter roter Schleier
+ *   50–74%           -> mittlerer
+ *   75–94%           -> heftiger
+ *   95–100% (tot)    -> dunkelroter Vollschleier
+ */
+const tokenDamageOverlay = (t: Token): { opacity: number; intense: boolean } | null => {
+  if (t.hp === null || !t.hpMax || t.hpMax <= 0) return null
+  const pct = Math.max(0, Math.min(1, 1 - t.hp / t.hpMax))
+  if (pct < 0.25) return null
+  if (pct >= 0.95) return { opacity: 0.85, intense: true }
+  if (pct >= 0.75) return { opacity: 0.55, intense: true }
+  if (pct >= 0.5) return { opacity: 0.4, intense: false }
+  return { opacity: 0.22, intense: false }
+}
 
 // --- Token hinzufuegen ---
 const showAddModal = ref(false)
@@ -651,29 +672,9 @@ onUnmounted(() => {
 })
 watch(pings, recomputeVisiblePings, { deep: true })
 
-// --- Audio (Musik + SFX) ---
-const audioPlayerEl = ref<HTMLAudioElement | null>(null)
-const sfxAudioEl = ref<HTMLAudioElement | null>(null)
-const audioVolume = ref(0.6)
-const audioMuted = ref(false)
+// --- Audio (YouTube/Spotify-Embeds) ---
 const audioTracks = ref<AudioTrack[]>([])
-let lastHandledStartedAt: string | null = null
-let lastHandledSfxAt: string | null = null
-
-onMounted(() => {
-  if (typeof window === 'undefined') return
-  const v = Number(localStorage.getItem('battlemap.audioVolume'))
-  if (Number.isFinite(v) && v >= 0 && v <= 1) audioVolume.value = v
-  audioMuted.value = localStorage.getItem('battlemap.audioMuted') === '1'
-})
-watch(audioVolume, (v) => {
-  if (typeof window !== 'undefined') localStorage.setItem('battlemap.audioVolume', String(v))
-  if (audioPlayerEl.value) audioPlayerEl.value.volume = v
-  if (sfxAudioEl.value) sfxAudioEl.value.volume = v
-})
-watch(audioMuted, (m) => {
-  if (typeof window !== 'undefined') localStorage.setItem('battlemap.audioMuted', m ? '1' : '0')
-})
+const audioCollapsed = ref(false)
 
 const fetchAudioTracks = async () => {
   try {
@@ -687,37 +688,47 @@ onMounted(fetchAudioTracks)
 
 function handleAudioStateUpdate(s: AudioState | null) {
   audioState.value = s
-  if (typeof window === 'undefined') return
-  if (!s) return
-  // Musik: bei neuem startedAt von vorne starten
-  if (s.isPlaying && s.trackId && s.startedAt && s.startedAt !== lastHandledStartedAt) {
-    lastHandledStartedAt = s.startedAt
-    nextTick(() => {
-      const el = audioPlayerEl.value
-      if (!el) return
-      el.src = `/api/groups/${groupId}/audio/tracks/${s.trackId}/stream`
-      el.volume = audioVolume.value
-      el.loop = true
-      el.play().catch(() => {
-        // Browser blocken oft Autoplay — User muss interagieren
-      })
-    })
-  }
-  if (!s.isPlaying && audioPlayerEl.value && !audioPlayerEl.value.paused) {
-    audioPlayerEl.value.pause()
-  }
-  // SFX: bei neuem lastSfxAt einmalig abspielen
-  if (s.lastSfxAt && s.lastSfxTrackId && s.lastSfxAt !== lastHandledSfxAt) {
-    lastHandledSfxAt = s.lastSfxAt
-    nextTick(() => {
-      const el = sfxAudioEl.value
-      if (!el) return
-      el.src = `/api/groups/${groupId}/audio/tracks/${s.lastSfxTrackId}/stream`
-      el.volume = audioVolume.value
-      el.play().catch(() => {})
-    })
-  }
 }
+
+// Embed-URL fuer den aktuell aktiven Music-Track
+const activeMusicEmbedUrl = computed(() => {
+  const s = audioState.value
+  if (!s?.isPlaying || !s.trackId) return null
+  const t = audioTracks.value.find((x) => x.id === s.trackId)
+  if (!t) return null
+  try {
+    return audioEmbedUrl(t.audioUrl, { autoplay: true })
+  } catch {
+    return null
+  }
+})
+
+// SFX-Trigger: ueberwacht lastSfxAt, blendet kurz einen autoplay-Iframe ein
+const sfxEmbedUrl = ref<string | null>(null)
+let lastHandledSfxAt: string | null = null
+let sfxClearTimer: ReturnType<typeof setTimeout> | null = null
+watch(
+  () => audioState.value?.lastSfxAt,
+  (sfxAt) => {
+    if (!sfxAt || sfxAt === lastHandledSfxAt) return
+    lastHandledSfxAt = sfxAt
+    const trackId = audioState.value?.lastSfxTrackId
+    if (!trackId) return
+    const t = audioTracks.value.find((x) => x.id === trackId)
+    if (!t) return
+    try {
+      sfxEmbedUrl.value = audioEmbedUrl(t.audioUrl, { autoplay: true })
+    } catch {
+      sfxEmbedUrl.value = null
+    }
+    if (sfxClearTimer) clearTimeout(sfxClearTimer)
+    // Nach 25 s den SFX-Iframe wieder rauswerfen, damit er nicht endlos
+    // weiter spielt (besonders bei Musik-Embeds als SFX missbraucht).
+    sfxClearTimer = setTimeout(() => {
+      sfxEmbedUrl.value = null
+    }, 25_000)
+  },
+)
 
 const dmPlayMusic = async (trackId: number) => {
   await $fetch(`/api/groups/${groupId}/audio/state`, {
@@ -746,37 +757,41 @@ const dmDeleteTrack = async (trackId: number) => {
   await fetchAudioTracks()
 }
 
-// Audio-Upload (DM)
-const audioUploadFile = ref<File | null>(null)
-const audioUploadName = ref('')
-const audioUploadKind = ref<'music' | 'sfx'>('music')
-const audioUploading = ref(false)
-const audioUploadError = ref<string | null>(null)
-const onAudioUploadFile = (e: Event) => {
-  const t = e.target as HTMLInputElement
-  audioUploadFile.value = t.files?.[0] ?? null
-  if (audioUploadFile.value && !audioUploadName.value) {
-    audioUploadName.value = audioUploadFile.value.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ')
-  }
-}
-const uploadAudio = async () => {
-  if (!audioUploadFile.value) return
-  audioUploading.value = true
-  audioUploadError.value = null
+// Track hinzufuegen (DM) — YouTube/Spotify-Link
+const audioAddUrl = ref('')
+const audioAddName = ref('')
+const audioAddKind = ref<'music' | 'sfx'>('music')
+const audioAdding = ref(false)
+const audioAddError = ref<string | null>(null)
+const audioAddProvider = computed(() => {
+  if (!audioAddUrl.value) return null
   try {
-    const fd = new FormData()
-    fd.append('file', audioUploadFile.value)
-    fd.append('name', audioUploadName.value || 'Track')
-    fd.append('kind', audioUploadKind.value)
-    await $fetch(`/api/groups/${groupId}/audio/tracks`, { method: 'POST', body: fd })
-    audioUploadFile.value = null
-    audioUploadName.value = ''
+    return parseAudioUrl(audioAddUrl.value).provider
+  } catch {
+    return null
+  }
+})
+const addAudioTrack = async () => {
+  if (!audioAddUrl.value || !audioAddName.value) return
+  audioAdding.value = true
+  audioAddError.value = null
+  try {
+    await $fetch(`/api/groups/${groupId}/audio/tracks`, {
+      method: 'POST',
+      body: {
+        name: audioAddName.value.trim(),
+        kind: audioAddKind.value,
+        url: audioAddUrl.value.trim(),
+      },
+    })
+    audioAddUrl.value = ''
+    audioAddName.value = ''
     await fetchAudioTracks()
   } catch (e: unknown) {
-    audioUploadError.value =
-      (e as { statusMessage?: string }).statusMessage ?? 'Upload fehlgeschlagen.'
+    audioAddError.value =
+      (e as { statusMessage?: string }).statusMessage ?? 'Konnte Track nicht hinzufügen.'
   } finally {
-    audioUploading.value = false
+    audioAdding.value = false
   }
 }
 
@@ -1467,6 +1482,25 @@ const endResize = () => {
               <span v-else class="text-center px-1 leading-tight pointer-events-none">
                 {{ t.name.slice(0, 8) }}
               </span>
+              <!-- Verwundungs-Schleier (Blut-Overlay je nach HP%) -->
+              <div
+                v-if="tokenDamageOverlay(t)"
+                class="absolute inset-0 rounded-full pointer-events-none"
+                :style="{
+                  background: tokenDamageOverlay(t)!.intense
+                    ? `radial-gradient(circle at 35% 30%, rgba(127,29,29,${tokenDamageOverlay(t)!.opacity * 0.9}) 0%, rgba(153,27,27,${tokenDamageOverlay(t)!.opacity}) 60%, rgba(69,10,10,${Math.min(1, tokenDamageOverlay(t)!.opacity * 1.1)}) 100%)`
+                    : `radial-gradient(circle at 30% 30%, rgba(220,38,38,${tokenDamageOverlay(t)!.opacity}) 0%, rgba(153,27,27,${tokenDamageOverlay(t)!.opacity * 0.9}) 100%)`,
+                  mixBlendMode: 'multiply',
+                }"
+              />
+              <!-- Dunkles Kreuz/X bei tot (HP <= 0) -->
+              <div
+                v-if="t.hp !== null && t.hp <= 0 && t.hpMax"
+                class="absolute inset-0 rounded-full pointer-events-none flex items-center justify-center"
+                :style="{ color: '#fee2e2', textShadow: '0 0 4px rgba(0,0,0,0.8)' }"
+              >
+                <UIcon name="i-lucide-x" class="size-1/2 opacity-80" />
+              </div>
               <div
                 v-if="t.hp !== null && t.hpMax"
                 class="absolute -bottom-3 left-1/2 -translate-x-1/2 text-[10px] bg-black/70 text-white px-1 rounded whitespace-nowrap pointer-events-none"
@@ -1590,7 +1624,7 @@ const endResize = () => {
         </ol>
       </div>
 
-      <!-- Audio-Panel (DM steuert, alle hoeren) -->
+      <!-- Audio-Panel (DM steuert, alle sehen den Embed-Player) -->
       <div class="parchment-card p-3 space-y-2">
         <div class="flex items-center justify-between gap-2 flex-wrap">
           <h2 class="font-serif text-lg flex items-center gap-2">
@@ -1602,21 +1636,6 @@ const endResize = () => {
           </h2>
           <div class="flex items-center gap-2">
             <UButton
-              size="xs"
-              variant="ghost"
-              :icon="audioMuted ? 'i-lucide-volume-x' : 'i-lucide-volume-2'"
-              @click="audioMuted = !audioMuted"
-            />
-            <input
-              v-model.number="audioVolume"
-              type="range"
-              min="0"
-              max="1"
-              step="0.05"
-              class="w-24"
-              :disabled="audioMuted"
-            >
-            <UButton
               v-if="isDm && audioState?.isPlaying"
               size="xs"
               variant="outline"
@@ -1625,28 +1644,60 @@ const endResize = () => {
             >
               Stopp
             </UButton>
+            <UButton
+              size="xs"
+              variant="ghost"
+              :icon="audioCollapsed ? 'i-lucide-chevron-down' : 'i-lucide-chevron-up'"
+              @click="audioCollapsed = !audioCollapsed"
+            />
           </div>
         </div>
-        <div v-if="isDm">
-          <!-- Upload-Form -->
+
+        <!-- Aktiver Player (alle sehen ihn) -->
+        <div v-if="activeMusicEmbedUrl" class="rounded overflow-hidden bg-black/5">
+          <iframe
+            :src="activeMusicEmbedUrl"
+            class="w-full"
+            :style="{ height: currentTrack?.provider === 'spotify' ? '152px' : '180px' }"
+            allow="autoplay; encrypted-media; fullscreen"
+            allowfullscreen
+            loading="lazy"
+            frameborder="0"
+            title="Audio-Player"
+          />
+        </div>
+        <div v-else-if="audioState?.isPlaying" class="text-xs text-ink-400 italic">
+          Track wird vorbereitet …
+        </div>
+
+        <!-- Verstecktes SFX-iframe (verschwindet nach 25 s) -->
+        <iframe
+          v-if="sfxEmbedUrl"
+          :src="sfxEmbedUrl"
+          class="hidden"
+          allow="autoplay; encrypted-media"
+          frameborder="0"
+        />
+
+        <div v-if="!audioCollapsed && isDm">
+          <!-- URL-Add-Form -->
           <div class="grid sm:grid-cols-12 gap-2 items-end mb-2">
-            <UFormField label="Audiodatei (MP3/OGG/WAV)" class="sm:col-span-5">
-              <input
-                type="file"
-                accept="audio/*"
-                class="block w-full text-xs"
-                @change="onAudioUploadFile"
-              >
+            <UFormField label="YouTube- oder Spotify-URL" class="sm:col-span-6">
+              <UInput
+                v-model="audioAddUrl"
+                size="xs"
+                placeholder="https://www.youtube.com/watch?v=… oder https://open.spotify.com/playlist/…"
+              />
             </UFormField>
             <UFormField label="Name" class="sm:col-span-3">
-              <UInput v-model="audioUploadName" size="xs" />
+              <UInput v-model="audioAddName" size="xs" placeholder="z.B. Tavern" />
             </UFormField>
             <UFormField label="Typ" class="sm:col-span-2">
               <USelect
-                v-model="audioUploadKind"
+                v-model="audioAddKind"
                 :items="[
                   { label: 'Musik (Loop)', value: 'music' },
-                  { label: 'SFX (1×)', value: 'sfx' },
+                  { label: 'SFX / einmalig', value: 'sfx' },
                 ]"
                 value-key="value"
                 size="xs"
@@ -1655,16 +1706,23 @@ const endResize = () => {
             <UButton
               color="primary"
               size="xs"
-              icon="i-lucide-upload"
-              :disabled="!audioUploadFile"
-              :loading="audioUploading"
-              class="sm:col-span-2"
-              @click="uploadAudio"
+              icon="i-lucide-plus"
+              :disabled="!audioAddUrl || !audioAddName || !audioAddProvider"
+              :loading="audioAdding"
+              class="sm:col-span-1"
+              @click="addAudioTrack"
             >
-              Hochladen
+              Add
             </UButton>
           </div>
-          <p v-if="audioUploadError" class="text-xs text-red-700 mb-2">{{ audioUploadError }}</p>
+          <p v-if="audioAddProvider" class="text-[10px] text-emerald-700 -mt-1 mb-1">
+            Erkannt als {{ audioAddProvider === 'youtube' ? 'YouTube' : 'Spotify' }}
+          </p>
+          <p v-else-if="audioAddUrl" class="text-[10px] text-amber-700 -mt-1 mb-1">
+            Nur YouTube- und Spotify-Links werden erkannt.
+          </p>
+          <p v-if="audioAddError" class="text-xs text-red-700 mb-2">{{ audioAddError }}</p>
+
           <!-- Musik-Liste -->
           <div v-if="audioMusicTracks.length" class="space-y-1">
             <div class="text-[10px] uppercase tracking-widest text-ink-300">Musik</div>
@@ -1674,6 +1732,13 @@ const endResize = () => {
                 :key="t.id"
                 class="flex items-center gap-1 text-xs bg-white/60 border border-parchment-700/30 rounded pl-2"
               >
+                <span
+                  class="text-[10px] uppercase font-bold"
+                  :style="{ color: t.provider === 'youtube' ? '#dc2626' : '#10b981' }"
+                  :title="t.provider"
+                >
+                  {{ t.provider === 'youtube' ? 'YT' : 'SP' }}
+                </span>
                 <button
                   type="button"
                   class="flex items-center gap-1 px-1 py-1 hover:text-[var(--color-accent)]"
@@ -1695,13 +1760,19 @@ const endResize = () => {
           </div>
           <!-- SFX-Liste -->
           <div v-if="audioSfxTracks.length" class="space-y-1 mt-2">
-            <div class="text-[10px] uppercase tracking-widest text-ink-300">Soundboard (SFX)</div>
+            <div class="text-[10px] uppercase tracking-widest text-ink-300">Soundboard (1×)</div>
             <div class="flex flex-wrap gap-1">
               <div
                 v-for="t in audioSfxTracks"
                 :key="t.id"
                 class="flex items-center gap-1 text-xs bg-white/60 border border-parchment-700/30 rounded pl-2"
               >
+                <span
+                  class="text-[10px] uppercase font-bold"
+                  :style="{ color: t.provider === 'youtube' ? '#dc2626' : '#10b981' }"
+                >
+                  {{ t.provider === 'youtube' ? 'YT' : 'SP' }}
+                </span>
                 <button
                   type="button"
                   class="flex items-center gap-1 px-1 py-1 hover:text-[var(--color-accent)]"
@@ -1721,22 +1792,9 @@ const endResize = () => {
             </div>
           </div>
           <p v-if="!audioTracks.length" class="text-xs text-ink-300 italic">
-            Noch keine Tracks hochgeladen.
+            Noch keine Tracks angelegt. Füg einen YouTube- oder Spotify-Link ein.
           </p>
         </div>
-        <!-- Versteckte Audio-Player fuer alle (Sync via audioState) -->
-        <audio
-          ref="audioPlayerEl"
-          preload="auto"
-          :muted="audioMuted"
-          class="hidden"
-        />
-        <audio
-          ref="sfxAudioEl"
-          preload="auto"
-          :muted="audioMuted"
-          class="hidden"
-        />
       </div>
     </div>
 

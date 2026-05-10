@@ -321,6 +321,9 @@ export const battleAudioTracks = pgTable(
     name: text('name').notNull(),
     /** "music" laeuft loopend bis stop, "sfx" wird einmalig ausgeloest. */
     kind: text('kind').notNull().$type<'music' | 'sfx'>().default('music'),
+    /** Provider: 'youtube' oder 'spotify'. (Auch fuer SFX nutzbar via YT-Clip.) */
+    provider: text('provider').notNull().$type<'youtube' | 'spotify'>().default('youtube'),
+    /** Original-URL (https://www.youtube.com/watch?v=... oder open.spotify.com/...). */
     audioUrl: text('audio_url').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
