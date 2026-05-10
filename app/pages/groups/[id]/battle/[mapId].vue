@@ -304,6 +304,13 @@ const gridSvgUrl = computed(() => {
   if (map.value && map.value.gridVisible === false) return 'none'
   return `url("data:image/svg+xml;utf8,${encodeURIComponent(gridSvg.value)}")`
 })
+// Soll das Raster aktuell wirklich angezeigt werden? Wird zusaetzlich vom
+// Template ausgewertet, um das Grid als echtes SVG-Overlay UEBER der Karte
+// (nicht nur als Hintergrund) zu rendern.
+const gridShouldRender = computed(() => {
+  if (!map.value || !imgW.value || !imgH.value) return false
+  return map.value.gridVisible !== false
+})
 
 // --- Snap ---
 const snap = (x: number, y: number) => {
@@ -1957,9 +1964,6 @@ const endResize = () => {
               width: imgW + 'px',
               height: imgH + 'px',
               transform: `scale(${zoom})`,
-              backgroundImage: gridSvgUrl,
-              backgroundSize: 'contain',
-              backgroundRepeat: 'no-repeat',
               cursor: stageCursor,
               touchAction: toolMode === 'draw' ? 'none' : 'auto',
             }"
@@ -1976,6 +1980,21 @@ const endResize = () => {
               draggable="false"
               @load="onImgLoad"
             >
+
+            <!-- Raster-Overlay UEBER der Karte (Pattern-SVG mit transparentem
+                 Untergrund). Liegt zwischen Karte und Zeichnungen, damit Tokens
+                 + Pings darueber gemalt werden. -->
+            <div
+              v-if="gridShouldRender"
+              class="absolute inset-0 pointer-events-none"
+              :style="{
+                width: imgW + 'px',
+                height: imgH + 'px',
+                backgroundImage: gridSvgUrl,
+                backgroundSize: 'contain',
+                backgroundRepeat: 'no-repeat',
+              }"
+            />
 
             <!-- Zeichnungen-SVG-Layer (zwischen Map und Token) -->
             <svg
