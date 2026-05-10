@@ -109,7 +109,7 @@ const submitPasswordChange = async () => {
           <label class="text-xs uppercase tracking-widest text-ink-300 block mb-1">
             Aktuelles Passwort
           </label>
-          <PasswordInput
+          <UiPasswordInput
             v-model="pwCurrent"
             autocomplete="current-password"
             required
@@ -119,7 +119,7 @@ const submitPasswordChange = async () => {
           <label class="text-xs uppercase tracking-widest text-ink-300 block mb-1">
             Neues Passwort
           </label>
-          <PasswordInput
+          <UiPasswordInput
             v-model="pwNew"
             autocomplete="new-password"
             required
@@ -130,7 +130,7 @@ const submitPasswordChange = async () => {
           <label class="text-xs uppercase tracking-widest text-ink-300 block mb-1">
             Neues Passwort bestätigen
           </label>
-          <PasswordInput
+          <UiPasswordInput
             v-model="pwConfirm"
             autocomplete="new-password"
             required

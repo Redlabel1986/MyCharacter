@@ -168,7 +168,7 @@ const clearLibraryPassword = async () => {
         class="flex flex-wrap gap-2 items-start"
         @submit.prevent="setLibraryPassword"
       >
-        <PasswordInput
+        <UiPasswordInput
           v-model="libPasswordInput"
           :placeholder="libPwState?.isSet ? 'Neues Passwort setzen' : 'Passwort festlegen'"
           autocomplete="new-password"

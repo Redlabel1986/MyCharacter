@@ -84,7 +84,7 @@ const formatSize = (bytes: number) => {
         Diese Bibliothek ist mit einem Passwort geschützt. Frag deinen DM oder Admin nach dem Code.
       </p>
       <form class="space-y-3" @submit.prevent="submitUnlock">
-        <PasswordInput
+        <UiPasswordInput
           v-model="unlockPassword"
           placeholder="Passwort"
           autocomplete="current-password"
