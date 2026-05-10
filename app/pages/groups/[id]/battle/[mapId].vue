@@ -10,7 +10,7 @@
 import GroupChat from '~/components/chat/GroupChat.vue'
 import {
   TOKEN_CONDITIONS,
-  CONDITION_COLOR_CLASSES,
+  conditionStyle,
   parseStatusText,
   buildStatusText,
   type TokenCondition,
@@ -461,7 +461,7 @@ const customStatusText = computed<string>({
   },
 })
 
-const condClasses = (c: TokenCondition) => CONDITION_COLOR_CLASSES[c.color]
+const condStyle = (c: TokenCondition) => conditionStyle(c)
 
 const removeToken = async () => {
   const t = editing.value
@@ -1119,15 +1119,16 @@ const endResize = () => {
                 <div
                   v-for="c in tokenConditions(t).slice(0, 6)"
                   :key="c.id"
-                  class="w-5 h-5 rounded-full border flex items-center justify-center shadow"
-                  :class="[condClasses(c).bg, condClasses(c).text, condClasses(c).border]"
+                  class="w-5 h-5 rounded-full border-2 flex items-center justify-center shadow"
+                  :style="condStyle(c)"
                   :title="c.label + ' — ' + c.hint"
                 >
                   <UIcon :name="c.icon" class="size-3.5" />
                 </div>
                 <div
                   v-if="tokenConditions(t).length > 6"
-                  class="w-5 h-5 rounded-full bg-black/70 text-white text-[10px] flex items-center justify-center"
+                  class="w-5 h-5 rounded-full text-[10px] flex items-center justify-center border-2"
+                  :style="{ background: '#1f2937', color: '#fff', borderColor: '#000' }"
                   :title="tokenConditions(t).slice(6).map((c) => c.label).join(', ')"
                 >
                   +{{ tokenConditions(t).length - 6 }}
@@ -1152,14 +1153,20 @@ const endResize = () => {
 
     <!-- Resize-Handle (nur lg+) -->
     <div
-      class="hidden lg:block w-1 cursor-col-resize self-stretch rounded transition-colors flex-none"
-      :class="resizing ? 'bg-[var(--color-accent)]' : 'bg-parchment-700/20 hover:bg-[var(--color-accent)]/50'"
+      class="hidden lg:flex w-3 cursor-col-resize self-stretch rounded items-center justify-center group flex-none touch-none"
+      :class="resizing ? 'bg-[var(--color-accent)]/30' : 'hover:bg-[var(--color-accent)]/15'"
       @pointerdown="startResize"
       @pointermove="onResize"
       @pointerup="endResize"
       @pointercancel="endResize"
       title="Chat-Breite ziehen"
-    />
+    >
+      <UIcon
+        name="i-lucide-grip-vertical"
+        class="size-4 transition-colors"
+        :class="resizing ? 'text-[var(--color-accent)]' : 'text-ink-300 group-hover:text-[var(--color-accent)]'"
+      />
+    </div>
 
     <!-- Rechte Spalte: Chat (auf mobile volle Breite, auf lg+ resizable Breite) -->
     <aside
@@ -1242,10 +1249,11 @@ const endResize = () => {
                 v-for="c in TOKEN_CONDITIONS"
                 :key="c.id"
                 type="button"
-                class="flex items-center gap-1 px-2 py-1 rounded border text-xs transition"
+                class="flex items-center gap-1 px-2 py-1 rounded border-2 text-xs font-semibold transition"
                 :class="isConditionActive(c.id)
-                  ? [condClasses(c).bg, condClasses(c).text, condClasses(c).border]
-                  : 'bg-white/40 text-ink-400 border-parchment-700/30 hover:bg-white/70'"
+                  ? ''
+                  : 'bg-white/60 text-ink-400 border-parchment-700/40 hover:bg-white/90'"
+                :style="isConditionActive(c.id) ? condStyle(c) : {}"
                 :title="c.hint"
                 @click="toggleCondition(c.id)"
               >
@@ -1307,8 +1315,8 @@ const endResize = () => {
                 <span
                   v-for="c in tokenConditions(infoToken)"
                   :key="c.id"
-                  class="flex items-center gap-1 px-2 py-1 rounded border text-xs"
-                  :class="[condClasses(c).bg, condClasses(c).text, condClasses(c).border]"
+                  class="flex items-center gap-1 px-2 py-1 rounded border-2 text-xs font-semibold"
+                  :style="condStyle(c)"
                   :title="c.hint"
                 >
                   <UIcon :name="c.icon" class="size-3.5" />
@@ -1317,7 +1325,8 @@ const endResize = () => {
                 <span
                   v-for="(lab, i) in tokenCustomLabels(infoToken)"
                   :key="`custom-${i}`"
-                  class="px-2 py-1 rounded border text-xs bg-amber-100 text-amber-900 border-amber-300"
+                  class="px-2 py-1 rounded border-2 text-xs font-semibold"
+                  :style="{ background: '#fef3c7', color: '#78350f', borderColor: '#b45309' }"
                 >
                   {{ lab }}
                 </span>

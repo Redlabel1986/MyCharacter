@@ -210,14 +210,31 @@ export function buildStatusText(conditionIds: string[], customLabels: string[]):
   return [...conditionIds, ...customLabels.map((s) => s.trim()).filter(Boolean)].join(',')
 }
 
-/** Tailwind-Klassen pro Farbe — fuer Badge / Border. */
-export const CONDITION_COLOR_CLASSES: Record<TokenCondition['color'], { bg: string; text: string; border: string }> = {
-  red: { bg: 'bg-red-500', text: 'text-white', border: 'border-red-700' },
-  green: { bg: 'bg-emerald-500', text: 'text-white', border: 'border-emerald-700' },
-  blue: { bg: 'bg-sky-500', text: 'text-white', border: 'border-sky-700' },
-  purple: { bg: 'bg-purple-500', text: 'text-white', border: 'border-purple-700' },
-  orange: { bg: 'bg-orange-500', text: 'text-white', border: 'border-orange-700' },
-  yellow: { bg: 'bg-yellow-400', text: 'text-black', border: 'border-yellow-600' },
-  gray: { bg: 'bg-gray-500', text: 'text-white', border: 'border-gray-700' },
-  pink: { bg: 'bg-pink-500', text: 'text-white', border: 'border-pink-700' },
+/**
+ * Hex-Farben pro Condition-Farbgruppe.
+ * Wir benutzen Inline-Styles statt Tailwind-Klassen, weil Tailwind dynamisch
+ * gebaute Klassen-Strings nicht zuverlaessig in den CSS-Output einbezieht.
+ */
+export const CONDITION_COLOR_STYLES: Record<
+  TokenCondition['color'],
+  { bg: string; text: string; border: string }
+> = {
+  red:    { bg: '#dc2626', text: '#ffffff', border: '#7f1d1d' },
+  green:  { bg: '#059669', text: '#ffffff', border: '#064e3b' },
+  blue:   { bg: '#0284c7', text: '#ffffff', border: '#0c4a6e' },
+  purple: { bg: '#7c3aed', text: '#ffffff', border: '#4c1d95' },
+  orange: { bg: '#ea580c', text: '#ffffff', border: '#7c2d12' },
+  yellow: { bg: '#eab308', text: '#1f2937', border: '#854d0e' },
+  gray:   { bg: '#4b5563', text: '#ffffff', border: '#1f2937' },
+  pink:   { bg: '#db2777', text: '#ffffff', border: '#831843' },
+}
+
+/** Liefert ein Vue-Style-Objekt fuer eine Condition. */
+export function conditionStyle(c: TokenCondition) {
+  const s = CONDITION_COLOR_STYLES[c.color]
+  return {
+    background: s.bg,
+    color: s.text,
+    borderColor: s.border,
+  }
 }
