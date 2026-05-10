@@ -1647,7 +1647,7 @@ const endResize = () => {
               size="xs"
               variant="ghost"
               icon="i-lucide-rotate-ccw"
-              title="Auf Runde 1 zurücksetzen, alle wieder „nicht gezogen""
+              title="Auf Runde 1 zurücksetzen, alle wieder „nicht gezogen“"
               @click="initResetRound"
             />
           </div>
