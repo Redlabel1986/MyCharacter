@@ -72,6 +72,11 @@ const isDm = ref(false)
 const activeMapId = ref<number | null>(null)
 const allMapsForSwitcher = ref<BattleMap[]>([])
 
+// Vorab-Deklarationen fuer Refs, die fetchMap referenziert, damit beim
+// allerersten Aufruf (top-level await unten) keine TDZ entsteht.
+const draggingTokenId = ref<number | null>(null)
+const editingTokenId = ref<number | null>(null)
+
 const fetchMap = async () => {
   try {
     const res = await $fetch<{
@@ -91,21 +96,43 @@ const fetchMap = async () => {
       return
     }
     activeMapId.value = res.activeMapId
-    if (!draggingTokenId.value) {
+    // Tokens, die ich gerade bearbeite/ziehe, NICHT aus dem Server-Snapshot
+    // ueberschreiben — sonst verliert der User waehrend des Tippens seine
+    // Aenderungen alle 2 Sekunden.
+    const protectedIds = new Set<number>()
+    if (draggingTokenId.value !== null) protectedIds.add(draggingTokenId.value)
+    if (editingTokenId.value !== null) protectedIds.add(editingTokenId.value)
+    if (protectedIds.size === 0) {
       tokens.value = res.tokens
     } else {
-      const dragId = draggingTokenId.value
       tokens.value = res.tokens.map((t) => {
-        if (t.id === dragId) {
-          const local = tokens.value.find((x) => x.id === dragId)
+        if (protectedIds.has(t.id)) {
+          const local = tokens.value.find((x) => x.id === t.id)
           return local ?? t
         }
         return t
       })
     }
   } catch (e: unknown) {
-    if ((e as { statusCode?: number }).statusCode === 404) {
+    const status = (e as { statusCode?: number }).statusCode
+    if (status === 404) {
       throw createError({ statusCode: 404, statusMessage: 'Karte nicht gefunden.' })
+    }
+    if (status === 403) {
+      // Spieler-Fall: die Karte ist nicht mehr aktiv (DM hat umgeschaltet).
+      // Aktive Karte aus der Gruppen-API holen und dorthin springen.
+      try {
+        const list = await $fetch<{ activeMapId: number | null }>(
+          `/api/groups/${groupId}/maps`,
+        )
+        if (list.activeMapId && list.activeMapId !== mapId) {
+          await navigateTo(`/groups/${groupId}/battle/${list.activeMapId}`)
+          return
+        }
+        await navigateTo(`/groups/${groupId}/battle`)
+      } catch {
+        await navigateTo(`/groups/${groupId}/battle`)
+      }
     }
   }
 }
@@ -197,8 +224,8 @@ const snap = (x: number, y: number) => {
 }
 
 // --- Drag ---
+// (draggingTokenId weiter oben deklariert, wegen TDZ in fetchMap)
 const stageEl = ref<HTMLElement | null>(null)
-const draggingTokenId = ref<number | null>(null)
 const dragStarted = ref(false)
 const dragOffset = ref({ x: 0, y: 0 })
 const dragStartPx = ref({ x: 0, y: 0 })
@@ -360,7 +387,7 @@ const addToken = async () => {
 }
 
 // --- Token bearbeiten (HP / Status / Beschreibung / Bild / Groesse) ---
-const editingTokenId = ref<number | null>(null)
+// (editingTokenId weiter oben deklariert, wegen TDZ in fetchMap)
 const editing = computed(() => tokens.value.find((t) => t.id === editingTokenId.value) ?? null)
 const editImageFile = ref<File | null>(null)
 const onEditFile = (e: Event) => {
