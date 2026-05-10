@@ -8,6 +8,7 @@
  *  - Doppelklick: schneller Edit
  */
 import GroupChat from '~/components/chat/GroupChat.vue'
+import MiniCharSheet from '~/components/battle/MiniCharSheet.vue'
 import {
   TOKEN_CONDITIONS,
   conditionStyle,
@@ -983,11 +984,15 @@ const addAudioTrack = async () => {
 
 const audioMusicTracks = computed(() => audioTracks.value.filter((t) => t.kind === 'music'))
 const audioSfxTracks = computed(() => audioTracks.value.filter((t) => t.kind === 'sfx'))
-const currentTrack = computed(() =>
-  audioState.value?.trackId
-    ? audioTracks.value.find((t) => t.id === audioState.value!.trackId)
-    : null,
-)
+// (currentTrack ist weiter oben deklariert — gemeinsam mit der Embed-/Stream-Logik)
+
+// Mein Token auf dieser Karte (fuer Mini-Charsheet) — bevorzugt einer mit Charakter-Bindung.
+const myTokenOnMap = computed(() => {
+  if (!user.value) return null
+  const mine = tokens.value.filter((t) => t.ownerUserId === user.value!.id)
+  const withChar = mine.find((t) => t.characterId !== null)
+  return withChar ?? mine[0] ?? null
+})
 
 // --- Initiative-Tracker ---
 const initActive = computed(() => initiativeState.value?.active ?? false)
@@ -1917,6 +1922,14 @@ const endResize = () => {
           </li>
         </ol>
       </div>
+
+      <!-- Mein Mini-Charbogen (HP-Sync, Skill-Würfler, Inventar) -->
+      <MiniCharSheet
+        :group-id="groupId"
+        :map-id="mapId"
+        :token="myTokenOnMap"
+        @token-updated="fetchMap"
+      />
 
       <!-- Audio-Panel (DM steuert, alle sehen den Embed-Player) -->
       <div class="parchment-card p-3 space-y-2">
