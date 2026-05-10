@@ -35,6 +35,7 @@ export default defineEventHandler(async (event) => {
     username: user.username,
     role: user.role,
     mustChangePassword: user.mustChangePassword,
+    canBeDm: user.canBeDm,
   }
   await setUserSession(event, { user: sessionUser })
 

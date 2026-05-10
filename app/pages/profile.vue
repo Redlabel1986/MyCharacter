@@ -33,6 +33,26 @@ const pwSaving = ref(false)
 const pwError = ref<string | null>(null)
 const pwSuccess = ref(false)
 
+// Self-Service-Rollenwechsel (nur fuer User mit canBeDm=true, niemals fuer Admin)
+const roleSwitching = ref(false)
+const roleError = ref<string | null>(null)
+const switchRole = async (next: 'player' | 'dm') => {
+  if (!user.value || user.value.role === next) return
+  roleError.value = null
+  roleSwitching.value = true
+  try {
+    await $fetch('/api/profile/role', { method: 'POST', body: { role: next } })
+    await refreshSession()
+    // Sanftes Reload, damit Layout-/Middleware-State (DM-Nav, Permissions) frisch ziehen.
+    await navigateTo({ path: '/profile', force: true })
+  } catch (e: unknown) {
+    roleError.value =
+      (e as { statusMessage?: string }).statusMessage ?? 'Rollenwechsel fehlgeschlagen.'
+  } finally {
+    roleSwitching.value = false
+  }
+}
+
 const submitPasswordChange = async () => {
   pwError.value = null
   pwSuccess.value = false
@@ -99,6 +119,39 @@ const submitPasswordChange = async () => {
           <dd class="font-semibold">{{ roleLabel(user?.role ?? 'player') }}</dd>
         </div>
       </dl>
+
+      <div
+        v-if="user?.canBeDm && user.role !== 'admin'"
+        class="mt-4 pt-4 border-t border-parchment-700/30 flex items-center gap-3 flex-wrap"
+      >
+        <div class="text-xs uppercase tracking-widest text-ink-300">Rolle wechseln</div>
+        <div class="flex gap-1">
+          <UButton
+            size="sm"
+            :variant="user.role === 'player' ? 'solid' : 'outline'"
+            :color="user.role === 'player' ? 'primary' : 'neutral'"
+            :loading="roleSwitching && user.role !== 'player'"
+            :disabled="user.role === 'player' || roleSwitching"
+            @click="switchRole('player')"
+          >
+            Spieler
+          </UButton>
+          <UButton
+            size="sm"
+            :variant="user.role === 'dm' ? 'solid' : 'outline'"
+            :color="user.role === 'dm' ? 'primary' : 'neutral'"
+            :loading="roleSwitching && user.role !== 'dm'"
+            :disabled="user.role === 'dm' || roleSwitching"
+            @click="switchRole('dm')"
+          >
+            Dungeon Master
+          </UButton>
+        </div>
+        <p class="text-xs text-ink-400 basis-full">
+          Du kannst zwischen Spieler- und DM-Rolle wechseln. Die Rolle gilt sofort für alle Gruppen.
+        </p>
+        <p v-if="roleError" class="text-sm text-red-400 basis-full">{{ roleError }}</p>
+      </div>
     </div>
 
     <div class="parchment-card p-6">

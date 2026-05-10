@@ -19,6 +19,12 @@ export const users = pgTable('users', {
   username: text('username').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   role: text('role').notNull().$type<UserRole>().default('player'),
+  /**
+   * Wenn true, darf der User selbst zwischen Spieler- und DM-Rolle wechseln
+   * (per /api/profile/role). Admin gewaehrt das Flag implizit beim Promoten
+   * zu DM/Admin und entzieht es beim Demoten zu Player.
+   */
+  canBeDm: boolean('can_be_dm').notNull().default(false),
   mustChangePassword: boolean('must_change_password').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

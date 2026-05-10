@@ -34,15 +34,18 @@ export default defineEventHandler(async (event) => {
     })
   }
 
+  // can_be_dm laeuft mit der Rolle: dm/admin -> true, player -> false
+  // (so verliert ein zum Player herabgestufter User die Self-Service-Option).
   const updated = await db
     .update(users)
-    .set({ role: body.role })
+    .set({ role: body.role, canBeDm: body.role !== 'player' })
     .where(eq(users.id, id))
     .returning({
       id: users.id,
       email: users.email,
       username: users.username,
       role: users.role,
+      canBeDm: users.canBeDm,
     })
 
   return { user: updated[0] }

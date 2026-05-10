@@ -263,6 +263,14 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE
   `)
+  // Flag fuer Self-Service-Rollenwechsel: User darf zwischen Player und DM
+  // hin- und herschalten. Admin/DM bekommen das Flag automatisch.
+  await db.execute(sql`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS can_be_dm BOOLEAN NOT NULL DEFAULT FALSE
+  `)
+  await db.execute(sql`
+    UPDATE users SET can_be_dm = TRUE WHERE role IN ('dm', 'admin') AND can_be_dm = FALSE
+  `)
   // App-weite Einstellungen (Key/Value): Bibliotheks-Passwort etc.
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS app_settings (

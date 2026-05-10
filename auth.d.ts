@@ -7,6 +7,7 @@ declare module '#auth-utils' {
     username: string
     role: UserRole
     mustChangePassword: boolean
+    canBeDm: boolean
   }
 
   interface UserSession {

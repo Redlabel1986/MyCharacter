@@ -39,7 +39,13 @@ export default defineEventHandler(async (event) => {
   const passwordHash = await hashUserPassword(body.password)
   const inserted = await db
     .insert(users)
-    .values({ email, username: body.username, passwordHash, role })
+    .values({
+      email,
+      username: body.username,
+      passwordHash,
+      role,
+      canBeDm: role !== 'player',
+    })
     .returning({
       id: users.id,
       email: users.email,
@@ -55,6 +61,7 @@ export default defineEventHandler(async (event) => {
       username: user.username,
       role: user.role,
       mustChangePassword: false,
+      canBeDm: user.role !== 'player',
     },
   })
 
