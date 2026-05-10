@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * Karten-Uebersicht einer Gruppe. Spieler sehen nur die aktive Karte (Auto-
- * Redirect) — der Rest dieser Liste ist DM-only.
+ * Karten-Uebersicht einer Gruppe. Spieler sehen nur freigegebene Karten,
+ * Gruppen-Owner (DM) sieht alle und kann hochladen.
  */
 definePageMeta({ middleware: ['auth'] })
 
@@ -41,6 +41,7 @@ onMounted(() => {
     navigateTo(`/groups/${groupId}/battle/${activeMapId.value}`)
     return
   }
+  // Spieler ohne aktive Karte: regelmaessig pruefen, ob der DM gestartet hat.
   if (!isDm.value) {
     activePoll = setInterval(async () => {
       await refresh()
@@ -243,21 +244,10 @@ const removeMap = async (map: BattleMap) => {
             >
               Aktiv entfernen
             </UButton>
-            <UButton
-              size="xs"
-              variant="outline"
-              :icon="m.visible ? 'i-lucide-eye-off' : 'i-lucide-eye'"
-              @click="toggleVisible(m)"
-            >
+            <UButton size="xs" variant="outline" :icon="m.visible ? 'i-lucide-eye-off' : 'i-lucide-eye'" @click="toggleVisible(m)">
               {{ m.visible ? 'Verstecken' : 'Freigeben' }}
             </UButton>
-            <UButton
-              size="xs"
-              variant="ghost"
-              color="error"
-              icon="i-lucide-trash-2"
-              @click="removeMap(m)"
-            >
+            <UButton size="xs" variant="ghost" color="error" icon="i-lucide-trash-2" @click="removeMap(m)">
               Löschen
             </UButton>
           </div>
