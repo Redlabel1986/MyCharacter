@@ -2,10 +2,11 @@
  * Wurf-Server-Utility — fuehrt regelwerk-spezifische Proben aus und liefert
  * eine `RollPayload`, die in die Group-Chat-Nachricht eingebettet wird.
  *
- * Aktuell implementiert:
- *  - HtbaH (Skill- und Begabungsproben, 1W100)
- *
- * Geplant: D&D 5e (1d20+mod gegen DC), DSA 5 (3W20 gegen Eigenschaften).
+ * Implementiert:
+ *  - HtbaH      (Skill- und Begabungsproben, 1W100)
+ *  - D&D 5e/24  (1W20 + Mod, optional Vorteil/Nachteil + DC)
+ *  - DSA 5      (3W20-Talent-/Zauber-/Liturgie-Probe + Eigenschaftsprobe)
+ *  - Frei       (Generischer NdM±X-Wurf)
  */
 import {
   HTBAH_TALENT_LABELS,
@@ -36,6 +37,14 @@ import type { RollPayload } from '~~/server/database/schema'
 function rand1to100(): number {
   return Math.floor(Math.random() * 100) + 1
 }
+
+function rand1to(n: number): number {
+  return Math.floor(Math.random() * n) + 1
+}
+
+/* ==================================================================== */
+/*  HtbaH                                                                */
+/* ==================================================================== */
 
 export interface HtbahSkillRollInput {
   character: Character
@@ -110,11 +119,10 @@ export function rollHtbahTalent(input: HtbahTalentRollInput): RollPayload {
   }
 }
 
-/**
- * Generischer "freier Wurf" — Spieler kann z.B. 1W20 + Modifier ohne Regel-
- * Auswertung in den Chat posten. Nuetzlich fuer alles, was nicht systemisch
- * abgebildet ist.
- */
+/* ==================================================================== */
+/*  Freier Wurf                                                          */
+/* ==================================================================== */
+
 export interface FreeRollInput {
   diceCount: number
   diceSides: number
@@ -148,10 +156,6 @@ export function rollFree(input: FreeRollInput): RollPayload {
 /* ==================================================================== */
 /*  D&D 5e / 2024                                                        */
 /* ==================================================================== */
-
-function rand1to(n: number): number {
-  return Math.floor(Math.random() * n) + 1
-}
 
 export type DndRollMode = 'normal' | 'advantage' | 'disadvantage'
 
@@ -292,7 +296,7 @@ export function rollDndAbility(input: DndAbilityCheckInput): RollPayload {
 }
 
 /* ==================================================================== */
-/*  DSA 5 — 3W20-Talentprobe                                             */
+/*  DSA 5 — 3W20-Talentprobe + Eigenschafts-Probe                        */
 /* ==================================================================== */
 
 export interface Dsa5SkillRollInput {
@@ -317,18 +321,18 @@ export function rollDsa5Skill(input: Dsa5SkillRollInput): RollPayload {
     probe: [DsaAbility, DsaAbility, DsaAbility]
     fw?: number
     zfw?: number
-    lfw?: number
+    lkw?: number
   }> =
     src === 'skill'
-      ? data.skills as never
+      ? (data.skills as never)
       : src === 'spell'
-        ? data.spells as never
-        : data.liturgies as never
+        ? (data.spells as never)
+        : (data.liturgies as never)
   const t = collection.find((s) => s.id === input.skillId)
   if (!t) {
     throw createError({ statusCode: 404, statusMessage: 'Talent/Zauber/Liturgie nicht gefunden.' })
   }
-  const fw = t.fw ?? t.zfw ?? t.lfw ?? 0
+  const fw = t.fw ?? t.zfw ?? t.lkw ?? 0
   const abilities: [number, number, number] = [
     data.abilities[t.probe[0]],
     data.abilities[t.probe[1]],
@@ -342,9 +346,10 @@ export function rollDsa5Skill(input: Dsa5SkillRollInput): RollPayload {
     modifier: input.modifier ?? 0,
   })
   const probeLabel = `${t.probe[0]}/${t.probe[1]}/${t.probe[2]}`
+  const sourcePrefix = src === 'spell' ? 'Zauber: ' : src === 'liturgy' ? 'Liturgie: ' : ''
   return {
     system: 'dsa5',
-    label: `${t.name} — ${probeLabel} (FW ${fw})`,
+    label: `${sourcePrefix}${t.name} — ${probeLabel} (FW ${fw})`,
     characterId: input.character.id,
     characterName: input.character.name,
     target: fw,

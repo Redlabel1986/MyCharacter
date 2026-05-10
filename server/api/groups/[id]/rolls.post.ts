@@ -10,8 +10,19 @@ import { eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
 import { characters, messages, type RollPayload } from '~~/server/database/schema'
-import { rollFree, rollHtbahSkill, rollHtbahTalent } from '~~/server/utils/dice'
+import {
+  rollDndAbility,
+  rollDndSave,
+  rollDndSkill,
+  rollDsa5Ability,
+  rollDsa5Skill,
+  rollFree,
+  rollHtbahSkill,
+  rollHtbahTalent,
+} from '~~/server/utils/dice'
 import { HTBAH_TALENTS } from '~~/shared/engines/htbah'
+import { DND_ABILITIES } from '~~/shared/engines/dnd'
+import { DSA_ABILITIES } from '~~/shared/engines/dsa5'
 
 const baseSchema = z.object({
   characterId: z.number().int().positive().optional(),
@@ -31,6 +42,45 @@ const htbahTalentSchema = baseSchema.extend({
   talent: z.enum(HTBAH_TALENTS),
 })
 
+const dndRollMode = z.enum(['normal', 'advantage', 'disadvantage']).optional()
+
+const dndSkillSchema = baseSchema.extend({
+  kind: z.literal('dndSkill'),
+  characterId: z.number().int().positive(),
+  skillKey: z.string().min(1),
+  dc: z.number().int().min(1).max(40).optional(),
+  rollMode: dndRollMode,
+})
+
+const dndSaveSchema = baseSchema.extend({
+  kind: z.literal('dndSave'),
+  characterId: z.number().int().positive(),
+  ability: z.enum(DND_ABILITIES),
+  dc: z.number().int().min(1).max(40).optional(),
+  rollMode: dndRollMode,
+})
+
+const dndAbilitySchema = baseSchema.extend({
+  kind: z.literal('dndAbility'),
+  characterId: z.number().int().positive(),
+  ability: z.enum(DND_ABILITIES),
+  dc: z.number().int().min(1).max(40).optional(),
+  rollMode: dndRollMode,
+})
+
+const dsa5SkillSchema = baseSchema.extend({
+  kind: z.literal('dsa5Skill'),
+  characterId: z.number().int().positive(),
+  skillId: z.string().min(1),
+  source: z.enum(['skill', 'spell', 'liturgy']).optional(),
+})
+
+const dsa5AbilitySchema = baseSchema.extend({
+  kind: z.literal('dsa5Ability'),
+  characterId: z.number().int().positive(),
+  ability: z.enum(DSA_ABILITIES),
+})
+
 const freeSchema = baseSchema.extend({
   kind: z.literal('free'),
   diceCount: z.number().int().min(1).max(20),
@@ -39,7 +89,16 @@ const freeSchema = baseSchema.extend({
   system: z.enum(['dnd5e', 'dnd2024', 'dsa5', 'dsa41', 'htbah']),
 })
 
-const bodySchema = z.discriminatedUnion('kind', [htbahSkillSchema, htbahTalentSchema, freeSchema])
+const bodySchema = z.discriminatedUnion('kind', [
+  htbahSkillSchema,
+  htbahTalentSchema,
+  dndSkillSchema,
+  dndSaveSchema,
+  dndAbilitySchema,
+  dsa5SkillSchema,
+  dsa5AbilitySchema,
+  freeSchema,
+])
 
 async function loadCharacterOrThrow(db: ReturnType<typeof useDb>, id: number, userId: number) {
   const [char] = await db.select().from(characters).where(eq(characters.id, id)).limit(1)
@@ -78,6 +137,53 @@ export default defineEventHandler(async (event) => {
     payload = rollHtbahTalent({
       character: char,
       talent: body.talent,
+      modifier: body.modifier,
+      note: body.note,
+    })
+  } else if (body.kind === 'dndSkill') {
+    const char = await loadCharacterOrThrow(db, body.characterId, user.id)
+    payload = rollDndSkill({
+      character: char,
+      skillKey: body.skillKey,
+      modifier: body.modifier,
+      dc: body.dc,
+      rollMode: body.rollMode,
+      note: body.note,
+    })
+  } else if (body.kind === 'dndSave') {
+    const char = await loadCharacterOrThrow(db, body.characterId, user.id)
+    payload = rollDndSave({
+      character: char,
+      ability: body.ability,
+      modifier: body.modifier,
+      dc: body.dc,
+      rollMode: body.rollMode,
+      note: body.note,
+    })
+  } else if (body.kind === 'dndAbility') {
+    const char = await loadCharacterOrThrow(db, body.characterId, user.id)
+    payload = rollDndAbility({
+      character: char,
+      ability: body.ability,
+      modifier: body.modifier,
+      dc: body.dc,
+      rollMode: body.rollMode,
+      note: body.note,
+    })
+  } else if (body.kind === 'dsa5Skill') {
+    const char = await loadCharacterOrThrow(db, body.characterId, user.id)
+    payload = rollDsa5Skill({
+      character: char,
+      skillId: body.skillId,
+      source: body.source,
+      modifier: body.modifier,
+      note: body.note,
+    })
+  } else if (body.kind === 'dsa5Ability') {
+    const char = await loadCharacterOrThrow(db, body.characterId, user.id)
+    payload = rollDsa5Ability({
+      character: char,
+      ability: body.ability,
       modifier: body.modifier,
       note: body.note,
     })

@@ -5,8 +5,9 @@
  * Akzeptiert eine LISTE von Tokens, die dem aktuellen User gehoeren.
  * Bei mehreren Tokens (z.B. der DM mit NPCs / Monstern) erscheinen Tabs zum
  * Wechseln. Pro Token wird gezeigt:
- *   - Charakter-gebunden (HtbaH): Portrait, HP-Editor (sync zum Token),
- *     Skill-/Begabungs-Picker mit Mod, Inventar
+ *   - Charakter-gebunden (HtbaH / D&D 5e+2024 / DSA 5): Portrait, HP-Editor
+ *     (sync zum Token), regelwerk-spezifischer Würfler (Skills, Saves,
+ *     Eigenschafts-/Talent-/Zauber-Proben), Inventar
  *   - NPC ohne Charakter: HP-Editor + ggf. Beschreibungstext
  */
 import {
@@ -17,6 +18,21 @@ import {
   type HtbahCharacterData,
   type HtbahTalent,
 } from '~~/shared/engines/htbah'
+import {
+  DND_ABILITIES,
+  DND_SKILLS,
+  abilityModifier,
+  saveBonus,
+  skillBonus,
+  type DnDAbility,
+  type DnDCharacterData,
+} from '~~/shared/engines/dnd'
+import {
+  DSA_ABILITIES,
+  DSA_ABILITY_LABELS,
+  type Dsa5CharacterData,
+  type DsaAbility,
+} from '~~/shared/engines/dsa5'
 import type { GameSystem } from '~~/shared/systems'
 
 interface Token {
@@ -62,7 +78,6 @@ watch(
       selectedTokenId.value === null ||
       !toks.some((t) => t.id === selectedTokenId.value)
     ) {
-      // Bevorzugt einen mit Charakter-Bindung
       const withChar = toks.find((t) => t.characterId !== null)
       selectedTokenId.value = (withChar ?? toks[0]!).id
     }
@@ -113,8 +128,19 @@ watch(
 )
 
 const isHtbah = computed(() => character.value?.system === 'htbah')
+const isDnd = computed(
+  () => character.value?.system === 'dnd5e' || character.value?.system === 'dnd2024',
+)
+const isDsa5 = computed(() => character.value?.system === 'dsa5')
+
 const htbahData = computed<HtbahCharacterData | null>(() =>
   isHtbah.value && character.value ? (character.value.data as HtbahCharacterData) : null,
+)
+const dndData = computed<DnDCharacterData | null>(() =>
+  isDnd.value && character.value ? (character.value.data as DnDCharacterData) : null,
+)
+const dsa5Data = computed<Dsa5CharacterData | null>(() =>
+  isDsa5.value && character.value ? (character.value.data as Dsa5CharacterData) : null,
 )
 
 // — HP-Editor (immer aus aktiveem Token)
@@ -162,41 +188,137 @@ const saveHp = async () => {
   }
 }
 
-// HtbaH: Skill/Begabung-Picker
-interface RollTarget { type: 'skill' | 'talent'; id: string; label: string; value: number }
+// System-spezifische Wurf-Optionen.
+type RollKind =
+  | 'htbahSkill'
+  | 'htbahTalent'
+  | 'dndSkill'
+  | 'dndSave'
+  | 'dndAbility'
+  | 'dsa5Skill'
+  | 'dsa5Ability'
+
+interface RollTarget {
+  kind: RollKind
+  id: string
+  label: string
+  value: number | string
+  source?: 'skill' | 'spell' | 'liturgy'
+}
+
 const rollOptions = computed<RollTarget[]>(() => {
-  const data = htbahData.value
-  if (!data) return []
-  const items: RollTarget[] = []
-  for (const t of HTBAH_TALENTS) {
-    items.push({
-      type: 'talent',
-      id: t,
-      label: `${HTBAH_TALENT_LABELS[t]} (Begabung)`,
-      value: htbahTalentValue(data, t),
-    })
+  if (htbahData.value) {
+    const data = htbahData.value
+    const items: RollTarget[] = []
+    for (const t of HTBAH_TALENTS) {
+      items.push({
+        kind: 'htbahTalent',
+        id: t,
+        label: `${HTBAH_TALENT_LABELS[t]} (Begabung)`,
+        value: htbahTalentValue(data, t),
+      })
+    }
+    for (const s of data.skills) {
+      if (!s.name?.trim()) continue
+      items.push({
+        kind: 'htbahSkill',
+        id: s.id,
+        label: `${s.name} — ${HTBAH_TALENT_LABELS[s.talent]}`,
+        value: htbahSkillTotal(data, s),
+      })
+    }
+    return items
   }
-  for (const s of data.skills) {
-    if (!s.name?.trim()) continue
-    items.push({
-      type: 'skill',
-      id: s.id,
-      label: `${s.name} — ${HTBAH_TALENT_LABELS[s.talent]}`,
-      value: htbahSkillTotal(data, s),
-    })
+  if (dndData.value) {
+    const data = dndData.value
+    const items: RollTarget[] = []
+    for (const a of DND_ABILITIES) {
+      const m = abilityModifier(data.abilities[a].score)
+      items.push({
+        kind: 'dndAbility',
+        id: a,
+        label: `${a}-Probe`,
+        value: m >= 0 ? `+${m}` : `${m}`,
+      })
+    }
+    for (const a of DND_ABILITIES) {
+      const m = saveBonus(data, a)
+      items.push({
+        kind: 'dndSave',
+        id: a,
+        label: `${a}-Rettungswurf`,
+        value: m >= 0 ? `+${m}` : `${m}`,
+      })
+    }
+    for (const s of DND_SKILLS) {
+      const m = skillBonus(data, s.key).value
+      items.push({
+        kind: 'dndSkill',
+        id: s.key,
+        label: `${s.label} (${s.ability})`,
+        value: m >= 0 ? `+${m}` : `${m}`,
+      })
+    }
+    return items
   }
-  return items
+  if (dsa5Data.value) {
+    const data = dsa5Data.value
+    const items: RollTarget[] = []
+    for (const a of DSA_ABILITIES) {
+      items.push({
+        kind: 'dsa5Ability',
+        id: a,
+        label: `${DSA_ABILITY_LABELS[a]} (Eigenschaft)`,
+        value: data.abilities[a],
+      })
+    }
+    for (const s of data.skills) {
+      if (!s.name?.trim()) continue
+      items.push({
+        kind: 'dsa5Skill',
+        id: s.id,
+        source: 'skill',
+        label: `${s.name} (${s.probe.join('/')})`,
+        value: `FW ${s.fw ?? 0}`,
+      })
+    }
+    for (const s of data.spells) {
+      if (!s.name?.trim()) continue
+      items.push({
+        kind: 'dsa5Skill',
+        id: s.id,
+        source: 'spell',
+        label: `Zauber: ${s.name} (${s.probe.join('/')})`,
+        value: `ZfW ${s.zfw ?? 0}`,
+      })
+    }
+    for (const s of data.liturgies) {
+      if (!s.name?.trim()) continue
+      items.push({
+        kind: 'dsa5Skill',
+        id: s.id,
+        source: 'liturgy',
+        label: `Liturgie: ${s.name} (${s.probe.join('/')})`,
+        value: `LkW ${s.lkw ?? 0}`,
+      })
+    }
+    return items
+  }
+  return []
 })
 
-// Auswahl + Notiz pro aktivem Token in localStorage merken
 const pickedRollId = ref<string>('')
 const rollMod = ref<number>(0)
 const rollNote = ref<string>('')
+const rollDc = ref<number | null>(null)
+const rollMode = ref<'normal' | 'advantage' | 'disadvantage'>('normal')
+
 watch(activeToken, () => {
-  // Frische Picks pro Token-Wechsel
   pickedRollId.value = ''
   rollMod.value = 0
   rollNote.value = ''
+  rollDc.value = null
+  rollMode.value = 'normal'
 })
 
 const rollSending = ref(false)
@@ -204,7 +326,8 @@ const rollError = ref<string | null>(null)
 const rollSuccess = ref(false)
 
 const pickedRollOption = computed(() =>
-  rollOptions.value.find((o) => `${o.type}:${o.id}` === pickedRollId.value) ?? null,
+  rollOptions.value.find((o) => `${o.kind}:${o.id}:${o.source ?? ''}` === pickedRollId.value)
+    ?? null,
 )
 
 const rollIt = async () => {
@@ -214,22 +337,72 @@ const rollIt = async () => {
   rollSuccess.value = false
   try {
     const opt = pickedRollOption.value
-    const body =
-      opt.type === 'skill'
-        ? {
-            kind: 'htbahSkill' as const,
-            characterId: character.value.id,
-            skillId: opt.id,
-            modifier: rollMod.value || undefined,
-            note: rollNote.value.trim() || undefined,
-          }
-        : {
-            kind: 'htbahTalent' as const,
-            characterId: character.value.id,
-            talent: opt.id as HtbahTalent,
-            modifier: rollMod.value || undefined,
-            note: rollNote.value.trim() || undefined,
-          }
+    const characterId = character.value.id
+    const modifier = rollMod.value || undefined
+    const note = rollNote.value.trim() || undefined
+    const dc = rollDc.value || undefined
+    const mode = rollMode.value
+    let body: Record<string, unknown>
+    switch (opt.kind) {
+      case 'htbahSkill':
+        body = { kind: 'htbahSkill', characterId, skillId: opt.id, modifier, note }
+        break
+      case 'htbahTalent':
+        body = { kind: 'htbahTalent', characterId, talent: opt.id as HtbahTalent, modifier, note }
+        break
+      case 'dndSkill':
+        body = {
+          kind: 'dndSkill',
+          characterId,
+          skillKey: opt.id,
+          modifier,
+          dc,
+          rollMode: mode === 'normal' ? undefined : mode,
+          note,
+        }
+        break
+      case 'dndSave':
+        body = {
+          kind: 'dndSave',
+          characterId,
+          ability: opt.id as DnDAbility,
+          modifier,
+          dc,
+          rollMode: mode === 'normal' ? undefined : mode,
+          note,
+        }
+        break
+      case 'dndAbility':
+        body = {
+          kind: 'dndAbility',
+          characterId,
+          ability: opt.id as DnDAbility,
+          modifier,
+          dc,
+          rollMode: mode === 'normal' ? undefined : mode,
+          note,
+        }
+        break
+      case 'dsa5Skill':
+        body = {
+          kind: 'dsa5Skill',
+          characterId,
+          skillId: opt.id,
+          source: opt.source ?? 'skill',
+          modifier,
+          note,
+        }
+        break
+      case 'dsa5Ability':
+        body = {
+          kind: 'dsa5Ability',
+          characterId,
+          ability: opt.id as DsaAbility,
+          modifier,
+          note,
+        }
+        break
+    }
     await $fetch(`/api/groups/${props.groupId}/rolls`, { method: 'POST', body })
     rollSuccess.value = true
     rollNote.value = ''
@@ -242,10 +415,22 @@ const rollIt = async () => {
   }
 }
 
-const inventoryOpen = ref(false)
-const inventoryText = computed(() => htbahData.value?.inventory ?? '')
+const supportsRoller = computed(() => isHtbah.value || isDnd.value || isDsa5.value)
+const rollPanelTitle = computed(() => {
+  if (isHtbah.value) return 'Probe würfeln (HtbaH)'
+  if (isDnd.value) return 'Probe würfeln (D&D)'
+  if (isDsa5.value) return 'Probe würfeln (DSA 5)'
+  return 'Probe würfeln'
+})
 
-// HP-Bar Computed
+const inventoryOpen = ref(false)
+const inventoryText = computed(() => {
+  if (htbahData.value) return htbahData.value.inventory ?? ''
+  if (dndData.value) return dndData.value.equipment ?? ''
+  if (dsa5Data.value) return dsa5Data.value.inventory ?? ''
+  return ''
+})
+
 const hpPercent = computed(() => {
   const t = activeToken.value
   if (!t || !t.hpMax) return 0
@@ -260,9 +445,6 @@ const hpColor = computed(() => {
   return '#7f1d1d'
 })
 
-// Tab-Bild: bevorzugt Token-Bild, sonst Char-Portrait via /api/portrait, sonst null.
-// Tokens, deren Bild bereits einmal gefehlt hat, merken wir uns lokal — dann
-// zeigen wir nur noch das Icon und blasen die Konsole nicht mit 404ern voll.
 const failedImageTokenIds = ref(new Set<number>())
 const tabImage = (t: Token): string | null => {
   if (failedImageTokenIds.value.has(t.id)) return null
@@ -394,24 +576,50 @@ const onImageError = (tokenId: number) => {
         </UButton>
       </div>
 
-      <!-- Skill-/Begabungs-Würfler (nur fuer charakter-gebundene HtbaH-Token) -->
-      <div v-if="isHtbah" class="space-y-2">
-        <div class="text-[10px] uppercase tracking-widest text-ink-300">Probe würfeln</div>
-        <UFormField label="Fähigkeit/Begabung">
+      <!-- Skill-/Begabungs-Würfler (HtbaH, D&D 5e/2024, DSA 5) -->
+      <div v-if="supportsRoller" class="space-y-2">
+        <div class="text-[10px] uppercase tracking-widest text-ink-300">{{ rollPanelTitle }}</div>
+        <UFormField label="Probe">
           <USelect
             v-model="pickedRollId"
-            :items="rollOptions.map((o) => ({ label: `${o.label} (${o.value})`, value: `${o.type}:${o.id}` }))"
+            :items="rollOptions.map((o) => ({ label: `${o.label} (${o.value})`, value: `${o.kind}:${o.id}:${o.source ?? ''}` }))"
             value-key="value"
-            placeholder="— Fähigkeit oder Begabung wählen —"
+            placeholder="— Probe wählen —"
             size="sm"
             class="w-full"
           />
         </UFormField>
-        <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
-          <UFormField label="Mod ±" class="sm:col-span-2" help="z.B. -10 Erschwernis">
+        <div v-if="isDnd" class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+          <UFormField label="Modus" class="sm:col-span-4">
+            <USelect
+              v-model="rollMode"
+              :items="[
+                { label: 'Normal', value: 'normal' },
+                { label: 'Vorteil', value: 'advantage' },
+                { label: 'Nachteil', value: 'disadvantage' },
+              ]"
+              value-key="value"
+              size="sm"
+            />
+          </UFormField>
+          <UFormField label="DC (optional)" class="sm:col-span-4">
+            <UInput v-model.number="rollDc" type="number" size="sm" placeholder="z.B. 15" />
+          </UFormField>
+          <UFormField label="Mod ±" class="sm:col-span-4">
+            <UInput v-model.number="rollMod" type="number" size="sm" />
+          </UFormField>
+        </div>
+        <div v-else class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+          <UFormField
+            label="Mod ±"
+            class="sm:col-span-12"
+            :help="isDsa5 ? 'Erleichterung (+) / Erschwernis (−) auf jede Eigenschaft' : 'z.B. −10 Erschwernis'"
+          >
             <UInput v-model.number="rollMod" type="number" size="sm" class="w-full" />
           </UFormField>
-          <UFormField label="Notiz (optional)" class="sm:col-span-7">
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+          <UFormField label="Notiz (optional)" class="sm:col-span-9">
             <UInput
               v-model="rollNote"
               placeholder="z.B. „klettert hoch“ oder „mit Anlauf“"
@@ -437,7 +645,7 @@ const onImageError = (tokenId: number) => {
         <p v-if="rollSuccess" class="text-xs text-emerald-700">✓ Wurf in Gruppen-Chat gepostet</p>
       </div>
       <div v-else-if="character" class="text-xs text-ink-300 italic">
-        Skill-Würfler ist aktuell nur für „How to be a Hero" eingebaut — der volle Bogen unten zeigt alle Werte.
+        Für dieses Regelwerk ist (noch) kein Würfler eingebaut — der volle Bogen unten zeigt alle Werte.
       </div>
 
       <!-- Klappbares Inventar / Beschreibung -->
