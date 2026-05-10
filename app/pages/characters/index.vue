@@ -16,10 +16,8 @@ const { data, refresh, pending } = await useFetch<{ characters: CharacterListIte
   { default: () => ({ characters: [] }) },
 )
 
-const formatDate = (iso: string) => {
-  const d = new Date(iso.replace(' ', 'T') + 'Z')
-  return d.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
-}
+const formatDate = (iso: string) =>
+  new Date(iso).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
 
 const remove = async (id: number, name: string) => {
   if (!confirm(`Charakter "${name}" wirklich löschen?`)) return
