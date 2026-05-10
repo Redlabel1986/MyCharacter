@@ -358,7 +358,71 @@ watch(selectedTokenId, () => {
   rollNote.value = ''
   rollDc.value = null
   rollMode.value = 'normal'
+  damageFormula.value = ''
+  damageLabel.value = 'Schaden'
 })
+
+// --- Schaden-Wuerfler (freier NdM+X-Wurf, fuer Charakter- und NPC-Tokens) ---
+const damageFormula = ref<string>('')
+const damageLabel = ref<string>('Schaden')
+const damageSending = ref(false)
+const damageError = ref<string | null>(null)
+const damageSuccess = ref(false)
+
+const damageParsed = computed<{ count: number; sides: number; mod: number } | null>(() => {
+  const m = damageFormula.value.trim().match(/^(\d+)\s*[dwDW]\s*(\d+)\s*([+-]\s*\d+)?$/)
+  if (!m) return null
+  const count = parseInt(m[1]!, 10)
+  const sides = parseInt(m[2]!, 10)
+  const mod = m[3] ? parseInt(m[3].replace(/\s+/g, ''), 10) : 0
+  if (count < 1 || count > 20) return null
+  if (sides < 2 || sides > 1000) return null
+  return { count, sides, mod }
+})
+
+const damagePreview = computed(() => {
+  const p = damageParsed.value
+  if (!p) return ''
+  const sign = p.mod > 0 ? `+${p.mod}` : p.mod < 0 ? `${p.mod}` : ''
+  return `${p.count}d${p.sides}${sign}`
+})
+
+const rollDamage = async () => {
+  const parsed = damageParsed.value
+  if (!parsed || !activeToken.value) return
+  damageSending.value = true
+  damageError.value = null
+  damageSuccess.value = false
+  try {
+    const npcSys = activeToken.value.system
+    const sys: 'dnd5e' | 'dnd2024' | 'dsa5' | 'dsa41' | 'htbah' =
+      character.value?.system as 'dnd5e' | 'dnd2024' | 'dsa5' | 'dsa41' | 'htbah'
+      ?? (npcSys === 'dnd' ? 'dnd5e' : npcSys === 'dsa5' ? 'dsa5' : 'htbah')
+    const labelBase = damageLabel.value.trim() || 'Schaden'
+    // Bei NPC-Token (kein Charakter) den Token-Namen mit ins Label, damit er
+    // im Chat erkennbar bleibt — sonst nimmt rollFree nur die character-Daten.
+    const label = character.value ? labelBase : `${activeToken.value.name}: ${labelBase}`
+    await $fetch(`/api/groups/${props.groupId}/rolls`, {
+      method: 'POST',
+      body: {
+        kind: 'free',
+        diceCount: parsed.count,
+        diceSides: parsed.sides,
+        modifier: parsed.mod || undefined,
+        label,
+        system: sys,
+        characterId: character.value?.id,
+      },
+    })
+    damageSuccess.value = true
+    damageFormula.value = ''
+    setTimeout(() => (damageSuccess.value = false), 2200)
+  } catch (e: unknown) {
+    damageError.value = (e as { statusMessage?: string }).statusMessage ?? 'Wurf fehlgeschlagen.'
+  } finally {
+    damageSending.value = false
+  }
+}
 
 const rollSending = ref(false)
 const rollError = ref<string | null>(null)
@@ -713,6 +777,50 @@ const onImageError = (tokenId: number) => {
       </div>
       <div v-else-if="character" class="text-xs text-ink-300 italic">
         Für dieses Regelwerk ist (noch) kein Würfler eingebaut — der volle Bogen unten zeigt alle Werte.
+      </div>
+
+      <!-- Schaden-Wuerfler: freier NdM+X-Wurf, fuer Charakter- und NPC-Tokens. -->
+      <div class="space-y-2 border-t border-parchment-700/30 pt-3">
+        <div class="text-[10px] uppercase tracking-widest text-ink-300">Schaden würfeln</div>
+        <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+          <UFormField label="Würfel" class="sm:col-span-4" help="z.B. 2d6, 4w8+3, 1d20−1">
+            <UInput
+              v-model="damageFormula"
+              placeholder="2d6+3"
+              size="sm"
+              @keydown.enter="rollDamage"
+            />
+          </UFormField>
+          <UFormField label="Bezeichnung" class="sm:col-span-4">
+            <UInput v-model="damageLabel" placeholder="Schaden" size="sm" :maxlength="60" />
+          </UFormField>
+          <UButton
+            color="primary"
+            icon="i-lucide-swords"
+            :disabled="!damageParsed || damageSending"
+            :loading="damageSending"
+            class="sm:col-span-4 roll-cta"
+            size="lg"
+            block
+            @click="rollDamage"
+          >
+            Würfeln
+          </UButton>
+        </div>
+        <p
+          v-if="damageFormula && !damageParsed"
+          class="text-xs text-amber-700"
+        >
+          Format: NdM±X — z.B. <code>2d6+3</code>, <code>1w20</code>, <code>4d10−2</code>
+        </p>
+        <p
+          v-else-if="damageParsed"
+          class="text-[11px] text-ink-300 italic"
+        >
+          Wirft <code class="font-semibold">{{ damagePreview }}</code> in den Gruppen-Chat.
+        </p>
+        <p v-if="damageError" class="text-xs text-red-700">{{ damageError }}</p>
+        <p v-if="damageSuccess" class="text-xs text-emerald-700">✓ Schaden in Gruppen-Chat gepostet</p>
       </div>
 
       <!-- Klappbares Inventar / Beschreibung -->

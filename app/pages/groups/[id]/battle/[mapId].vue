@@ -586,17 +586,23 @@ const settingsDraft = ref({
   gridColor: 'rgba(0,0,0,0.35)',
   visible: true,
 })
-watchEffect(() => {
-  if (map.value) {
+// Settings nur beim echten Karten-Wechsel aus dem Server-Snapshot uebernehmen,
+// nicht bei jedem 2s-Poll — sonst klobbert der Poll Eingaben mitten im Tippen.
+watch(
+  () => map.value?.id ?? null,
+  (id) => {
+    const m = map.value
+    if (id === null || !m) return
     settingsDraft.value = {
-      name: map.value.name,
-      gridType: map.value.gridType,
-      gridSize: map.value.gridSize,
-      gridColor: map.value.gridColor,
-      visible: map.value.visible,
+      name: m.name,
+      gridType: m.gridType,
+      gridSize: m.gridSize,
+      gridColor: m.gridColor,
+      visible: m.visible,
     }
-  }
-})
+  },
+  { immediate: true },
+)
 const savingSettings = ref(false)
 const saveSettings = async () => {
   if (!map.value) return
