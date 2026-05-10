@@ -1,10 +1,17 @@
 /**
- * POST /api/groups/:id/audio/tracks/upload — Audiodatei hochladen (DM only).
- * Multipart: file, name, kind ('music'|'sfx').
- * Speichert in Vercel Blob, provider = 'upload'.
+ * POST /api/groups/:id/audio/tracks/upload — Audio-Upload via Vercel-Blob-Client.
+ *
+ * Vercel-Serverless-Functions haben ein hartes 4.5-MB-Body-Limit; deshalb läuft
+ * der Upload direkt vom Browser in den Blob-Store. Dieser Endpoint dient nur
+ * zwei Zwecken:
+ *   1. Token ausstellen (onBeforeGenerateToken) — hier prüfen wir Auth + Owner
+ *      und schreiben groupId/name/kind in den tokenPayload.
+ *   2. DB-Insert nach erfolgreichem Upload (onUploadCompleted, Webhook von
+ *      Vercel-Blob-Servern). Hinweis: Auf localhost ist der Webhook nicht
+ *      erreichbar; lokal funktioniert der Client-Upload daher nur mit Tunnel
+ *      (z. B. ngrok).
  */
-import { put } from '@vercel/blob'
-import { randomBytes } from 'node:crypto'
+import { handleUpload, type HandleUploadBody } from '@vercel/blob/client'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupOwner } from '~~/server/utils/group-access'
 import { battleAudioTracks } from '~~/server/database/schema'
@@ -16,18 +23,17 @@ const ALLOWED_TYPES = [
 ]
 const MAX_BYTES = 20 * 1024 * 1024 // 20 MB pro Track
 
-function pickStr(form: { name?: string; data: Buffer }[] | undefined, key: string): string {
-  return form?.find((p) => p.name === key)?.data.toString().trim() ?? ''
+interface AudioTokenPayload {
+  groupId: number
+  name: string
+  kind: 'music' | 'sfx'
 }
 
 export default defineEventHandler(async (event) => {
-  const { user } = await requireUserSession(event)
   const groupId = Number(getRouterParam(event, 'id'))
   if (!Number.isFinite(groupId)) {
     throw createError({ statusCode: 400, statusMessage: 'Ungültige Gruppen-ID.' })
   }
-  const db = useDb()
-  await requireGroupOwner(db, groupId, user.id)
 
   const token = process.env.BLOB_READ_WRITE_TOKEN
   if (!token) {
@@ -37,38 +43,54 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  const form = await readMultipartFormData(event)
-  const file = form?.find((p) => p.name === 'file')
-  const name = pickStr(form, 'name') || 'Track'
-  const kindRaw = pickStr(form, 'kind')
-  const kind: 'music' | 'sfx' = kindRaw === 'sfx' ? 'sfx' : 'music'
+  const body = (await readBody(event)) as HandleUploadBody
 
-  if (!file?.data || !file.filename) {
-    throw createError({ statusCode: 400, statusMessage: 'Keine Audiodatei übermittelt.' })
-  }
-  if (!ALLOWED_TYPES.includes(file.type ?? '')) {
-    throw createError({ statusCode: 400, statusMessage: 'Nur MP3/OGG/WAV/M4A erlaubt.' })
-  }
-  if (file.data.byteLength > MAX_BYTES) {
-    throw createError({ statusCode: 413, statusMessage: 'Datei ist größer als 20 MB.' })
-  }
-
-  const ext = file.filename.split('.').pop()?.toLowerCase() ?? 'mp3'
-  const filename = `${randomBytes(8).toString('hex')}.${ext}`
-  const blobPath = `audio/${groupId}/${filename}`
-
-  const blob = await put(blobPath, file.data, {
-    access: 'private',
-    contentType: file.type,
+  return await handleUpload({
+    body,
+    request: event.node.req,
     token,
-    addRandomSuffix: false,
-    allowOverwrite: true,
+    onBeforeGenerateToken: async (pathname, clientPayload) => {
+      // Auth + Owner-Check laufen nur auf dem Browser-Call (Cookies vorhanden);
+      // der Upload-Completed-Webhook von Vercel hat keinen User-Context.
+      const { user } = await requireUserSession(event)
+      const db = useDb()
+      await requireGroupOwner(db, groupId, user.id)
+
+      // Pfad muss zur Gruppe passen — verhindert Cross-Group-Writes.
+      if (!pathname.startsWith(`audio/${groupId}/`)) {
+        throw createError({ statusCode: 400, statusMessage: 'Ungültiger Upload-Pfad.' })
+      }
+
+      let parsed: { name?: unknown; kind?: unknown } = {}
+      try {
+        parsed = clientPayload ? JSON.parse(clientPayload) : {}
+      } catch {
+        parsed = {}
+      }
+      const name =
+        (typeof parsed.name === 'string' ? parsed.name.trim() : '') || 'Track'
+      const kind: 'music' | 'sfx' = parsed.kind === 'sfx' ? 'sfx' : 'music'
+
+      const tokenPayload: AudioTokenPayload = { groupId, name, kind }
+      return {
+        allowedContentTypes: ALLOWED_TYPES,
+        maximumSizeInBytes: MAX_BYTES,
+        addRandomSuffix: false,
+        allowOverwrite: true,
+        tokenPayload: JSON.stringify(tokenPayload),
+      }
+    },
+    onUploadCompleted: async ({ blob, tokenPayload }) => {
+      if (!tokenPayload) return
+      const meta = JSON.parse(tokenPayload) as AudioTokenPayload
+      const db = useDb()
+      await db.insert(battleAudioTracks).values({
+        groupId: meta.groupId,
+        name: meta.name,
+        kind: meta.kind,
+        provider: 'upload',
+        audioUrl: blob.url,
+      })
+    },
   })
-
-  const [inserted] = await db
-    .insert(battleAudioTracks)
-    .values({ groupId, name, kind, provider: 'upload', audioUrl: blob.url })
-    .returning()
-
-  return { track: inserted }
 })

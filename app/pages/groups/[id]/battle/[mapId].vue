@@ -954,21 +954,33 @@ const onAudioUploadFile = (e: Event) => {
   }
 }
 const uploadAudio = async () => {
-  if (!audioUploadFile.value) return
+  const file = audioUploadFile.value
+  if (!file) return
   audioUploading.value = true
   audioUploadError.value = null
   try {
-    const fd = new FormData()
-    fd.append('file', audioUploadFile.value)
-    fd.append('name', audioUploadName.value || 'Track')
-    fd.append('kind', audioUploadKind.value)
-    await $fetch(`/api/groups/${groupId}/audio/tracks/upload`, { method: 'POST', body: fd })
+    // Direkt-Upload zum Vercel-Blob-Store, um das 4.5-MB-Limit der
+    // Serverless-Function zu umgehen. Pfad-Prefix `audio/<groupId>/` wird
+    // serverseitig im handleUpload-Endpoint erzwungen.
+    const { upload } = await import('@vercel/blob/client')
+    const ext = file.name.split('.').pop()?.toLowerCase() || 'mp3'
+    const rand = (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/-/g, '')
+    const pathname = `audio/${groupId}/${rand}.${ext}`
+    await upload(pathname, file, {
+      access: 'private',
+      handleUploadUrl: `/api/groups/${groupId}/audio/tracks/upload`,
+      contentType: file.type || undefined,
+      clientPayload: JSON.stringify({
+        name: audioUploadName.value || 'Track',
+        kind: audioUploadKind.value,
+      }),
+    })
     audioUploadFile.value = null
     audioUploadName.value = ''
     await fetchAudioTracks()
   } catch (e: unknown) {
-    audioUploadError.value =
-      (e as { statusMessage?: string }).statusMessage ?? 'Upload fehlgeschlagen.'
+    const err = e as { statusMessage?: string; message?: string }
+    audioUploadError.value = err.statusMessage ?? err.message ?? 'Upload fehlgeschlagen.'
   } finally {
     audioUploading.value = false
   }
