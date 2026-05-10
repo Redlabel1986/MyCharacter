@@ -146,16 +146,38 @@ const dsa5Data = computed<Dsa5CharacterData | null>(() =>
   isDsa5.value && character.value ? (character.value.data as Dsa5CharacterData) : null,
 )
 
-// — HP-Editor (immer aus aktiveem Token)
+// — HP-Editor: liest vom aktiven Token, ueberschreibt Eingaben aber NICHT
+// bei jedem 2s-Poll. Wir tracken den letzten Server-Stand pro Token; nur
+// wenn der Draft genau diesem alten Server-Stand entsprach (also der User
+// nichts getippt hat), uebernehmen wir den neuen Server-Wert.
 const hpDraft = ref<number | null>(null)
 const hpMaxDraft = ref<number | null>(null)
+let lastServerHp: number | null = null
+let lastServerHpMax: number | null = null
+
+// Tab-Wechsel: harte Sync — neuer Token, neuer Stand.
 watch(
-  activeToken,
-  (t) => {
+  selectedTokenId,
+  () => {
+    const t = activeToken.value
     hpDraft.value = t?.hp ?? null
     hpMaxDraft.value = t?.hpMax ?? null
+    lastServerHp = t?.hp ?? null
+    lastServerHpMax = t?.hpMax ?? null
   },
-  { immediate: true, deep: true },
+  { immediate: true },
+)
+
+// Server-Update bei selbem Token (z.B. anderer Spieler heilt mich) —
+// nur uebernehmen, wenn der User nichts getippt hat.
+watch(
+  () => [activeToken.value?.hp ?? null, activeToken.value?.hpMax ?? null] as const,
+  ([hp, hpMax]) => {
+    if (hpDraft.value === lastServerHp) hpDraft.value = hp
+    if (hpMaxDraft.value === lastServerHpMax) hpMaxDraft.value = hpMax
+    lastServerHp = hp
+    lastServerHpMax = hpMax
+  },
 )
 const hpDirty = computed(
   () =>

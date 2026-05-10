@@ -123,6 +123,12 @@ export default defineEventHandler(async (event) => {
   const npcSystem = allowNpcStat ? body.system ?? null : null
   const npcAbilities = allowNpcStat ? body.npcAbilities ?? [] : []
 
+  // Fuer Charakter-Tokens speichern wir keine HP an der Token-Spalte —
+  // HP wohnt am Charakter (data-JSONB), damit ein Karten-Wechsel keinen
+  // HP-Reset bedeutet. NPC-Tokens behalten ihre eigenen HP-Spalten.
+  const tokenHp = body.characterId ? null : body.hp ?? null
+  const tokenHpMax = body.characterId ? null : body.hpMax ?? null
+
   const [inserted] = await db
     .insert(battleTokens)
     .values({
@@ -135,8 +141,8 @@ export default defineEventHandler(async (event) => {
       y: Math.round(body.y),
       sizeMultiplier: body.sizeMultiplier,
       hidden: body.hidden,
-      hp: body.hp,
-      hpMax: body.hpMax,
+      hp: tokenHp,
+      hpMax: tokenHpMax,
       statusText: body.statusText ?? '',
       description: body.description ?? '',
       system: npcSystem,

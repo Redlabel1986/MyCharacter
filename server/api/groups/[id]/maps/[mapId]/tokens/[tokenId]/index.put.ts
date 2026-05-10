@@ -8,8 +8,9 @@ import { z } from 'zod'
 import { and, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
-import { battleMaps, battleTokens, groups } from '~~/server/database/schema'
+import { battleMaps, battleTokens, characters, groups } from '~~/server/database/schema'
 import { DSA_ABILITIES } from '~~/shared/engines/dsa5'
+import { readCharacterHp, writeCharacterHp, type CharSystem } from '~~/shared/character-hp'
 
 const npcAbilityHtbahSchema = z.object({
   id: z.string().min(1).max(40),
@@ -124,11 +125,50 @@ export default defineEventHandler(async (event) => {
   if (typeof body.x === 'number') patch.x = Math.round(body.x)
   if (typeof body.y === 'number') patch.y = Math.round(body.y)
 
+  // HP fuer Charakter-Tokens an den Charakter durchschreiben — Token-Spalten
+  // bleiben fuer NPC-Tokens authoritativ.
+  const hasHpPatch = body.hp !== undefined || body.hpMax !== undefined
+  if (tok.characterId !== null && hasHpPatch) {
+    const [char] = await db
+      .select({ id: characters.id, system: characters.system, data: characters.data })
+      .from(characters)
+      .where(eq(characters.id, tok.characterId))
+      .limit(1)
+    if (char) {
+      const nextData = writeCharacterHp(char.system as CharSystem, char.data, {
+        current: body.hp,
+        max: body.hpMax,
+      })
+      await db
+        .update(characters)
+        .set({ data: nextData, updatedAt: new Date() })
+        .where(eq(characters.id, tok.characterId))
+      // Token-eigene Spalten fuer Charakter-Tokens nicht persistieren — der
+      // GET-Endpoint liest immer vom Charakter und wuerde Token-HP eh ueberschreiben.
+      delete patch.hp
+      delete patch.hpMax
+    }
+  }
+
   const [updated] = await db
     .update(battleTokens)
     .set(patch)
     .where(eq(battleTokens.id, tokenId))
     .returning()
+
+  // Wenn HP an den Charakter geschrieben wurde, im Response die effektiven Werte
+  // liefern, damit der Client sofort den richtigen Stand sieht.
+  if (tok.characterId !== null && hasHpPatch) {
+    const [char] = await db
+      .select({ system: characters.system, data: characters.data })
+      .from(characters)
+      .where(eq(characters.id, tok.characterId))
+      .limit(1)
+    if (char) {
+      const hp = readCharacterHp(char.system as CharSystem, char.data)
+      return { token: { ...updated, hp: hp.current, hpMax: hp.max } }
+    }
+  }
 
   return { token: updated }
 })

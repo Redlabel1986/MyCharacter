@@ -2,7 +2,7 @@
  * GET /api/groups/:id/maps/:mapId — eine Map mit allen Token (gefiltert
  * nach Sichtbarkeit fuer Spieler).
  */
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
 import {
@@ -10,9 +10,11 @@ import {
   battleMaps,
   battlePings,
   battleTokens,
+  characters,
   groups,
 } from '~~/server/database/schema'
 import { gt } from 'drizzle-orm'
+import { readCharacterHp, type CharSystem } from '~~/shared/character-hp'
 
 export default defineEventHandler(async (event) => {
   const { user } = await requireUserSession(event)
@@ -47,7 +49,29 @@ export default defineEventHandler(async (event) => {
     .orderBy(asc(battleTokens.id))
 
   // Versteckte Token sieht nur DM
-  const tokens = isDm ? tokensRaw : tokensRaw.filter((t) => !t.hidden)
+  const visibleTokens = isDm ? tokensRaw : tokensRaw.filter((t) => !t.hidden)
+
+  // HP fuer Charakter-gebundene Tokens kommt vom Charakter (data-JSONB),
+  // damit ein Karten-Wechsel keinen HP-Reset bedeutet. Token-eigene
+  // hp/hp_max-Spalten bleiben nur fuer NPC-Tokens authoritativ.
+  const charIds = Array.from(
+    new Set(visibleTokens.map((t) => t.characterId).filter((x): x is number => x !== null)),
+  )
+  const charsById = new Map<number, { system: CharSystem; data: unknown }>()
+  if (charIds.length) {
+    const chars = await db
+      .select({ id: characters.id, system: characters.system, data: characters.data })
+      .from(characters)
+      .where(inArray(characters.id, charIds))
+    for (const c of chars) charsById.set(c.id, { system: c.system as CharSystem, data: c.data })
+  }
+  const tokens = visibleTokens.map((t) => {
+    if (t.characterId === null) return t
+    const c = charsById.get(t.characterId)
+    if (!c) return t
+    const hp = readCharacterHp(c.system, c.data)
+    return { ...t, hp: hp.current, hpMax: hp.max }
+  })
 
   const drawings = await db
     .select()
