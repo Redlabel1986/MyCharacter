@@ -1392,10 +1392,22 @@ const endResize = () => {
       </div>
 
       <div class="parchment-card p-2">
-        <div ref="stageWrapperEl" class="overflow-auto bg-black/5 rounded" style="max-height: 78vh">
+        <div
+          ref="stageWrapperEl"
+          class="overflow-auto bg-black/5 rounded flex"
+          style="max-height: 78vh; place-content: safe center; place-items: safe center;"
+        >
+          <!-- Aeusserer Wrapper hat die SKALIERTEN Dimensionen, damit das
+               Layout die echte sichtbare Groesse kennt und Flex-Center
+               funktioniert. Innerer Stage hat die Original-Dimensionen +
+               transform: scale(zoom). -->
+          <div
+            class="relative flex-none"
+            :style="{ width: (imgW * zoom) + 'px', height: (imgH * zoom) + 'px' }"
+          >
           <div
             ref="stageEl"
-            class="relative origin-top-left"
+            class="absolute inset-0 origin-top-left"
             :style="{
               width: imgW + 'px',
               height: imgH + 'px',
@@ -1579,6 +1591,7 @@ const endResize = () => {
                 {{ tokenCustomLabels(t).join(', ') }}
               </div>
             </div>
+          </div>
           </div>
         </div>
       </div>
