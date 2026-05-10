@@ -260,11 +260,18 @@ const hpColor = computed(() => {
   return '#7f1d1d'
 })
 
-// Tab-Bild: bevorzugt Token-Bild, sonst Char-Portrait via /api/portrait, sonst null
+// Tab-Bild: bevorzugt Token-Bild, sonst Char-Portrait via /api/portrait, sonst null.
+// Tokens, deren Bild bereits einmal gefehlt hat, merken wir uns lokal — dann
+// zeigen wir nur noch das Icon und blasen die Konsole nicht mit 404ern voll.
+const failedImageTokenIds = ref(new Set<number>())
 const tabImage = (t: Token): string | null => {
+  if (failedImageTokenIds.value.has(t.id)) return null
   if (t.characterId) return `/api/portrait/${t.characterId}`
   if (t.imageUrl) return `/api/groups/${props.groupId}/maps/${props.mapId}/tokens/${t.id}/image`
   return null
+}
+const onImageError = (tokenId: number) => {
+  failedImageTokenIds.value.add(tokenId)
 }
 </script>
 
@@ -293,6 +300,7 @@ const tabImage = (t: Token): string | null => {
           :src="tabImage(t) ?? ''"
           :alt="t.name"
           class="w-5 h-5 rounded-full object-cover border border-[var(--color-accent)]/50"
+          @error="onImageError(t.id)"
         >
         <UIcon v-else name="i-lucide-user" class="size-4 opacity-60" />
         <span class="max-w-[140px] truncate">{{ t.name }}</span>
@@ -316,16 +324,18 @@ const tabImage = (t: Token): string | null => {
       <!-- Header: Bild + Name + HP-Bar -->
       <div class="flex items-center gap-3">
         <img
-          v-if="character?.portraitUrl"
+          v-if="character?.portraitUrl && !failedImageTokenIds.has(activeToken.id)"
           :src="`/api/portrait/${character.id}`"
           :alt="character.name"
           class="w-12 h-12 rounded-full object-cover border border-[var(--color-accent)]"
+          @error="onImageError(activeToken.id)"
         >
         <img
-          v-else-if="activeToken.imageUrl"
+          v-else-if="activeToken.imageUrl && !failedImageTokenIds.has(activeToken.id)"
           :src="`/api/groups/${groupId}/maps/${mapId}/tokens/${activeToken.id}/image`"
           :alt="activeToken.name"
           class="w-12 h-12 rounded-full object-cover border border-[var(--color-accent)]"
+          @error="onImageError(activeToken.id)"
         >
         <div
           v-else
