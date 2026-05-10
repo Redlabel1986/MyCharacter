@@ -5,7 +5,7 @@
 import { and, desc, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
-import { battleMaps, groups } from '~~/server/database/schema'
+import { battleMaps, groups, type BattleMap } from '~~/server/database/schema'
 
 export default defineEventHandler(async (event) => {
   const { user } = await requireUserSession(event)
@@ -19,16 +19,25 @@ export default defineEventHandler(async (event) => {
   // Owner-Check fuer DM-Sicht
   const [g] = await db.select().from(groups).where(eq(groups.id, groupId)).limit(1)
   const isDm = !!g && g.ownerUserId === user.id
+  const activeId = g?.activeMapId ?? null
 
-  const list = await db
-    .select()
-    .from(battleMaps)
-    .where(
-      isDm
-        ? eq(battleMaps.groupId, groupId)
-        : and(eq(battleMaps.groupId, groupId), eq(battleMaps.visible, true)),
-    )
-    .orderBy(desc(battleMaps.updatedAt))
+  // DM sieht alles. Spieler sehen ausschliesslich die als "aktiv" markierte
+  // Karte — andere Karten existieren fuer sie effektiv nicht (auch nicht
+  // wenn `visible=true`). So kann der DM ungestoert mehrere Karten vorbereiten.
+  let list: BattleMap[] = []
+  if (isDm) {
+    list = await db
+      .select()
+      .from(battleMaps)
+      .where(eq(battleMaps.groupId, groupId))
+      .orderBy(desc(battleMaps.updatedAt))
+  } else if (activeId !== null) {
+    list = await db
+      .select()
+      .from(battleMaps)
+      .where(and(eq(battleMaps.groupId, groupId), eq(battleMaps.id, activeId)))
+      .limit(1)
+  }
 
-  return { maps: list, isDm, activeMapId: g?.activeMapId ?? null }
+  return { maps: list, isDm, activeMapId: activeId }
 })

@@ -44,6 +44,15 @@ interface Token {
   statusText: string
   description: string
 }
+interface Drawing {
+  id: number
+  mapId: number
+  ownerUserId: number
+  color: string
+  strokeWidth: number
+  points: Array<{ x: number; y: number }>
+  createdAt: string
+}
 interface CharacterSummary {
   id: number
   name: string
@@ -58,6 +67,7 @@ const { user } = useUserSession()
 
 const map = ref<BattleMap | null>(null)
 const tokens = ref<Token[]>([])
+const drawings = ref<Drawing[]>([])
 const isDm = ref(false)
 const activeMapId = ref<number | null>(null)
 const allMapsForSwitcher = ref<BattleMap[]>([])
@@ -67,11 +77,13 @@ const fetchMap = async () => {
     const res = await $fetch<{
       map: BattleMap
       tokens: Token[]
+      drawings: Drawing[]
       isDm: boolean
       activeMapId: number | null
     }>(`/api/groups/${groupId}/maps/${mapId}`)
     map.value = res.map
     isDm.value = res.isDm
+    drawings.value = res.drawings ?? []
     // Spieler werden automatisch auf die aktuell aktive Karte geleitet,
     // wenn der DM eine andere setzt.
     if (!res.isDm && res.activeMapId && res.activeMapId !== mapId) {
@@ -194,6 +206,9 @@ const dragStartPx = ref({ x: 0, y: 0 })
 const canMoveToken = (t: Token) => isDm.value || t.ownerUserId === user.value?.id
 
 const startDrag = (e: PointerEvent, t: Token) => {
+  // Im Zeichnen-/Erase-Modus ignorieren wir Token-Drags — der Klick fliesst
+  // dann zur Stage durch und triggert das jeweilige Werkzeug.
+  if (toolMode.value !== 'select') return
   if (!canMoveToken(t)) {
     // Spieler kann fremde Token nur ansehen — Klick = Info-Karte
     return
@@ -533,6 +548,196 @@ watch(chatWidth, (v) => {
   }
 })
 
+// --- Tool-Mode (Select / Draw / Erase) ---
+type ToolMode = 'select' | 'draw' | 'erase'
+const toolMode = ref<ToolMode>('select')
+
+// --- Zeichnen ---
+const DRAW_COLORS = [
+  '#ef4444', // rot
+  '#f59e0b', // orange
+  '#eab308', // gelb
+  '#10b981', // grün
+  '#06b6d4', // türkis
+  '#3b82f6', // blau
+  '#8b5cf6', // lila
+  '#ec4899', // pink
+  '#000000', // schwarz
+  '#ffffff', // weiß
+]
+const drawColor = ref<string>(DRAW_COLORS[0]!)
+const drawWidth = ref<number>(4)
+
+onMounted(() => {
+  if (typeof window === 'undefined') return
+  const c = localStorage.getItem('battlemap.drawColor')
+  if (c && DRAW_COLORS.includes(c)) drawColor.value = c
+  const w = Number(localStorage.getItem('battlemap.drawWidth'))
+  if (Number.isFinite(w) && w >= 1 && w <= 64) drawWidth.value = w
+})
+watch([drawColor, drawWidth], () => {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('battlemap.drawColor', drawColor.value)
+    localStorage.setItem('battlemap.drawWidth', String(drawWidth.value))
+  }
+})
+
+interface ActiveStroke {
+  color: string
+  strokeWidth: number
+  points: Array<{ x: number; y: number }>
+}
+const currentStroke = ref<ActiveStroke | null>(null)
+
+const startDrawing = (e: PointerEvent) => {
+  if (!stageEl.value) return
+  const rect = stageEl.value.getBoundingClientRect()
+  const localX = (e.clientX - rect.left) / zoom.value
+  const localY = (e.clientY - rect.top) / zoom.value
+  currentStroke.value = {
+    color: drawColor.value,
+    strokeWidth: drawWidth.value,
+    points: [{ x: Math.round(localX), y: Math.round(localY) }],
+  }
+  ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+  e.preventDefault()
+}
+const continueDrawing = (e: PointerEvent) => {
+  if (!currentStroke.value || !stageEl.value) return
+  const rect = stageEl.value.getBoundingClientRect()
+  const localX = (e.clientX - rect.left) / zoom.value
+  const localY = (e.clientY - rect.top) / zoom.value
+  const last = currentStroke.value.points[currentStroke.value.points.length - 1]
+  // Throttle: nur Punkte mit > 3px Distanz aufnehmen, sonst wird das DB-JSONB
+  // unnoetig dick.
+  if (last && Math.hypot(localX - last.x, localY - last.y) < 3) return
+  currentStroke.value.points.push({ x: Math.round(localX), y: Math.round(localY) })
+}
+const endDrawing = async () => {
+  const s = currentStroke.value
+  currentStroke.value = null
+  if (!s || s.points.length < 2) return
+  try {
+    const res = await $fetch<{ drawing: Drawing }>(
+      `/api/groups/${groupId}/maps/${mapId}/drawings`,
+      { method: 'POST', body: s },
+    )
+    if (res.drawing) drawings.value.push(res.drawing)
+  } catch (err) {
+    console.error('drawing save failed', err)
+  }
+}
+
+const canDeleteDrawing = (d: Drawing) => isDm.value || d.ownerUserId === user.value?.id
+const deleteDrawing = async (d: Drawing) => {
+  if (!canDeleteDrawing(d)) return
+  // optimistisch entfernen
+  drawings.value = drawings.value.filter((x) => x.id !== d.id)
+  try {
+    await $fetch(
+      `/api/groups/${groupId}/maps/${mapId}/drawings/${d.id}`,
+      { method: 'DELETE' },
+    )
+  } catch {
+    await fetchMap()
+  }
+}
+const undoLastMine = async () => {
+  if (!user.value) return
+  const myStrokes = drawings.value.filter((d) => d.ownerUserId === user.value!.id)
+  const last = myStrokes[myStrokes.length - 1]
+  if (last) await deleteDrawing(last)
+}
+const clearAllDrawings = async () => {
+  if (!isDm.value) return
+  if (!confirm('Alle Zeichnungen auf dieser Karte loeschen?')) return
+  drawings.value = []
+  try {
+    await $fetch(`/api/groups/${groupId}/maps/${mapId}/drawings`, { method: 'DELETE' })
+  } catch {
+    await fetchMap()
+  }
+}
+
+// SVG-Pfad-d aus Punkte-Array
+const pointsToPath = (pts: Array<{ x: number; y: number }>) => {
+  if (!pts.length) return ''
+  let d = `M ${pts[0]!.x} ${pts[0]!.y}`
+  for (let i = 1; i < pts.length; i++) d += ` L ${pts[i]!.x} ${pts[i]!.y}`
+  return d
+}
+
+// --- Pan per Drag (im Select-Mode auf leerer Flaeche) ---
+const stageWrapperEl = ref<HTMLElement | null>(null)
+const pan = reactive({
+  active: false,
+  startX: 0,
+  startY: 0,
+  scrollLeft: 0,
+  scrollTop: 0,
+})
+const startPan = (e: PointerEvent) => {
+  if (!stageWrapperEl.value) return
+  pan.active = true
+  pan.startX = e.clientX
+  pan.startY = e.clientY
+  pan.scrollLeft = stageWrapperEl.value.scrollLeft
+  pan.scrollTop = stageWrapperEl.value.scrollTop
+  ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+  e.preventDefault()
+}
+const updatePan = (e: PointerEvent) => {
+  if (!pan.active || !stageWrapperEl.value) return
+  stageWrapperEl.value.scrollLeft = pan.scrollLeft - (e.clientX - pan.startX)
+  stageWrapperEl.value.scrollTop = pan.scrollTop - (e.clientY - pan.startY)
+}
+const endPan = () => {
+  pan.active = false
+}
+
+// --- Zentraler Pointer-Dispatch auf der Stage ---
+const onStagePointerDown = (e: PointerEvent) => {
+  // Wenn der Klick auf einem Token ist, hat das Token bereits
+  // startDrag() ausgefuehrt — wir lassen den Bubble durch, ignorieren ihn aber.
+  if (draggingTokenId.value) return
+  const target = e.target as HTMLElement
+  if (target.closest('[data-token-id]')) return
+  if (toolMode.value === 'draw') {
+    startDrawing(e)
+  } else if (toolMode.value === 'select') {
+    startPan(e)
+  }
+  // erase: nichts hier, Klick auf einzelne Stroke-Pfade behandelt das
+}
+const onStagePointerMove = (e: PointerEvent) => {
+  if (currentStroke.value) {
+    continueDrawing(e)
+    return
+  }
+  if (pan.active) {
+    updatePan(e)
+    return
+  }
+  onPointerMove(e)
+}
+const onStagePointerUp = (e: PointerEvent) => {
+  if (currentStroke.value) {
+    endDrawing()
+    return
+  }
+  if (pan.active) {
+    endPan()
+    return
+  }
+  onPointerUp(e)
+}
+
+const stageCursor = computed(() => {
+  if (toolMode.value === 'draw') return 'crosshair'
+  if (toolMode.value === 'erase') return 'cell'
+  return pan.active ? 'grabbing' : 'grab'
+})
+
 const resizing = ref(false)
 const startResize = (e: PointerEvent) => {
   resizing.value = true
@@ -696,8 +901,86 @@ const endResize = () => {
         </section>
       </div>
 
+      <!-- Werkzeug-Toolbar -->
+      <div class="parchment-card p-2 flex items-center gap-2 flex-wrap">
+        <div class="flex items-center gap-1">
+          <UButton
+            size="xs"
+            :variant="toolMode === 'select' ? 'solid' : 'outline'"
+            :color="toolMode === 'select' ? 'primary' : 'neutral'"
+            icon="i-lucide-mouse-pointer-2"
+            title="Auswählen / Bewegen / Pan"
+            @click="toolMode = 'select'"
+          >
+            Auswählen
+          </UButton>
+          <UButton
+            size="xs"
+            :variant="toolMode === 'draw' ? 'solid' : 'outline'"
+            :color="toolMode === 'draw' ? 'primary' : 'neutral'"
+            icon="i-lucide-pencil"
+            title="Zeichnen"
+            @click="toolMode = 'draw'"
+          >
+            Zeichnen
+          </UButton>
+          <UButton
+            size="xs"
+            :variant="toolMode === 'erase' ? 'solid' : 'outline'"
+            :color="toolMode === 'erase' ? 'primary' : 'neutral'"
+            icon="i-lucide-eraser"
+            title="Strich anklicken zum Löschen"
+            @click="toolMode = 'erase'"
+          >
+            Radieren
+          </UButton>
+        </div>
+
+        <div v-if="toolMode === 'draw'" class="flex items-center gap-2 flex-wrap pl-3 border-l border-parchment-700/30">
+          <div class="flex items-center gap-1">
+            <button
+              v-for="c in DRAW_COLORS"
+              :key="c"
+              type="button"
+              class="w-6 h-6 rounded-full border-2 transition"
+              :class="drawColor === c ? 'border-ink-500 scale-110' : 'border-white/60 hover:border-ink-300'"
+              :style="{ background: c }"
+              :title="c"
+              @click="drawColor = c"
+            />
+          </div>
+          <div class="flex items-center gap-1 text-xs">
+            <span class="text-ink-400">Pinsel</span>
+            <UInput v-model.number="drawWidth" type="number" min="1" max="64" class="w-16" size="xs" />
+            <span class="text-ink-300">px</span>
+          </div>
+        </div>
+
+        <div class="ml-auto flex items-center gap-2 flex-wrap">
+          <UButton
+            size="xs"
+            variant="ghost"
+            icon="i-lucide-undo-2"
+            title="Meine letzte Zeichnung zurücknehmen"
+            @click="undoLastMine"
+          >
+            Rückgängig
+          </UButton>
+          <UButton
+            v-if="isDm"
+            size="xs"
+            variant="ghost"
+            color="error"
+            icon="i-lucide-trash-2"
+            @click="clearAllDrawings"
+          >
+            Alle Zeichnungen löschen
+          </UButton>
+        </div>
+      </div>
+
       <div class="parchment-card p-2">
-        <div class="overflow-auto bg-black/5 rounded" style="max-height: 78vh">
+        <div ref="stageWrapperEl" class="overflow-auto bg-black/5 rounded" style="max-height: 78vh">
           <div
             ref="stageEl"
             class="relative origin-top-left"
@@ -708,10 +991,13 @@ const endResize = () => {
               backgroundImage: gridSvgUrl,
               backgroundSize: 'contain',
               backgroundRepeat: 'no-repeat',
+              cursor: stageCursor,
+              touchAction: toolMode === 'draw' ? 'none' : 'auto',
             }"
-            @pointermove="onPointerMove"
-            @pointerup="onPointerUp"
-            @pointercancel="onPointerUp"
+            @pointerdown="onStagePointerDown"
+            @pointermove="onStagePointerMove"
+            @pointerup="onStagePointerUp"
+            @pointercancel="onStagePointerUp"
           >
             <img
               :src="`/api/groups/${groupId}/maps/${mapId}/image`"
@@ -722,12 +1008,55 @@ const endResize = () => {
               @load="onImgLoad"
             >
 
+            <!-- Zeichnungen-SVG-Layer (zwischen Map und Token) -->
+            <svg
+              v-if="imgW && imgH"
+              class="absolute inset-0 pointer-events-none"
+              :width="imgW"
+              :height="imgH"
+              :viewBox="`0 0 ${imgW} ${imgH}`"
+            >
+              <path
+                v-for="d in drawings"
+                :key="d.id"
+                :d="pointsToPath(d.points)"
+                fill="none"
+                :stroke="d.color"
+                :stroke-width="d.strokeWidth"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                :class="[
+                  toolMode === 'erase' && canDeleteDrawing(d)
+                    ? 'cursor-pointer hover:opacity-60'
+                    : '',
+                ]"
+                :style="{
+                  pointerEvents: toolMode === 'erase' && canDeleteDrawing(d) ? 'stroke' : 'none',
+                }"
+                @click="toolMode === 'erase' && canDeleteDrawing(d) && deleteDrawing(d)"
+              />
+              <!-- Aktiver, gerade gezogener Strich -->
+              <path
+                v-if="currentStroke && currentStroke.points.length > 1"
+                :d="pointsToPath(currentStroke.points)"
+                fill="none"
+                :stroke="currentStroke.color"
+                :stroke-width="currentStroke.strokeWidth"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                style="pointer-events: none"
+              />
+            </svg>
+
             <div
               v-for="t in tokens"
               :key="t.id"
+              :data-token-id="t.id"
               class="absolute border-2 rounded-full bg-white/80 shadow flex items-center justify-center text-xs font-semibold select-none"
               :class="[
-                canMoveToken(t) ? 'cursor-move' : 'cursor-pointer',
+                toolMode !== 'select'
+                  ? 'cursor-default'
+                  : canMoveToken(t) ? 'cursor-move' : 'cursor-pointer',
                 t.hidden ? 'opacity-60 border-amber-500' : 'border-[var(--color-accent)]',
               ]"
               :style="{
@@ -739,8 +1068,8 @@ const endResize = () => {
                 touchAction: 'none',
               }"
               @pointerdown="startDrag($event, t)"
-              @click="openInfoFromClick(t)"
-              @dblclick="startEdit(t)"
+              @click="toolMode === 'select' && openInfoFromClick(t)"
+              @dblclick="toolMode === 'select' && startEdit(t)"
             >
               <img
                 v-if="tokenImageSrc(t)"

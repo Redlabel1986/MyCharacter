@@ -35,10 +35,24 @@ const activeMapId = computed(() => data.value?.activeMapId ?? null)
 
 // Auto-Redirect fuer Spieler: wenn der DM eine Karte aktiv gesetzt hat,
 // direkt dorthin springen — kein „Liste"-Schritt fuer den Spieler.
+let activePoll: ReturnType<typeof setInterval> | null = null
 onMounted(() => {
   if (!isDm.value && activeMapId.value) {
     navigateTo(`/groups/${groupId}/battle/${activeMapId.value}`)
+    return
   }
+  // Spieler ohne aktive Karte: regelmaessig pruefen, ob der DM gestartet hat.
+  if (!isDm.value) {
+    activePoll = setInterval(async () => {
+      await refresh()
+      if (activeMapId.value) {
+        navigateTo(`/groups/${groupId}/battle/${activeMapId.value}`)
+      }
+    }, 3000)
+  }
+})
+onUnmounted(() => {
+  if (activePoll) clearInterval(activePoll)
 })
 
 const setActive = async (map: BattleMap) => {
@@ -165,7 +179,12 @@ const removeMap = async (map: BattleMap) => {
     <section class="space-y-3">
       <div v-if="pending && !data?.maps.length" class="text-ink-400 italic">Lade Karten …</div>
       <div v-else-if="!data?.maps.length" class="parchment-card p-6 text-center text-ink-400">
-        Noch keine Karten vorhanden.
+        <template v-if="isDm">
+          Noch keine Karten vorhanden — lade oben eine hoch und markiere sie als aktiv, damit deine Spieler sie sehen.
+        </template>
+        <template v-else>
+          Der Spielleiter hat aktuell keine Karte aktiv geschaltet. Sobald er eine startet, landest du automatisch hier drauf.
+        </template>
       </div>
       <ul v-else class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <li

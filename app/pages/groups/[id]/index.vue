@@ -54,6 +54,27 @@ const removeMember = async (memberId: number) => {
   await refreshGroup()
 }
 
+const transferOwnership = async (m: { userId: number; username: string }) => {
+  if (
+    !confirm(
+      `Owner-Rolle wirklich an ${m.username} übergeben? Du verlierst danach die Owner-Rechte (Karten verwalten, Mitglieder hinzufügen/entfernen, Gruppe löschen).`,
+    )
+  ) {
+    return
+  }
+  try {
+    await $fetch(`/api/groups/${id}/owner`, {
+      method: 'PUT',
+      body: { newOwnerUserId: m.userId },
+    })
+    await refreshGroup()
+  } catch (e: unknown) {
+    alert(
+      (e as { statusMessage?: string }).statusMessage ?? 'Owner-Übergabe fehlgeschlagen.',
+    )
+  }
+}
+
 const deleteGroup = async () => {
   if (!confirm('Gruppe wirklich löschen? Alle Nachrichten gehen verloren.')) return
   await $fetch(`/api/groups/${id}`, { method: 'DELETE' })
@@ -81,9 +102,12 @@ const roleBadge = (r: 'player' | 'dm' | 'admin') =>
         <NuxtLink
           :to="`/groups/${id}/battle`"
           class="text-sm text-[var(--color-accent)] hover:underline flex items-center gap-1"
+          :title="groupData.isOwner
+            ? 'Karten verwalten und Sitzung steuern'
+            : 'Zur aktuell aktiven Karte springen'"
         >
-          <UIcon name="i-lucide-map" />
-          Battle Maps
+          <UIcon name="i-lucide-swords" />
+          Spielen
         </NuxtLink>
       </div>
       <div class="accent-rule my-3" />
@@ -127,14 +151,23 @@ const roleBadge = (r: 'player' | 'dm' | 'admin') =>
           >
             Owner
           </span>
-          <UButton
-            v-else-if="groupData.isOwner"
-            size="xs"
-            color="error"
-            variant="ghost"
-            icon="i-lucide-x"
-            @click="removeMember(m.id)"
-          />
+          <template v-else-if="groupData.isOwner">
+            <UButton
+              size="xs"
+              variant="ghost"
+              icon="i-lucide-crown"
+              :title="`Owner an ${m.username} übergeben`"
+              @click="transferOwnership(m)"
+            />
+            <UButton
+              size="xs"
+              color="error"
+              variant="ghost"
+              icon="i-lucide-x"
+              :title="`${m.username} aus der Gruppe entfernen`"
+              @click="removeMember(m.id)"
+            />
+          </template>
         </li>
       </ul>
 

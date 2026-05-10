@@ -189,6 +189,21 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS active_map_id INTEGER
   `)
+  // Zeichnungen auf Battle-Maps
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS battle_drawings (
+      id SERIAL PRIMARY KEY,
+      map_id INTEGER NOT NULL REFERENCES battle_maps(id) ON DELETE CASCADE,
+      owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      color TEXT NOT NULL DEFAULT '#ef4444',
+      stroke_width INTEGER NOT NULL DEFAULT 4,
+      points JSONB NOT NULL DEFAULT '[]'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_battle_drawings_map ON battle_drawings(map_id)
+  `)
 
   await db.execute(sql`
     UPDATE users SET role = 'admin' WHERE email = ${ADMIN_EMAIL} AND role <> 'admin'

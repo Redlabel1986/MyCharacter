@@ -261,10 +261,35 @@ export const battleTokens = pgTable(
   }),
 )
 
+export const battleDrawings = pgTable(
+  'battle_drawings',
+  {
+    id: serial('id').primaryKey(),
+    mapId: integer('map_id')
+      .notNull()
+      .references(() => battleMaps.id, { onDelete: 'cascade' }),
+    ownerUserId: integer('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** CSS-Farbe (Hex oder rgba). */
+    color: text('color').notNull().default('#ef4444'),
+    /** Strichdicke in Pixel (Karten-Koordinaten). */
+    strokeWidth: integer('stroke_width').notNull().default(4),
+    /** Punkte des Strichs in Karten-Koordinaten: [{x,y}, ...] */
+    points: jsonb('points').notNull().$type<Array<{ x: number; y: number }>>().default([]),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    mapIdx: index('idx_battle_drawings_map').on(table.mapId),
+  }),
+)
+
 export type BattleMap = typeof battleMaps.$inferSelect
 export type NewBattleMap = typeof battleMaps.$inferInsert
 export type BattleToken = typeof battleTokens.$inferSelect
 export type NewBattleToken = typeof battleTokens.$inferInsert
+export type BattleDrawing = typeof battleDrawings.$inferSelect
+export type NewBattleDrawing = typeof battleDrawings.$inferInsert
 
 /* ==================================================================== */
 /*  Type-Exports                                                         */

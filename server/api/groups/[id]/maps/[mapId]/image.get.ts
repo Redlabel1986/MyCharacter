@@ -32,8 +32,9 @@ export default defineEventHandler(async (event) => {
   if (!map) {
     throw createError({ statusCode: 404, statusMessage: 'Karte nicht gefunden.' })
   }
-  if (!map.visible && !isDm) {
-    throw createError({ statusCode: 403, statusMessage: 'Karte ist nicht freigegeben.' })
+  // Spieler bekommen nur das Bild der aktiven Karte
+  if (!isDm && (g?.activeMapId == null || g.activeMapId !== mapId)) {
+    throw createError({ statusCode: 403, statusMessage: 'Diese Karte ist nicht aktiv.' })
   }
 
   const token = process.env.BLOB_READ_WRITE_TOKEN

@@ -5,7 +5,12 @@
 import { and, asc, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
-import { battleMaps, battleTokens, groups } from '~~/server/database/schema'
+import {
+  battleDrawings,
+  battleMaps,
+  battleTokens,
+  groups,
+} from '~~/server/database/schema'
 
 export default defineEventHandler(async (event) => {
   const { user } = await requireUserSession(event)
@@ -28,8 +33,9 @@ export default defineEventHandler(async (event) => {
   if (!map) {
     throw createError({ statusCode: 404, statusMessage: 'Karte nicht gefunden.' })
   }
-  if (!map.visible && !isDm) {
-    throw createError({ statusCode: 403, statusMessage: 'Karte ist noch nicht freigegeben.' })
+  // Spieler duerfen ausschliesslich die aktiv-markierte Karte oeffnen.
+  if (!isDm && (g?.activeMapId == null || g.activeMapId !== mapId)) {
+    throw createError({ statusCode: 403, statusMessage: 'Diese Karte ist nicht aktiv.' })
   }
 
   const tokensRaw = await db
@@ -41,5 +47,11 @@ export default defineEventHandler(async (event) => {
   // Versteckte Token sieht nur DM
   const tokens = isDm ? tokensRaw : tokensRaw.filter((t) => !t.hidden)
 
-  return { map, tokens, isDm, activeMapId: g?.activeMapId ?? null }
+  const drawings = await db
+    .select()
+    .from(battleDrawings)
+    .where(eq(battleDrawings.mapId, mapId))
+    .orderBy(asc(battleDrawings.id))
+
+  return { map, tokens, drawings, isDm, activeMapId: g?.activeMapId ?? null }
 })
