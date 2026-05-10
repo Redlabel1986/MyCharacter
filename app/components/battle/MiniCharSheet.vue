@@ -2,13 +2,12 @@
 /**
  * Mini-Charakterbogen direkt in der Battle-Map.
  *
- * Zeigt fuer den eigenen, an einen Token gekoppelten Charakter:
- *  - Portrait + Name
- *  - HP-Editor (sync zum Token via tokens-PUT)
- *  - Skill-/Begabungs-Picker mit Modifikator → wuerfeln in Gruppen-Chat
- *  - Klappbares Inventar (lesbar, mit Edit-Save bei Klick auf Speichern)
- *
- * Primaer fuer HtbaH gebaut. Andere Systeme zeigen einen Hinweis.
+ * Akzeptiert eine LISTE von Tokens, die dem aktuellen User gehoeren.
+ * Bei mehreren Tokens (z.B. der DM mit NPCs / Monstern) erscheinen Tabs zum
+ * Wechseln. Pro Token wird gezeigt:
+ *   - Charakter-gebunden (HtbaH): Portrait, HP-Editor (sync zum Token),
+ *     Skill-/Begabungs-Picker mit Mod, Inventar
+ *   - NPC ohne Charakter: HP-Editor + ggf. Beschreibungstext
  */
 import {
   HTBAH_TALENTS,
@@ -25,8 +24,10 @@ interface Token {
   ownerUserId: number
   characterId: number | null
   name: string
+  imageUrl: string | null
   hp: number | null
   hpMax: number | null
+  description: string
 }
 
 interface CharacterFull {
@@ -40,38 +41,73 @@ interface CharacterFull {
 const props = defineProps<{
   groupId: number
   mapId: number
-  /** Der zum Charakter gehoerende Token auf der aktiven Map (oder null wenn keiner). */
-  token: Token | null
+  tokens: Token[]
 }>()
 
 const emit = defineEmits<{
-  /** Wird ausgeloest, wenn die HP des Tokens veraendert wurden — Eltern soll fetchMap() ausloesen. */
   (e: 'token-updated'): void
 }>()
 
+// Welcher Token ist gerade ausgewaehlt?
+const selectedTokenId = ref<number | null>(null)
+watch(
+  () => props.tokens,
+  (toks) => {
+    if (!toks.length) {
+      selectedTokenId.value = null
+      return
+    }
+    // Wenn aktuell ausgewaehlter weg ist → ersten nehmen.
+    if (
+      selectedTokenId.value === null ||
+      !toks.some((t) => t.id === selectedTokenId.value)
+    ) {
+      // Bevorzugt einen mit Charakter-Bindung
+      const withChar = toks.find((t) => t.characterId !== null)
+      selectedTokenId.value = (withChar ?? toks[0]!).id
+    }
+  },
+  { immediate: true, deep: true },
+)
+
+const activeToken = computed<Token | null>(() =>
+  props.tokens.find((t) => t.id === selectedTokenId.value) ?? null,
+)
+
+// Charakter laden, wenn das aktive Token einen hat
 const character = ref<CharacterFull | null>(null)
-const loading = ref(false)
-const error = ref<string | null>(null)
+const characterLoading = ref(false)
+const characterError = ref<string | null>(null)
+const cacheByCharId = new Map<number, CharacterFull>()
 
 const fetchChar = async (id: number) => {
-  loading.value = true
-  error.value = null
+  if (cacheByCharId.has(id)) {
+    character.value = cacheByCharId.get(id)!
+    return
+  }
+  characterLoading.value = true
+  characterError.value = null
   try {
     const res = await $fetch<{ character: CharacterFull }>(`/api/characters/${id}`)
     character.value = res.character
+    cacheByCharId.set(id, res.character)
   } catch (e: unknown) {
-    error.value = (e as { statusMessage?: string }).statusMessage ?? 'Charakter nicht ladbar.'
+    characterError.value =
+      (e as { statusMessage?: string }).statusMessage ?? 'Charakter nicht ladbar.'
     character.value = null
   } finally {
-    loading.value = false
+    characterLoading.value = false
   }
 }
 
 watch(
-  () => props.token?.characterId ?? null,
+  () => activeToken.value?.characterId ?? null,
   (id) => {
     if (id) fetchChar(id)
-    else character.value = null
+    else {
+      character.value = null
+      characterError.value = null
+    }
   },
   { immediate: true },
 )
@@ -81,12 +117,11 @@ const htbahData = computed<HtbahCharacterData | null>(() =>
   isHtbah.value && character.value ? (character.value.data as HtbahCharacterData) : null,
 )
 
-// — HP-Editor (Token-HP, nicht Char-HP — der Char-Bogen hat eigene HP, aber
-// die Map-HP sind die kanonische Wahrheit waehrend einer Sitzung).
+// — HP-Editor (immer aus aktiveem Token)
 const hpDraft = ref<number | null>(null)
 const hpMaxDraft = ref<number | null>(null)
 watch(
-  () => props.token,
+  activeToken,
   (t) => {
     hpDraft.value = t?.hp ?? null
     hpMaxDraft.value = t?.hpMax ?? null
@@ -94,7 +129,9 @@ watch(
   { immediate: true, deep: true },
 )
 const hpDirty = computed(
-  () => hpDraft.value !== (props.token?.hp ?? null) || hpMaxDraft.value !== (props.token?.hpMax ?? null),
+  () =>
+    hpDraft.value !== (activeToken.value?.hp ?? null) ||
+    hpMaxDraft.value !== (activeToken.value?.hpMax ?? null),
 )
 const hpSaving = ref(false)
 const hpDelta = ref<number>(0)
@@ -106,11 +143,12 @@ const applyHpDelta = (sign: 1 | -1) => {
   saveHp()
 }
 const saveHp = async () => {
-  if (!props.token) return
+  const t = activeToken.value
+  if (!t) return
   hpSaving.value = true
   try {
     await $fetch(
-      `/api/groups/${props.groupId}/maps/${props.mapId}/tokens/${props.token.id}`,
+      `/api/groups/${props.groupId}/maps/${props.mapId}/tokens/${t.id}`,
       {
         method: 'PUT',
         body: { hp: hpDraft.value, hpMax: hpMaxDraft.value },
@@ -150,9 +188,17 @@ const rollOptions = computed<RollTarget[]>(() => {
   return items
 })
 
+// Auswahl + Notiz pro aktivem Token in localStorage merken
 const pickedRollId = ref<string>('')
 const rollMod = ref<number>(0)
 const rollNote = ref<string>('')
+watch(activeToken, () => {
+  // Frische Picks pro Token-Wechsel
+  pickedRollId.value = ''
+  rollMod.value = 0
+  rollNote.value = ''
+})
+
 const rollSending = ref(false)
 const rollError = ref<string | null>(null)
 const rollSuccess = ref(false)
@@ -161,32 +207,30 @@ const pickedRollOption = computed(() =>
   rollOptions.value.find((o) => `${o.type}:${o.id}` === pickedRollId.value) ?? null,
 )
 
-const groupId = computed(() => props.groupId)
-const characterIdComputed = computed(() => character.value?.id ?? null)
-
 const rollIt = async () => {
-  if (!pickedRollOption.value || !characterIdComputed.value) return
+  if (!pickedRollOption.value || !character.value) return
   rollSending.value = true
   rollError.value = null
   rollSuccess.value = false
   try {
     const opt = pickedRollOption.value
-    const body = opt.type === 'skill'
-      ? {
-          kind: 'htbahSkill' as const,
-          characterId: characterIdComputed.value,
-          skillId: opt.id,
-          modifier: rollMod.value || undefined,
-          note: rollNote.value.trim() || undefined,
-        }
-      : {
-          kind: 'htbahTalent' as const,
-          characterId: characterIdComputed.value,
-          talent: opt.id as HtbahTalent,
-          modifier: rollMod.value || undefined,
-          note: rollNote.value.trim() || undefined,
-        }
-    await $fetch(`/api/groups/${groupId.value}/rolls`, { method: 'POST', body })
+    const body =
+      opt.type === 'skill'
+        ? {
+            kind: 'htbahSkill' as const,
+            characterId: character.value.id,
+            skillId: opt.id,
+            modifier: rollMod.value || undefined,
+            note: rollNote.value.trim() || undefined,
+          }
+        : {
+            kind: 'htbahTalent' as const,
+            characterId: character.value.id,
+            talent: opt.id as HtbahTalent,
+            modifier: rollMod.value || undefined,
+            note: rollNote.value.trim() || undefined,
+          }
+    await $fetch(`/api/groups/${props.groupId}/rolls`, { method: 'POST', body })
     rollSuccess.value = true
     rollNote.value = ''
     setTimeout(() => (rollSuccess.value = false), 2200)
@@ -198,13 +242,12 @@ const rollIt = async () => {
   }
 }
 
-// Inventar (nur HtbaH-Datenstruktur)
 const inventoryOpen = ref(false)
 const inventoryText = computed(() => htbahData.value?.inventory ?? '')
 
-// HP-Bar
+// HP-Bar Computed
 const hpPercent = computed(() => {
-  const t = props.token
+  const t = activeToken.value
   if (!t || !t.hpMax) return 0
   return Math.max(0, Math.min(100, Math.round(((t.hp ?? 0) / t.hpMax) * 100)))
 })
@@ -216,136 +259,207 @@ const hpColor = computed(() => {
   if (p > 0) return '#ef4444'
   return '#7f1d1d'
 })
+
+// Tab-Bild: bevorzugt Token-Bild, sonst Char-Portrait via /api/portrait, sonst null
+const tabImage = (t: Token): string | null => {
+  if (t.characterId) return `/api/portrait/${t.characterId}`
+  if (t.imageUrl) return `/api/groups/${props.groupId}/maps/${props.mapId}/tokens/${t.id}/image`
+  return null
+}
 </script>
 
 <template>
-  <div v-if="!token" class="parchment-card p-3 text-xs text-ink-300 italic">
-    Setz deinen Charakter als Token auf die Karte — danach erscheint hier dein Mini-Bogen.
+  <div v-if="!tokens.length" class="parchment-card p-3 text-xs text-ink-300 italic">
+    Setz deinen Charakter (oder einen NPC) als Token auf die Karte — danach erscheint hier dein Mini-Bogen.
   </div>
-  <div v-else-if="loading" class="parchment-card p-3 text-xs text-ink-400 italic">
-    Lade Charakter …
-  </div>
-  <div v-else-if="error" class="parchment-card p-3 text-xs text-red-700">
-    {{ error }}
-  </div>
-  <div v-else-if="character" class="parchment-card p-3 space-y-3">
-    <!-- Header: Portrait + Name + HP-Bar -->
-    <div class="flex items-center gap-3">
-      <img
-        v-if="character.portraitUrl"
-        :src="`/api/portrait/${character.id}`"
-        :alt="character.name"
-        class="w-12 h-12 rounded-full object-cover border border-[var(--color-accent)]"
+  <div v-else class="parchment-card p-3 space-y-3">
+    <!-- Tab-Switcher (nur wenn mehrere Tokens) -->
+    <div
+      v-if="tokens.length > 1"
+      class="flex flex-wrap gap-1 -mt-1 -mx-1 pb-1 border-b border-parchment-700/30"
+    >
+      <button
+        v-for="t in tokens"
+        :key="t.id"
+        type="button"
+        class="flex items-center gap-1 px-2 py-1 text-xs rounded border transition"
+        :class="t.id === selectedTokenId
+          ? 'bg-[var(--color-accent-soft)] border-[var(--color-accent)] text-ink-700 font-semibold'
+          : 'bg-white/40 border-parchment-700/30 text-ink-400 hover:bg-white/70'"
+        @click="selectedTokenId = t.id"
       >
-      <div class="flex-1 min-w-0">
-        <div class="font-serif text-lg truncate">{{ character.name }}</div>
-        <div class="text-[10px] uppercase tracking-widest text-ink-300">
-          {{ character.system.toUpperCase() }}
-          <span v-if="token.hp !== null && token.hpMax">
-            · {{ token.hp }}/{{ token.hpMax }} HP
-          </span>
-        </div>
-        <div
-          v-if="token.hpMax"
-          class="mt-1 h-2 rounded bg-black/15 overflow-hidden"
+        <img
+          v-if="tabImage(t)"
+          :src="tabImage(t) ?? ''"
+          :alt="t.name"
+          class="w-5 h-5 rounded-full object-cover border border-[var(--color-accent)]/50"
         >
+        <UIcon v-else name="i-lucide-user" class="size-4 opacity-60" />
+        <span class="max-w-[140px] truncate">{{ t.name }}</span>
+        <span
+          v-if="t.hp !== null && t.hpMax"
+          class="text-[10px] tabular-nums opacity-70"
+        >
+          {{ t.hp }}/{{ t.hpMax }}
+        </span>
+      </button>
+    </div>
+
+    <!-- Loading-/Fehler-/Inhalt-Zustand -->
+    <div v-if="characterLoading" class="text-xs text-ink-400 italic">
+      Lade Charakter …
+    </div>
+    <div v-else-if="characterError" class="text-xs text-red-700">
+      {{ characterError }}
+    </div>
+    <div v-else-if="activeToken" class="space-y-3">
+      <!-- Header: Bild + Name + HP-Bar -->
+      <div class="flex items-center gap-3">
+        <img
+          v-if="character?.portraitUrl"
+          :src="`/api/portrait/${character.id}`"
+          :alt="character.name"
+          class="w-12 h-12 rounded-full object-cover border border-[var(--color-accent)]"
+        >
+        <img
+          v-else-if="activeToken.imageUrl"
+          :src="`/api/groups/${groupId}/maps/${mapId}/tokens/${activeToken.id}/image`"
+          :alt="activeToken.name"
+          class="w-12 h-12 rounded-full object-cover border border-[var(--color-accent)]"
+        >
+        <div
+          v-else
+          class="w-12 h-12 rounded-full border border-[var(--color-accent)] bg-white/40 flex items-center justify-center text-ink-400"
+        >
+          <UIcon name="i-lucide-user" class="size-6" />
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="font-serif text-lg truncate">
+            {{ character?.name ?? activeToken.name }}
+          </div>
+          <div class="text-[10px] uppercase tracking-widest text-ink-300">
+            {{ character ? character.system.toUpperCase() : 'NPC / Token' }}
+            <span v-if="activeToken.hp !== null && activeToken.hpMax">
+              · {{ activeToken.hp }}/{{ activeToken.hpMax }} HP
+            </span>
+          </div>
           <div
-            class="h-full transition-all"
-            :style="{ width: hpPercent + '%', background: hpColor }"
-          />
+            v-if="activeToken.hpMax"
+            class="mt-1 h-2 rounded bg-black/15 overflow-hidden"
+          >
+            <div
+              class="h-full transition-all"
+              :style="{ width: hpPercent + '%', background: hpColor }"
+            />
+          </div>
         </div>
       </div>
-    </div>
 
-    <!-- HP-Editor -->
-    <div class="flex flex-wrap items-end gap-2 text-xs">
-      <UFormField label="HP">
-        <UInput v-model.number="hpDraft" type="number" size="xs" class="w-20" />
-      </UFormField>
-      <UFormField label="Max">
-        <UInput v-model.number="hpMaxDraft" type="number" size="xs" class="w-20" />
-      </UFormField>
-      <UButton
-        v-if="hpDirty"
-        size="xs"
-        color="primary"
-        :loading="hpSaving"
-        @click="saveHp"
-      >
-        HP speichern
-      </UButton>
-      <span class="flex-1" />
-      <UFormField label="±">
-        <UInput v-model.number="hpDelta" type="number" size="xs" class="w-16" />
-      </UFormField>
-      <UButton size="xs" variant="outline" color="error" icon="i-lucide-minus" @click="applyHpDelta(-1)">
-        Schaden
-      </UButton>
-      <UButton size="xs" variant="outline" color="success" icon="i-lucide-plus" @click="applyHpDelta(1)">
-        Heilung
-      </UButton>
-    </div>
+      <!-- HP-Editor -->
+      <div class="flex flex-wrap items-end gap-2 text-xs">
+        <UFormField label="HP">
+          <UInput v-model.number="hpDraft" type="number" size="xs" class="w-20" />
+        </UFormField>
+        <UFormField label="Max">
+          <UInput v-model.number="hpMaxDraft" type="number" size="xs" class="w-20" />
+        </UFormField>
+        <UButton
+          v-if="hpDirty"
+          size="xs"
+          color="primary"
+          :loading="hpSaving"
+          @click="saveHp"
+        >
+          HP speichern
+        </UButton>
+        <span class="flex-1" />
+        <UFormField label="±">
+          <UInput v-model.number="hpDelta" type="number" size="xs" class="w-16" />
+        </UFormField>
+        <UButton size="xs" variant="outline" color="error" icon="i-lucide-minus" @click="applyHpDelta(-1)">
+          Schaden
+        </UButton>
+        <UButton size="xs" variant="outline" color="success" icon="i-lucide-plus" @click="applyHpDelta(1)">
+          Heilung
+        </UButton>
+      </div>
 
-    <!-- Skill/Begabungs-Würfler (HtbaH) -->
-    <div v-if="isHtbah" class="space-y-2">
-      <div class="text-[10px] uppercase tracking-widest text-ink-300">Probe würfeln</div>
-      <div class="grid sm:grid-cols-12 gap-2 items-end">
-        <UFormField label="Fähigkeit/Begabung" class="sm:col-span-6">
+      <!-- Skill-/Begabungs-Würfler (nur fuer charakter-gebundene HtbaH-Token) -->
+      <div v-if="isHtbah" class="space-y-2">
+        <div class="text-[10px] uppercase tracking-widest text-ink-300">Probe würfeln</div>
+        <UFormField label="Fähigkeit/Begabung">
           <USelect
             v-model="pickedRollId"
             :items="rollOptions.map((o) => ({ label: `${o.label} (${o.value})`, value: `${o.type}:${o.id}` }))"
             value-key="value"
-            placeholder="—"
-            size="xs"
+            placeholder="— Fähigkeit oder Begabung wählen —"
+            size="sm"
+            class="w-full"
           />
         </UFormField>
-        <UFormField label="Mod ±" class="sm:col-span-2" help="z.B. -10 Erschwernis">
-          <UInput v-model.number="rollMod" type="number" size="xs" />
-        </UFormField>
-        <UFormField label="Notiz" class="sm:col-span-3">
-          <UInput v-model="rollNote" placeholder="z.B. „klettert hoch“" size="xs" :maxlength="200" />
-        </UFormField>
-        <UButton
-          color="primary"
-          icon="i-lucide-dices"
-          :disabled="!pickedRollOption"
-          :loading="rollSending"
-          class="sm:col-span-1"
-          size="xs"
-          @click="rollIt"
+        <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+          <UFormField label="Mod ±" class="sm:col-span-2" help="z.B. -10 Erschwernis">
+            <UInput v-model.number="rollMod" type="number" size="sm" class="w-full" />
+          </UFormField>
+          <UFormField label="Notiz (optional)" class="sm:col-span-7">
+            <UInput
+              v-model="rollNote"
+              placeholder="z.B. „klettert hoch“ oder „mit Anlauf“"
+              size="sm"
+              :maxlength="200"
+              class="w-full"
+            />
+          </UFormField>
+          <UButton
+            color="primary"
+            icon="i-lucide-dices"
+            :disabled="!pickedRollOption"
+            :loading="rollSending"
+            class="sm:col-span-3"
+            size="sm"
+            block
+            @click="rollIt"
+          >
+            Würfeln
+          </UButton>
+        </div>
+        <p v-if="rollError" class="text-xs text-red-700">{{ rollError }}</p>
+        <p v-if="rollSuccess" class="text-xs text-emerald-700">✓ Wurf in Gruppen-Chat gepostet</p>
+      </div>
+      <div v-else-if="character" class="text-xs text-ink-300 italic">
+        Skill-Würfler ist aktuell nur für „How to be a Hero" eingebaut — der volle Bogen unten zeigt alle Werte.
+      </div>
+
+      <!-- Klappbares Inventar / Beschreibung -->
+      <div>
+        <button
+          type="button"
+          class="flex items-center gap-1 w-full text-left text-xs uppercase tracking-widest text-ink-400 hover:text-[var(--color-accent)]"
+          @click="inventoryOpen = !inventoryOpen"
         >
-          W
-        </UButton>
+          <UIcon :name="inventoryOpen ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'" class="size-3" />
+          {{ character ? 'Inventar' : 'Beschreibung' }}
+        </button>
+        <div
+          v-if="inventoryOpen"
+          class="mt-1 text-xs whitespace-pre-wrap bg-white/40 border border-parchment-700/20 rounded p-2 max-h-40 overflow-auto"
+        >
+          <span v-if="character && inventoryText.trim()">{{ inventoryText }}</span>
+          <span v-else-if="!character && activeToken.description?.trim()">
+            {{ activeToken.description }}
+          </span>
+          <span v-else class="italic text-ink-300">Leer.</span>
+        </div>
       </div>
-      <p v-if="rollError" class="text-[10px] text-red-700">{{ rollError }}</p>
-      <p v-if="rollSuccess" class="text-[10px] text-emerald-700">✓ In Chat gepostet</p>
-    </div>
-    <div v-else class="text-xs text-ink-300 italic">
-      Skill-Würfler ist aktuell nur für „How to be a Hero" eingebaut.
-    </div>
 
-    <!-- Klappbares Inventar -->
-    <div>
-      <button
-        type="button"
-        class="flex items-center gap-1 w-full text-left text-xs uppercase tracking-widest text-ink-400 hover:text-[var(--color-accent)]"
-        @click="inventoryOpen = !inventoryOpen"
+      <NuxtLink
+        v-if="character"
+        :to="`/characters/${character.id}`"
+        class="block text-[10px] text-[var(--color-accent)] hover:underline"
+        target="_blank"
       >
-        <UIcon :name="inventoryOpen ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'" class="size-3" />
-        Inventar
-      </button>
-      <div v-if="inventoryOpen" class="mt-1 text-xs whitespace-pre-wrap bg-white/40 border border-parchment-700/20 rounded p-2 max-h-40 overflow-auto">
-        <span v-if="inventoryText.trim()">{{ inventoryText }}</span>
-        <span v-else class="italic text-ink-300">Leer.</span>
-      </div>
+        Vollen Charakterbogen öffnen ↗
+      </NuxtLink>
     </div>
-
-    <NuxtLink
-      :to="`/characters/${character.id}`"
-      class="block text-[10px] text-[var(--color-accent)] hover:underline"
-      target="_blank"
-    >
-      Vollen Charakterbogen öffnen ↗
-    </NuxtLink>
   </div>
 </template>

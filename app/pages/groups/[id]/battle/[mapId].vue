@@ -795,20 +795,25 @@ watch(activeYouTubeTrack, async (t) => {
   destroyYtPlayer()
   try {
     const YT = await loadYouTubeApi()
+    // playerVars sauber bauen (keine undefined-Eintraege, sonst landet
+    // "list=undefined" in der URL und YouTube schmeisst "Invalid video id").
+    const playerVars: Record<string, string | number> = {
+      autoplay: 1,
+      loop: 1,
+      modestbranding: 1,
+      rel: 0,
+      playlist: parsed.playlistId ?? parsed.id,
+    }
+    if (parsed.playlistId) {
+      playerVars.list = parsed.playlistId
+      playerVars.listType = 'playlist'
+    }
     ytPlayer.value = new YT.Player(container, {
       // nocookie-Domain — YouTube erkennt den Embed nicht als „angemeldeter
       // User", wodurch das „dein Konto wird woanders verwendet"-Problem wegfaellt.
       host: YOUTUBE_NOCOOKIE_HOST,
-      videoId: parsed.playlistId ? undefined : parsed.id,
-      playerVars: {
-        autoplay: 1,
-        loop: 1,
-        playlist: parsed.playlistId ?? parsed.id,
-        list: parsed.playlistId,
-        listType: parsed.playlistId ? 'playlist' : undefined,
-        modestbranding: 1,
-        rel: 0,
-      },
+      videoId: parsed.id,
+      playerVars,
       events: {
         onReady: (e) => {
           const p = e.target

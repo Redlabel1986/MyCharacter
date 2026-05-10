@@ -28,7 +28,7 @@ const roleBadge = computed(() => {
           to="/"
           class="font-serif text-2xl font-bold text-ink-500 tracking-wide flex items-baseline"
         >
-          <span class="text-[var(--color-accent)]">my</span>Character
+          <span class="text-[var(--color-accent)]">paper</span>heros
         </NuxtLink>
         <span class="hidden sm:block flex-1 accent-rule" />
         <nav class="flex items-center gap-3 text-sm flex-wrap">

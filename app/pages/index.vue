@@ -9,9 +9,9 @@ const systems = GAME_SYSTEMS.map((id) => SYSTEM_META[id])
   <div class="space-y-10">
     <section class="parchment-card p-8 md:p-12 text-center">
       <h1 class="text-5xl md:text-6xl font-serif">
-        <span class="text-[var(--color-accent)]">my</span>Character
+        <span class="text-[var(--color-accent)]">paper</span>heros
       </h1>
-      <p class="text-ink-400 italic mt-2 text-lg">Charakterbögen für jedes Abenteuer.</p>
+      <p class="text-ink-400 italic mt-2 text-lg">Charakterbögen, Battle-Map und Würfeltisch für jedes Abenteuer.</p>
       <div class="accent-rule my-4 max-w-md mx-auto" />
       <p class="max-w-2xl mx-auto text-ink-400">
         Pflege deine Helden für D&amp;D 5e, D&amp;D 2024, DSA 4.1, DSA 5 und How to be a Hero
