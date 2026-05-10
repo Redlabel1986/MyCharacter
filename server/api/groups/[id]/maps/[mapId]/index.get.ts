@@ -8,9 +8,11 @@ import { requireGroupMember } from '~~/server/utils/group-access'
 import {
   battleDrawings,
   battleMaps,
+  battlePings,
   battleTokens,
   groups,
 } from '~~/server/database/schema'
+import { gt } from 'drizzle-orm'
 
 export default defineEventHandler(async (event) => {
   const { user } = await requireUserSession(event)
@@ -53,5 +55,20 @@ export default defineEventHandler(async (event) => {
     .where(eq(battleDrawings.mapId, mapId))
     .orderBy(asc(battleDrawings.id))
 
-  return { map, tokens, drawings, isDm, activeMapId: g?.activeMapId ?? null }
+  const pings = await db
+    .select()
+    .from(battlePings)
+    .where(and(eq(battlePings.mapId, mapId), gt(battlePings.expiresAt, new Date())))
+    .orderBy(asc(battlePings.id))
+
+  return {
+    map,
+    tokens,
+    drawings,
+    pings,
+    isDm,
+    activeMapId: g?.activeMapId ?? null,
+    initiativeState: g?.initiativeState ?? null,
+    audioState: g?.audioState ?? null,
+  }
 })

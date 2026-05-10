@@ -205,6 +205,48 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
     CREATE INDEX IF NOT EXISTS idx_battle_drawings_map ON battle_drawings(map_id)
   `)
 
+  // Pings (kurzlebige Marker auf der Battle-Map)
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS battle_pings (
+      id SERIAL PRIMARY KEY,
+      map_id INTEGER NOT NULL REFERENCES battle_maps(id) ON DELETE CASCADE,
+      owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      x INTEGER NOT NULL,
+      y INTEGER NOT NULL,
+      color TEXT NOT NULL DEFAULT '#ef4444',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL
+    )
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_battle_pings_map ON battle_pings(map_id)
+  `)
+  // Audio-Tracks (Musik + SFX) pro Gruppe
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS battle_audio_tracks (
+      id SERIAL PRIMARY KEY,
+      group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'music',
+      audio_url TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_battle_audio_tracks_group ON battle_audio_tracks(group_id)
+  `)
+  // Initiative + Audio State auf groups
+  await db.execute(sql`
+    ALTER TABLE groups ADD COLUMN IF NOT EXISTS initiative_state JSONB
+  `)
+  await db.execute(sql`
+    ALTER TABLE groups ADD COLUMN IF NOT EXISTS audio_state JSONB
+  `)
+  // Whisper-Empfaenger
+  await db.execute(sql`
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS target_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+  `)
+
   await db.execute(sql`
     UPDATE users SET role = 'admin' WHERE email = ${ADMIN_EMAIL} AND role <> 'admin'
   `)

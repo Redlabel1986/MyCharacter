@@ -16,7 +16,7 @@ import {
   type TokenCondition,
 } from '~~/shared/conditions'
 
-definePageMeta({ middleware: ['auth'] })
+definePageMeta({ middleware: ['auth'], layout: 'wide' })
 
 interface BattleMap {
   id: number
@@ -53,6 +53,45 @@ interface Drawing {
   points: Array<{ x: number; y: number }>
   createdAt: string
 }
+interface Ping {
+  id: number
+  mapId: number
+  ownerUserId: number
+  x: number
+  y: number
+  color: string
+  createdAt: string
+  expiresAt: string
+}
+interface InitiativeEntry {
+  id: string
+  name: string
+  initiative: number
+  characterId?: number
+  ownerUserId?: number
+  hasActed: boolean
+  imageUrl?: string
+}
+interface InitiativeState {
+  active: boolean
+  round: number
+  currentIndex: number
+  entries: InitiativeEntry[]
+}
+interface AudioTrack {
+  id: number
+  groupId: number
+  name: string
+  kind: 'music' | 'sfx'
+  audioUrl: string
+}
+interface AudioState {
+  trackId: number | null
+  startedAt: string | null
+  isPlaying: boolean
+  lastSfxTrackId: number | null
+  lastSfxAt: string | null
+}
 interface CharacterSummary {
   id: number
   name: string
@@ -68,6 +107,9 @@ const { user } = useUserSession()
 const map = ref<BattleMap | null>(null)
 const tokens = ref<Token[]>([])
 const drawings = ref<Drawing[]>([])
+const pings = ref<Ping[]>([])
+const initiativeState = ref<InitiativeState | null>(null)
+const audioState = ref<AudioState | null>(null)
 const isDm = ref(false)
 const activeMapId = ref<number | null>(null)
 const allMapsForSwitcher = ref<BattleMap[]>([])
@@ -83,12 +125,18 @@ const fetchMap = async () => {
       map: BattleMap
       tokens: Token[]
       drawings: Drawing[]
+      pings: Ping[]
       isDm: boolean
       activeMapId: number | null
+      initiativeState: InitiativeState | null
+      audioState: AudioState | null
     }>(`/api/groups/${groupId}/maps/${mapId}`)
     map.value = res.map
     isDm.value = res.isDm
     drawings.value = res.drawings ?? []
+    pings.value = res.pings ?? []
+    initiativeState.value = res.initiativeState
+    handleAudioStateUpdate(res.audioState)
     // Spieler werden automatisch auf die aktuell aktive Karte geleitet,
     // wenn der DM eine andere setzt.
     if (!res.isDm && res.activeMapId && res.activeMapId !== mapId) {
@@ -575,6 +623,275 @@ watch(chatWidth, (v) => {
   }
 })
 
+// --- Pings ---
+const sendPing = async (x: number, y: number) => {
+  try {
+    const res = await $fetch<{ ping: Ping }>(
+      `/api/groups/${groupId}/maps/${mapId}/pings`,
+      { method: 'POST', body: { x: Math.round(x), y: Math.round(y) } },
+    )
+    if (res.ping) pings.value.push(res.ping)
+  } catch (err) {
+    console.error('ping failed', err)
+  }
+}
+// Pings die abgelaufen sind, lokal ausblenden — wir prüfen alle 1s
+const visiblePings = ref<Ping[]>([])
+const recomputeVisiblePings = () => {
+  const now = Date.now()
+  visiblePings.value = pings.value.filter((p) => new Date(p.expiresAt).getTime() > now)
+}
+recomputeVisiblePings()
+let pingTick: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+  pingTick = setInterval(recomputeVisiblePings, 500)
+})
+onUnmounted(() => {
+  if (pingTick) clearInterval(pingTick)
+})
+watch(pings, recomputeVisiblePings, { deep: true })
+
+// --- Audio (Musik + SFX) ---
+const audioPlayerEl = ref<HTMLAudioElement | null>(null)
+const sfxAudioEl = ref<HTMLAudioElement | null>(null)
+const audioVolume = ref(0.6)
+const audioMuted = ref(false)
+const audioTracks = ref<AudioTrack[]>([])
+let lastHandledStartedAt: string | null = null
+let lastHandledSfxAt: string | null = null
+
+onMounted(() => {
+  if (typeof window === 'undefined') return
+  const v = Number(localStorage.getItem('battlemap.audioVolume'))
+  if (Number.isFinite(v) && v >= 0 && v <= 1) audioVolume.value = v
+  audioMuted.value = localStorage.getItem('battlemap.audioMuted') === '1'
+})
+watch(audioVolume, (v) => {
+  if (typeof window !== 'undefined') localStorage.setItem('battlemap.audioVolume', String(v))
+  if (audioPlayerEl.value) audioPlayerEl.value.volume = v
+  if (sfxAudioEl.value) sfxAudioEl.value.volume = v
+})
+watch(audioMuted, (m) => {
+  if (typeof window !== 'undefined') localStorage.setItem('battlemap.audioMuted', m ? '1' : '0')
+})
+
+const fetchAudioTracks = async () => {
+  try {
+    const res = await $fetch<{ tracks: AudioTrack[] }>(`/api/groups/${groupId}/audio/tracks`)
+    audioTracks.value = res.tracks ?? []
+  } catch {
+    audioTracks.value = []
+  }
+}
+onMounted(fetchAudioTracks)
+
+function handleAudioStateUpdate(s: AudioState | null) {
+  audioState.value = s
+  if (typeof window === 'undefined') return
+  if (!s) return
+  // Musik: bei neuem startedAt von vorne starten
+  if (s.isPlaying && s.trackId && s.startedAt && s.startedAt !== lastHandledStartedAt) {
+    lastHandledStartedAt = s.startedAt
+    nextTick(() => {
+      const el = audioPlayerEl.value
+      if (!el) return
+      el.src = `/api/groups/${groupId}/audio/tracks/${s.trackId}/stream`
+      el.volume = audioVolume.value
+      el.loop = true
+      el.play().catch(() => {
+        // Browser blocken oft Autoplay — User muss interagieren
+      })
+    })
+  }
+  if (!s.isPlaying && audioPlayerEl.value && !audioPlayerEl.value.paused) {
+    audioPlayerEl.value.pause()
+  }
+  // SFX: bei neuem lastSfxAt einmalig abspielen
+  if (s.lastSfxAt && s.lastSfxTrackId && s.lastSfxAt !== lastHandledSfxAt) {
+    lastHandledSfxAt = s.lastSfxAt
+    nextTick(() => {
+      const el = sfxAudioEl.value
+      if (!el) return
+      el.src = `/api/groups/${groupId}/audio/tracks/${s.lastSfxTrackId}/stream`
+      el.volume = audioVolume.value
+      el.play().catch(() => {})
+    })
+  }
+}
+
+const dmPlayMusic = async (trackId: number) => {
+  await $fetch(`/api/groups/${groupId}/audio/state`, {
+    method: 'PUT',
+    body: { action: 'play', trackId },
+  })
+  await fetchMap()
+}
+const dmStopMusic = async () => {
+  await $fetch(`/api/groups/${groupId}/audio/state`, {
+    method: 'PUT',
+    body: { action: 'stop' },
+  })
+  await fetchMap()
+}
+const dmTriggerSfx = async (trackId: number) => {
+  await $fetch(`/api/groups/${groupId}/audio/state`, {
+    method: 'PUT',
+    body: { action: 'sfx', trackId },
+  })
+  await fetchMap()
+}
+const dmDeleteTrack = async (trackId: number) => {
+  if (!confirm('Track wirklich löschen?')) return
+  await $fetch(`/api/groups/${groupId}/audio/tracks/${trackId}`, { method: 'DELETE' })
+  await fetchAudioTracks()
+}
+
+// Audio-Upload (DM)
+const audioUploadFile = ref<File | null>(null)
+const audioUploadName = ref('')
+const audioUploadKind = ref<'music' | 'sfx'>('music')
+const audioUploading = ref(false)
+const audioUploadError = ref<string | null>(null)
+const onAudioUploadFile = (e: Event) => {
+  const t = e.target as HTMLInputElement
+  audioUploadFile.value = t.files?.[0] ?? null
+  if (audioUploadFile.value && !audioUploadName.value) {
+    audioUploadName.value = audioUploadFile.value.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ')
+  }
+}
+const uploadAudio = async () => {
+  if (!audioUploadFile.value) return
+  audioUploading.value = true
+  audioUploadError.value = null
+  try {
+    const fd = new FormData()
+    fd.append('file', audioUploadFile.value)
+    fd.append('name', audioUploadName.value || 'Track')
+    fd.append('kind', audioUploadKind.value)
+    await $fetch(`/api/groups/${groupId}/audio/tracks`, { method: 'POST', body: fd })
+    audioUploadFile.value = null
+    audioUploadName.value = ''
+    await fetchAudioTracks()
+  } catch (e: unknown) {
+    audioUploadError.value =
+      (e as { statusMessage?: string }).statusMessage ?? 'Upload fehlgeschlagen.'
+  } finally {
+    audioUploading.value = false
+  }
+}
+
+const audioMusicTracks = computed(() => audioTracks.value.filter((t) => t.kind === 'music'))
+const audioSfxTracks = computed(() => audioTracks.value.filter((t) => t.kind === 'sfx'))
+const currentTrack = computed(() =>
+  audioState.value?.trackId
+    ? audioTracks.value.find((t) => t.id === audioState.value!.trackId)
+    : null,
+)
+
+// --- Initiative-Tracker ---
+const initActive = computed(() => initiativeState.value?.active ?? false)
+const initEntries = computed<InitiativeEntry[]>(() => {
+  const e = initiativeState.value?.entries ?? []
+  return [...e].sort((a, b) => b.initiative - a.initiative)
+})
+const initCurrentEntryId = computed(() => {
+  const s = initiativeState.value
+  if (!s || !s.active) return null
+  return initEntries.value[s.currentIndex]?.id ?? null
+})
+
+const saveInitiative = async (state: InitiativeState | null) => {
+  await $fetch(`/api/groups/${groupId}/initiative`, {
+    method: 'PUT',
+    body: state,
+  })
+  initiativeState.value = state
+}
+
+const initStartFromTokens = async () => {
+  // Alle sichtbaren Token in den Tracker, Initiative = 10 (DM passt an)
+  const entries: InitiativeEntry[] = tokens.value.map((t) => ({
+    id: `tok-${t.id}-${Date.now()}`,
+    name: t.name,
+    initiative: 10,
+    characterId: t.characterId ?? undefined,
+    ownerUserId: t.ownerUserId,
+    hasActed: false,
+    imageUrl: tokenImageSrc(t) ?? undefined,
+  }))
+  await saveInitiative({
+    active: true,
+    round: 1,
+    currentIndex: 0,
+    entries,
+  })
+}
+const initAddManual = async () => {
+  const name = prompt('Name fuer Initiative-Eintrag?')?.trim()
+  if (!name) return
+  const initRaw = prompt('Initiative (Zahl)?', '10')
+  const initiative = Number.parseInt(initRaw ?? '10', 10) || 10
+  const entries = [
+    ...(initiativeState.value?.entries ?? []),
+    {
+      id: `manual-${Date.now()}`,
+      name,
+      initiative,
+      hasActed: false,
+    },
+  ]
+  await saveInitiative({
+    active: initiativeState.value?.active ?? true,
+    round: initiativeState.value?.round ?? 1,
+    currentIndex: initiativeState.value?.currentIndex ?? 0,
+    entries,
+  })
+}
+const initRemoveEntry = async (id: string) => {
+  if (!initiativeState.value) return
+  const entries = initiativeState.value.entries.filter((e) => e.id !== id)
+  await saveInitiative({ ...initiativeState.value, entries })
+}
+const initSetInitiative = async (id: string, value: number) => {
+  if (!initiativeState.value) return
+  const entries = initiativeState.value.entries.map((e) =>
+    e.id === id ? { ...e, initiative: value } : e,
+  )
+  await saveInitiative({ ...initiativeState.value, entries })
+}
+const initNextTurn = async () => {
+  const s = initiativeState.value
+  if (!s || !s.entries.length) return
+  // Sortierte Reihenfolge wie initEntries.value
+  const sorted = initEntries.value
+  const currentSortedIdx = sorted.findIndex((e) => e.id === initCurrentEntryId.value)
+  const nextIdx = currentSortedIdx + 1
+  if (nextIdx >= sorted.length) {
+    // Neue Runde
+    const entries = s.entries.map((e) => ({ ...e, hasActed: false }))
+    await saveInitiative({
+      ...s,
+      entries,
+      round: s.round + 1,
+      currentIndex: 0,
+    })
+  } else {
+    // Markiere aktuellen als hasActed
+    const entries = s.entries.map((e) =>
+      e.id === sorted[currentSortedIdx]?.id ? { ...e, hasActed: true } : e,
+    )
+    // currentIndex bezieht sich auf den entry in der sortierten Liste,
+    // wir speichern aber den Index in der unsortierten state.entries.
+    // Stattdessen: speichere ID des aktuellen Eintrags ueber currentIndex
+    // Workaround: setze currentIndex auf nextIdx und sortiere immer beim Lesen
+    await saveInitiative({ ...s, entries, currentIndex: nextIdx })
+  }
+}
+const initEnd = async () => {
+  if (!confirm('Kampf-Initiative wirklich beenden?')) return
+  await saveInitiative(null)
+}
+
 // --- Tool-Mode (Select / Draw / Erase) ---
 type ToolMode = 'select' | 'draw' | 'erase'
 const toolMode = ref<ToolMode>('select')
@@ -729,6 +1046,15 @@ const onStagePointerDown = (e: PointerEvent) => {
   if (draggingTokenId.value) return
   const target = e.target as HTMLElement
   if (target.closest('[data-token-id]')) return
+  // Alt+Klick = Ping (in jedem Modus)
+  if (e.altKey && stageEl.value) {
+    const rect = stageEl.value.getBoundingClientRect()
+    const x = (e.clientX - rect.left) / zoom.value
+    const y = (e.clientY - rect.top) / zoom.value
+    sendPing(x, y)
+    e.preventDefault()
+    return
+  }
   if (toolMode.value === 'draw') {
     startDrawing(e)
   } else if (toolMode.value === 'select') {
@@ -1073,6 +1399,39 @@ const endResize = () => {
                 stroke-linejoin="round"
                 style="pointer-events: none"
               />
+              <!-- Pings (kurzlebige Marker) -->
+              <g v-for="p in visiblePings" :key="`ping-${p.id}`" class="pointer-events-none">
+                <circle
+                  :cx="p.x"
+                  :cy="p.y"
+                  :r="map.gridSize * 0.4"
+                  fill="none"
+                  :stroke="p.color"
+                  stroke-width="3"
+                  opacity="0.9"
+                >
+                  <animate
+                    attributeName="r"
+                    :from="map.gridSize * 0.4"
+                    :to="map.gridSize * 0.9"
+                    dur="1s"
+                    repeatCount="indefinite"
+                  />
+                  <animate
+                    attributeName="opacity"
+                    from="0.9"
+                    to="0"
+                    dur="1s"
+                    repeatCount="indefinite"
+                  />
+                </circle>
+                <circle
+                  :cx="p.x"
+                  :cy="p.y"
+                  :r="6"
+                  :fill="p.color"
+                />
+              </g>
             </svg>
 
             <div
@@ -1147,8 +1506,238 @@ const endResize = () => {
       </div>
 
       <p class="text-xs text-ink-300">
-        Klick = Info-Karte. Ziehen = bewegen. Doppelklick = bearbeiten. Shift während Loslassen = nicht ans Raster snappen.
+        Klick = Info-Karte · Ziehen = bewegen · Doppelklick = bearbeiten · Shift = nicht ans Raster snappen · <strong>Alt+Klick = Ping</strong>
       </p>
+
+      <!-- Initiative-Tracker -->
+      <div v-if="initiativeState || isDm" class="parchment-card p-3 space-y-2">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <h2 class="font-serif text-lg flex items-center gap-2">
+            <UIcon name="i-lucide-swords" />
+            Initiative
+            <span v-if="initiativeState?.active" class="text-xs text-ink-400 font-normal">
+              · Runde {{ initiativeState.round }}
+            </span>
+          </h2>
+          <div v-if="isDm" class="flex gap-2 flex-wrap">
+            <UButton
+              v-if="!initiativeState"
+              size="xs"
+              color="primary"
+              icon="i-lucide-play"
+              @click="initStartFromTokens"
+            >
+              Mit Tokens starten
+            </UButton>
+            <UButton size="xs" variant="outline" icon="i-lucide-plus" @click="initAddManual">
+              Manuell hinzufügen
+            </UButton>
+            <UButton
+              v-if="initiativeState"
+              size="xs"
+              color="primary"
+              icon="i-lucide-skip-forward"
+              @click="initNextTurn"
+            >
+              Nächster Zug
+            </UButton>
+            <UButton
+              v-if="initiativeState"
+              size="xs"
+              variant="ghost"
+              color="error"
+              @click="initEnd"
+            >
+              Beenden
+            </UButton>
+          </div>
+        </div>
+        <ol v-if="initEntries.length" class="space-y-1">
+          <li
+            v-for="(e, idx) in initEntries"
+            :key="e.id"
+            class="flex items-center gap-2 px-2 py-1 rounded text-sm"
+            :class="e.id === initCurrentEntryId
+              ? 'bg-[var(--color-accent-soft)] ring-2 ring-[var(--color-accent)]'
+              : (e.hasActed ? 'opacity-50' : '')"
+          >
+            <span class="font-mono text-xs w-6 text-right">{{ idx + 1 }}.</span>
+            <img
+              v-if="e.imageUrl"
+              :src="e.imageUrl"
+              :alt="e.name"
+              class="w-6 h-6 rounded-full object-cover border border-[var(--color-accent)]"
+            >
+            <span class="flex-1 truncate">{{ e.name }}</span>
+            <span v-if="e.id === initCurrentEntryId" class="text-[10px] uppercase tracking-widest text-[var(--color-accent)]">am Zug</span>
+            <input
+              v-if="isDm"
+              type="number"
+              :value="e.initiative"
+              class="w-14 text-right text-xs px-1 py-0.5 rounded border border-parchment-700/30 bg-white/60"
+              @change="(ev) => initSetInitiative(e.id, Number((ev.target as HTMLInputElement).value) || 0)"
+            >
+            <span v-else class="font-mono text-xs w-10 text-right">{{ e.initiative }}</span>
+            <UButton
+              v-if="isDm"
+              size="xs"
+              variant="ghost"
+              color="error"
+              icon="i-lucide-x"
+              @click="initRemoveEntry(e.id)"
+            />
+          </li>
+        </ol>
+      </div>
+
+      <!-- Audio-Panel (DM steuert, alle hoeren) -->
+      <div class="parchment-card p-3 space-y-2">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <h2 class="font-serif text-lg flex items-center gap-2">
+            <UIcon name="i-lucide-music" />
+            Audio
+            <span v-if="currentTrack" class="text-xs text-ink-400 font-normal italic">
+              ▶ {{ currentTrack.name }}
+            </span>
+          </h2>
+          <div class="flex items-center gap-2">
+            <UButton
+              size="xs"
+              variant="ghost"
+              :icon="audioMuted ? 'i-lucide-volume-x' : 'i-lucide-volume-2'"
+              @click="audioMuted = !audioMuted"
+            />
+            <input
+              v-model.number="audioVolume"
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              class="w-24"
+              :disabled="audioMuted"
+            >
+            <UButton
+              v-if="isDm && audioState?.isPlaying"
+              size="xs"
+              variant="outline"
+              icon="i-lucide-square"
+              @click="dmStopMusic"
+            >
+              Stopp
+            </UButton>
+          </div>
+        </div>
+        <div v-if="isDm">
+          <!-- Upload-Form -->
+          <div class="grid sm:grid-cols-12 gap-2 items-end mb-2">
+            <UFormField label="Audiodatei (MP3/OGG/WAV)" class="sm:col-span-5">
+              <input
+                type="file"
+                accept="audio/*"
+                class="block w-full text-xs"
+                @change="onAudioUploadFile"
+              >
+            </UFormField>
+            <UFormField label="Name" class="sm:col-span-3">
+              <UInput v-model="audioUploadName" size="xs" />
+            </UFormField>
+            <UFormField label="Typ" class="sm:col-span-2">
+              <USelect
+                v-model="audioUploadKind"
+                :items="[
+                  { label: 'Musik (Loop)', value: 'music' },
+                  { label: 'SFX (1×)', value: 'sfx' },
+                ]"
+                value-key="value"
+                size="xs"
+              />
+            </UFormField>
+            <UButton
+              color="primary"
+              size="xs"
+              icon="i-lucide-upload"
+              :disabled="!audioUploadFile"
+              :loading="audioUploading"
+              class="sm:col-span-2"
+              @click="uploadAudio"
+            >
+              Hochladen
+            </UButton>
+          </div>
+          <p v-if="audioUploadError" class="text-xs text-red-700 mb-2">{{ audioUploadError }}</p>
+          <!-- Musik-Liste -->
+          <div v-if="audioMusicTracks.length" class="space-y-1">
+            <div class="text-[10px] uppercase tracking-widest text-ink-300">Musik</div>
+            <div class="flex flex-wrap gap-1">
+              <div
+                v-for="t in audioMusicTracks"
+                :key="t.id"
+                class="flex items-center gap-1 text-xs bg-white/60 border border-parchment-700/30 rounded pl-2"
+              >
+                <button
+                  type="button"
+                  class="flex items-center gap-1 px-1 py-1 hover:text-[var(--color-accent)]"
+                  :class="audioState?.trackId === t.id && audioState?.isPlaying ? 'text-[var(--color-accent)] font-semibold' : ''"
+                  @click="dmPlayMusic(t.id)"
+                >
+                  <UIcon name="i-lucide-play" class="size-3" />
+                  {{ t.name }}
+                </button>
+                <button
+                  type="button"
+                  class="px-1 py-1 text-ink-300 hover:text-red-700"
+                  @click="dmDeleteTrack(t.id)"
+                >
+                  <UIcon name="i-lucide-x" class="size-3" />
+                </button>
+              </div>
+            </div>
+          </div>
+          <!-- SFX-Liste -->
+          <div v-if="audioSfxTracks.length" class="space-y-1 mt-2">
+            <div class="text-[10px] uppercase tracking-widest text-ink-300">Soundboard (SFX)</div>
+            <div class="flex flex-wrap gap-1">
+              <div
+                v-for="t in audioSfxTracks"
+                :key="t.id"
+                class="flex items-center gap-1 text-xs bg-white/60 border border-parchment-700/30 rounded pl-2"
+              >
+                <button
+                  type="button"
+                  class="flex items-center gap-1 px-1 py-1 hover:text-[var(--color-accent)]"
+                  @click="dmTriggerSfx(t.id)"
+                >
+                  <UIcon name="i-lucide-volume-2" class="size-3" />
+                  {{ t.name }}
+                </button>
+                <button
+                  type="button"
+                  class="px-1 py-1 text-ink-300 hover:text-red-700"
+                  @click="dmDeleteTrack(t.id)"
+                >
+                  <UIcon name="i-lucide-x" class="size-3" />
+                </button>
+              </div>
+            </div>
+          </div>
+          <p v-if="!audioTracks.length" class="text-xs text-ink-300 italic">
+            Noch keine Tracks hochgeladen.
+          </p>
+        </div>
+        <!-- Versteckte Audio-Player fuer alle (Sync via audioState) -->
+        <audio
+          ref="audioPlayerEl"
+          preload="auto"
+          :muted="audioMuted"
+          class="hidden"
+        />
+        <audio
+          ref="sfxAudioEl"
+          preload="auto"
+          :muted="audioMuted"
+          class="hidden"
+        />
+      </div>
     </div>
 
     <!-- Resize-Handle (nur lg+) -->

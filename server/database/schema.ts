@@ -68,6 +68,10 @@ export const groups = pgTable('groups', {
     .references(() => users.id, { onDelete: 'cascade' }),
   /** Aktuell vom DM aktivierte Battle-Map (Spieler werden auf diese geleitet). */
   activeMapId: integer('active_map_id'),
+  /** Initiative-Tracker-State (siehe InitiativeState). */
+  initiativeState: jsonb('initiative_state').$type<unknown>(),
+  /** Audio-Sync-State (siehe AudioState). */
+  audioState: jsonb('audio_state').$type<unknown>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
@@ -152,6 +156,8 @@ export const messages = pgTable(
     type: text('type').notNull().$type<MessageType>().default('text'),
     content: text('content').notNull(),
     payload: jsonb('payload').$type<MessagePayload>(),
+    /** Wenn gesetzt: Whisper, nur Sender + Empfaenger sehen die Nachricht. */
+    targetUserId: integer('target_user_id').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
@@ -284,12 +290,88 @@ export const battleDrawings = pgTable(
   }),
 )
 
+export const battlePings = pgTable(
+  'battle_pings',
+  {
+    id: serial('id').primaryKey(),
+    mapId: integer('map_id')
+      .notNull()
+      .references(() => battleMaps.id, { onDelete: 'cascade' }),
+    ownerUserId: integer('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    x: integer('x').notNull(),
+    y: integer('y').notNull(),
+    color: text('color').notNull().default('#ef4444'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    mapIdx: index('idx_battle_pings_map').on(table.mapId),
+  }),
+)
+
+export const battleAudioTracks = pgTable(
+  'battle_audio_tracks',
+  {
+    id: serial('id').primaryKey(),
+    groupId: integer('group_id')
+      .notNull()
+      .references(() => groups.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    /** "music" laeuft loopend bis stop, "sfx" wird einmalig ausgeloest. */
+    kind: text('kind').notNull().$type<'music' | 'sfx'>().default('music'),
+    audioUrl: text('audio_url').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    groupIdx: index('idx_battle_audio_tracks_group').on(table.groupId),
+  }),
+)
+
 export type BattleMap = typeof battleMaps.$inferSelect
 export type NewBattleMap = typeof battleMaps.$inferInsert
 export type BattleToken = typeof battleTokens.$inferSelect
 export type NewBattleToken = typeof battleTokens.$inferInsert
 export type BattleDrawing = typeof battleDrawings.$inferSelect
 export type NewBattleDrawing = typeof battleDrawings.$inferInsert
+export type BattlePing = typeof battlePings.$inferSelect
+export type BattleAudioTrack = typeof battleAudioTracks.$inferSelect
+
+/**
+ * Initiative-Eintrag im Tracker. Wird in groups.initiative_state als JSON
+ * gespeichert.
+ */
+export interface InitiativeEntry {
+  id: string
+  name: string
+  initiative: number
+  characterId?: number
+  ownerUserId?: number
+  hasActed: boolean
+  /** Optional: Token-Bild URL als Quick-Lookup (Snapshot). */
+  imageUrl?: string
+}
+
+export interface InitiativeState {
+  active: boolean
+  round: number
+  currentIndex: number
+  entries: InitiativeEntry[]
+}
+
+/**
+ * Audio-Sync-State der Gruppe. trackId+startedAt erlauben Spielern, ihren
+ * Audio-Player synchron zu starten. lastSfxTrackId+lastSfxAt loest beim
+ * Polling einen einmaligen SFX-Sound aus.
+ */
+export interface AudioState {
+  trackId: number | null
+  startedAt: string | null
+  isPlaying: boolean
+  lastSfxTrackId: number | null
+  lastSfxAt: string | null
+}
 
 /* ==================================================================== */
 /*  Type-Exports                                                         */
