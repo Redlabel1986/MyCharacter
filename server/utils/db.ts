@@ -271,6 +271,32 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `)
+  // Battle-Map: Fog of War + UI-Toggles (Grid, Namensbalken).
+  await db.execute(sql`
+    ALTER TABLE battle_maps ADD COLUMN IF NOT EXISTS grid_visible BOOLEAN NOT NULL DEFAULT TRUE
+  `)
+  await db.execute(sql`
+    ALTER TABLE battle_maps ADD COLUMN IF NOT EXISTS show_token_names BOOLEAN NOT NULL DEFAULT TRUE
+  `)
+  await db.execute(sql`
+    ALTER TABLE battle_maps ADD COLUMN IF NOT EXISTS fog_enabled BOOLEAN NOT NULL DEFAULT FALSE
+  `)
+  await db.execute(sql`
+    ALTER TABLE battle_maps ADD COLUMN IF NOT EXISTS fog_memory BOOLEAN NOT NULL DEFAULT TRUE
+  `)
+  await db.execute(sql`
+    ALTER TABLE battle_maps ADD COLUMN IF NOT EXISTS fog_revealed JSONB NOT NULL DEFAULT '[]'::jsonb
+  `)
+  await db.execute(sql`
+    ALTER TABLE battle_maps ADD COLUMN IF NOT EXISTS fog_explored JSONB NOT NULL DEFAULT '[]'::jsonb
+  `)
+  // Battle-Token: Sichtweite + per-Token-HP-Sichtbarkeit fuer Spieler.
+  await db.execute(sql`
+    ALTER TABLE battle_tokens ADD COLUMN IF NOT EXISTS vision_radius INTEGER NOT NULL DEFAULT 0
+  `)
+  await db.execute(sql`
+    ALTER TABLE battle_tokens ADD COLUMN IF NOT EXISTS hp_visible_to_players BOOLEAN NOT NULL DEFAULT TRUE
+  `)
 
   await db.execute(sql`
     UPDATE users SET role = 'admin' WHERE email = ${ADMIN_EMAIL} AND role <> 'admin'

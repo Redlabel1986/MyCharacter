@@ -11,6 +11,7 @@ import { requireGroupMember } from '~~/server/utils/group-access'
 import { battleMaps, battleTokens, characters, groups } from '~~/server/database/schema'
 import { DSA_ABILITIES } from '~~/shared/engines/dsa5'
 import { readCharacterHp, writeCharacterHp, type CharSystem } from '~~/shared/character-hp'
+import { cellsInTokenVision, uniqueCells, type CellTuple } from '~~/shared/fog'
 
 const npcAbilityHtbahSchema = z.object({
   id: z.string().min(1).max(40),
@@ -57,6 +58,8 @@ const bodySchema = z.object({
   description: z.string().max(4000).optional(),
   system: z.enum(['htbah', 'dnd', 'dsa5']).nullable().optional(),
   npcAbilities: z.array(npcAbilitySchema).max(40).optional(),
+  visionRadius: z.number().int().min(0).max(60).optional(),
+  hpVisibleToPlayers: z.boolean().optional(),
 })
 
 export default defineEventHandler(async (event) => {
@@ -104,6 +107,13 @@ export default defineEventHandler(async (event) => {
     throw createError({
       statusCode: 403,
       statusMessage: 'Versteckt-Status darf nur der DM aendern.',
+    })
+  }
+  // Sichtweite + HP-Sichtbarkeit darf nur der DM aendern.
+  if ((body.visionRadius !== undefined || body.hpVisibleToPlayers !== undefined) && !isDm) {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'Sichtweite / HP-Sichtbarkeit darf nur der DM aendern.',
     })
   }
   // NPC-Wuerfler-Felder darf nur der DM und nur fuer Tokens ohne Charakter pflegen.
@@ -155,6 +165,42 @@ export default defineEventHandler(async (event) => {
     .set(patch)
     .where(eq(battleTokens.id, tokenId))
     .returning()
+
+  // Auto-Explore: Wenn der Token sich bewegt hat und der Map Fog of War mit
+  // Memory aktiv hat, alle aktuellen Sichtbereiche der Token mit visionRadius>0
+  // zur fog_explored-Liste hinzufuegen. So bleiben begangene Bereiche aufgedeckt.
+  const positionChanged = body.x !== undefined || body.y !== undefined
+  const visionChanged = body.visionRadius !== undefined && body.visionRadius > 0
+  if ((positionChanged || visionChanged) && map.fogEnabled && map.fogMemory) {
+    const allTokens = await db
+      .select({
+        x: battleTokens.x,
+        y: battleTokens.y,
+        sizeMultiplier: battleTokens.sizeMultiplier,
+        visionRadius: battleTokens.visionRadius,
+      })
+      .from(battleTokens)
+      .where(eq(battleTokens.mapId, mapId))
+
+    const newCells: CellTuple[] = []
+    for (const t of allTokens) {
+      if (t.visionRadius <= 0) continue
+      const halfPx = (t.sizeMultiplier * map.gridSize) / 2
+      newCells.push(
+        ...cellsInTokenVision(
+          { centerX: t.x + halfPx, centerY: t.y + halfPx, visionRadius: t.visionRadius },
+          map.gridSize,
+        ),
+      )
+    }
+    const merged = uniqueCells([...(map.fogExplored ?? []), ...newCells])
+    // Soft-Cap, damit fog_explored nicht ungebremst waechst.
+    const capped = merged.slice(0, 50000)
+    await db
+      .update(battleMaps)
+      .set({ fogExplored: capped, updatedAt: new Date() })
+      .where(eq(battleMaps.id, mapId))
+  }
 
   // Wenn HP an den Charakter geschrieben wurde, im Response die effektiven Werte
   // liefern, damit der Client sofort den richtigen Stand sieht.

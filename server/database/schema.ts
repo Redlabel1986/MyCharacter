@@ -221,6 +221,28 @@ export const battleMaps = pgTable(
     gridColor: text('grid_color').notNull().default('rgba(0,0,0,0.35)'),
     /** Sichtbarkeit fuer Spieler (DM kann Karten unsichtbar vorbereiten). */
     visible: boolean('visible').notNull().default(true),
+    /** Raster-Overlay sichtbar (Spieler & DM koennen Entfernungen abschaetzen). */
+    gridVisible: boolean('grid_visible').notNull().default(true),
+    /** Namensbalken an den Tokens fuer Spieler ein-/ausblenden. */
+    showTokenNames: boolean('show_token_names').notNull().default(true),
+    /** Fog of War aktiv? */
+    fogEnabled: boolean('fog_enabled').notNull().default(false),
+    /**
+     * Wenn true: einmal aufgedeckte Bereiche bleiben sichtbar (Memory).
+     * Wenn false: nur das aktuell durch Tokens beleuchtete + DM-manuell aufgedeckte
+     * Gebiet ist enthuellt.
+     */
+    fogMemory: boolean('fog_memory').notNull().default(true),
+    /** Vom DM manuell mit dem Pinsel aufgedeckte Zellen ([col, row]-Tupel). */
+    fogRevealed: jsonb('fog_revealed')
+      .notNull()
+      .$type<Array<[number, number]>>()
+      .default([]),
+    /** Automatisch (durch Token-Sicht) aufgedeckte Zellen, nur wenn fogMemory=true. */
+    fogExplored: jsonb('fog_explored')
+      .notNull()
+      .$type<Array<[number, number]>>()
+      .default([]),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -267,6 +289,13 @@ export const battleTokens = pgTable(
       .notNull()
       .$type<import('~~/shared/npc').NpcAbility[]>()
       .default([]),
+    /**
+     * Sichtweite in Rasterzellen, mit der dieser Token Fog of War aufdeckt.
+     * 0 = kein Beitrag zur Sicht (NPC-Standard).
+     */
+    visionRadius: integer('vision_radius').notNull().default(0),
+    /** Wenn false, sehen Spieler die HP dieses Tokens nicht (nur DM + Owner). */
+    hpVisibleToPlayers: boolean('hp_visible_to_players').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

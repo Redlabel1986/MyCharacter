@@ -20,6 +20,7 @@ import {
 import { audioEmbedUrl, parseAudioUrl, YOUTUBE_NOCOOKIE_HOST } from '~~/shared/audio'
 import { loadYouTubeApi, type YouTubePlayer } from '~/composables/useYouTubeApi'
 import type { NpcAbility } from '~~/shared/npc'
+import { cellsInTokenVision as computeCellsInVision } from '~~/shared/fog'
 
 definePageMeta({ middleware: ['auth'], layout: 'wide' })
 
@@ -32,6 +33,12 @@ interface BattleMap {
   gridSize: number
   gridColor: string
   visible: boolean
+  gridVisible: boolean
+  showTokenNames: boolean
+  fogEnabled: boolean
+  fogMemory: boolean
+  fogRevealed: Array<[number, number]>
+  fogExplored: Array<[number, number]>
 }
 interface Token {
   id: number
@@ -50,6 +57,8 @@ interface Token {
   description: string
   system: 'htbah' | 'dnd' | 'dsa5' | null
   npcAbilities: NpcAbility[]
+  visionRadius: number
+  hpVisibleToPlayers: boolean
 }
 interface Drawing {
   id: number
@@ -290,9 +299,11 @@ const gridSvg = computed(() => {
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${imgW.value}" height="${imgH.value}" viewBox="0 0 ${imgW.value} ${imgH.value}">${polys.join('')}</svg>`
 })
-const gridSvgUrl = computed(() =>
-  gridSvg.value ? `url("data:image/svg+xml;utf8,${encodeURIComponent(gridSvg.value)}")` : 'none',
-)
+const gridSvgUrl = computed(() => {
+  if (!gridSvg.value) return 'none'
+  if (map.value && map.value.gridVisible === false) return 'none'
+  return `url("data:image/svg+xml;utf8,${encodeURIComponent(gridSvg.value)}")`
+})
 
 // --- Snap ---
 const snap = (x: number, y: number) => {
@@ -522,6 +533,13 @@ const saveEdit = async () => {
   const npcPatch = isNpcEditable
     ? { system: t.system ?? null, npcAbilities: t.npcAbilities ?? [] }
     : {}
+  // Sichtweite + HP-Sichtbarkeit darf nur der DM aendern.
+  const dmPatch = isDm.value
+    ? {
+        visionRadius: t.visionRadius ?? 0,
+        hpVisibleToPlayers: t.hpVisibleToPlayers ?? true,
+      }
+    : {}
   await $fetch(`/api/groups/${groupId}/maps/${mapId}/tokens/${t.id}`, {
     method: 'PUT',
     body: {
@@ -532,6 +550,7 @@ const saveEdit = async () => {
       sizeMultiplier: t.sizeMultiplier,
       hidden: isDm.value ? t.hidden : undefined,
       ...npcPatch,
+      ...dmPatch,
     },
   })
   if (editImageFile.value) {
@@ -616,6 +635,10 @@ const settingsDraft = ref({
   gridSize: 50,
   gridColor: 'rgba(0,0,0,0.35)',
   visible: true,
+  gridVisible: true,
+  showTokenNames: true,
+  fogEnabled: false,
+  fogMemory: true,
 })
 // Settings nur beim echten Karten-Wechsel aus dem Server-Snapshot uebernehmen,
 // nicht bei jedem 2s-Poll — sonst klobbert der Poll Eingaben mitten im Tippen.
@@ -630,6 +653,10 @@ watch(
       gridSize: m.gridSize,
       gridColor: m.gridColor,
       visible: m.visible,
+      gridVisible: m.gridVisible ?? true,
+      showTokenNames: m.showTokenNames ?? true,
+      fogEnabled: m.fogEnabled ?? false,
+      fogMemory: m.fogMemory ?? true,
     }
   },
   { immediate: true },
@@ -1221,9 +1248,174 @@ const initEnd = async () => {
   await saveInitiative(null)
 }
 
-// --- Tool-Mode (Select / Draw / Erase) ---
-type ToolMode = 'select' | 'draw' | 'erase'
+// --- Tool-Mode (Select / Draw / Erase / Fog-Reveal / Fog-Conceal) ---
+type ToolMode = 'select' | 'draw' | 'erase' | 'fog-reveal' | 'fog-conceal'
 const toolMode = ref<ToolMode>('select')
+
+// --- Fog of War ---
+const fogCellSize = computed(() => map.value?.gridSize ?? 50)
+const fogOverlayId = computed(() => `fog-mask-${mapId}`)
+const fogGridCols = computed(() =>
+  imgW.value && fogCellSize.value ? Math.ceil(imgW.value / fogCellSize.value) : 0,
+)
+const fogGridRows = computed(() =>
+  imgH.value && fogCellSize.value ? Math.ceil(imgH.value / fogCellSize.value) : 0,
+)
+
+// Zellen, die durch aktuelle Token-Sicht gerade live aufgedeckt sind.
+const fogCurrentVisionSet = computed(() => {
+  const set = new Set<string>()
+  if (!map.value || !fogCellSize.value) return set
+  const g = fogCellSize.value
+  for (const t of tokens.value) {
+    if (t.visionRadius <= 0) continue
+    const halfPx = (t.sizeMultiplier * g) / 2
+    const cells = computeCellsInVision(
+      { centerX: t.x + halfPx, centerY: t.y + halfPx, visionRadius: t.visionRadius },
+      g,
+    )
+    for (const [c, r] of cells) set.add(`${c}|${r}`)
+  }
+  return set
+})
+
+// Vereinigte sichtbare Zellen: DM-manuelle Reveals + aktuelle Sicht +
+// (Memory-Zellen, falls aktiv).
+const fogVisibleSet = computed(() => {
+  const set = new Set<string>(fogCurrentVisionSet.value)
+  if (!map.value) return set
+  for (const [c, r] of map.value.fogRevealed ?? []) set.add(`${c}|${r}`)
+  if (map.value.fogMemory) {
+    for (const [c, r] of map.value.fogExplored ?? []) set.add(`${c}|${r}`)
+  }
+  return set
+})
+
+// Lokaler Pinsel-Buffer: Aenderungen werden waehrend des Zeichnens nur lokal
+// gefuehrt und bei pointerup an den Server gepusht.
+const fogBrushDirty = ref(false)
+const fogLocalRevealed = ref<Array<[number, number]>>([])
+watch(
+  () => map.value?.fogRevealed,
+  (v) => {
+    if (!fogBrushDirty.value) fogLocalRevealed.value = (v ?? []).map((p) => [...p] as [number, number])
+  },
+  { immediate: true },
+)
+const effectiveFogRevealed = computed<Array<[number, number]>>(() =>
+  fogBrushDirty.value ? fogLocalRevealed.value : map.value?.fogRevealed ?? [],
+)
+// Visible-Set unter Beruecksichtigung des lokalen Pinsel-Buffers, damit der
+// DM die Pinsel-Effekte sofort sieht.
+const fogVisibleSetEffective = computed(() => {
+  const set = new Set<string>(fogCurrentVisionSet.value)
+  if (!map.value) return set
+  for (const [c, r] of effectiveFogRevealed.value) set.add(`${c}|${r}`)
+  if (map.value.fogMemory) {
+    for (const [c, r] of map.value.fogExplored ?? []) set.add(`${c}|${r}`)
+  }
+  return set
+})
+
+// Token-Sichtbarkeit fuer den Viewer: Spieler sehen Tokens nur, wenn deren
+// Zelle aktuell beleuchtet, manuell aufgedeckt oder erinnert wird (oder es
+// das eigene Token ist). DM sieht alles.
+const isTokenVisibleToViewer = (t: Token): boolean => {
+  if (isDm.value) return true
+  if (!map.value?.fogEnabled) return true
+  if (user.value && t.ownerUserId === user.value.id) return true
+  const g = map.value.gridSize || 0
+  if (g === 0) return true
+  const halfPx = (t.sizeMultiplier * g) / 2
+  const col = Math.floor((t.x + halfPx) / g)
+  const row = Math.floor((t.y + halfPx) / g)
+  return fogVisibleSetEffective.value.has(`${col}|${row}`)
+}
+
+// Fuer das Rendering: alle sichtbaren Zellen im Karten-Bereich als Tupel-Liste.
+const fogVisibleCellsList = computed<Array<[number, number]>>(() => {
+  if (!map.value) return []
+  const cols = fogGridCols.value
+  const rows = fogGridRows.value
+  const out: Array<[number, number]> = []
+  for (const key of fogVisibleSetEffective.value) {
+    const parts = key.split('|')
+    const c = Number(parts[0])
+    const r = Number(parts[1])
+    if (!Number.isFinite(c) || !Number.isFinite(r)) continue
+    if (c < 0 || r < 0) continue
+    if (c >= cols || r >= rows) continue
+    out.push([c, r])
+  }
+  return out
+})
+
+// Pixelposition -> Zellindex
+const cellAtPixel = (px: number, py: number): [number, number] | null => {
+  const g = fogCellSize.value
+  if (!g || px < 0 || py < 0) return null
+  return [Math.floor(px / g), Math.floor(py / g)]
+}
+
+const paintFogCell = (cell: [number, number], reveal: boolean) => {
+  if (!map.value || !isDm.value) return
+  const key = `${cell[0]}|${cell[1]}`
+  const idx = fogLocalRevealed.value.findIndex(([c, r]) => `${c}|${r}` === key)
+  if (reveal && idx === -1) {
+    fogLocalRevealed.value = [...fogLocalRevealed.value, cell]
+    fogBrushDirty.value = true
+  } else if (!reveal && idx !== -1) {
+    const next = fogLocalRevealed.value.slice()
+    next.splice(idx, 1)
+    fogLocalRevealed.value = next
+    fogBrushDirty.value = true
+  }
+}
+
+const fogBrushActive = ref(false)
+const fogPaintMode = ref<'reveal' | 'conceal'>('reveal')
+
+const flushFogBrush = async () => {
+  if (!fogBrushDirty.value || !map.value) return
+  const payload = fogLocalRevealed.value
+  fogBrushDirty.value = false
+  try {
+    await $fetch(`/api/groups/${groupId}/maps/${mapId}`, {
+      method: 'PUT',
+      body: { fogRevealed: payload },
+    })
+    await fetchMap()
+  } catch (e) {
+    // Bei Fehler den lokalen Buffer nicht resetten, damit kein Datenverlust.
+    fogBrushDirty.value = true
+    console.error('Fog speichern fehlgeschlagen', e)
+  }
+}
+
+const fogRevealAll = async () => {
+  if (!map.value) return
+  if (!confirm('Komplette Karte fuer Spieler aufdecken?')) return
+  const all: Array<[number, number]> = []
+  for (let r = 0; r < fogGridRows.value; r++) {
+    for (let c = 0; c < fogGridCols.value; c++) all.push([c, r])
+  }
+  fogLocalRevealed.value = all
+  fogBrushDirty.value = true
+  await flushFogBrush()
+}
+
+const fogClearAll = async () => {
+  if (!map.value) return
+  if (!confirm('Komplette Karte wieder zudecken (auch Memory loeschen)?')) return
+  fogLocalRevealed.value = []
+  fogBrushDirty.value = true
+  await $fetch(`/api/groups/${groupId}/maps/${mapId}`, {
+    method: 'PUT',
+    body: { fogRevealed: [], fogExplored: [] },
+  })
+  fogBrushDirty.value = false
+  await fetchMap()
+}
 
 // --- Zeichnen ---
 const DRAW_COLORS = [
@@ -1386,6 +1578,17 @@ const onStagePointerDown = (e: PointerEvent) => {
   }
   if (toolMode.value === 'draw') {
     startDrawing(e)
+  } else if (toolMode.value === 'fog-reveal' || toolMode.value === 'fog-conceal') {
+    if (!stageEl.value || !isDm.value) return
+    fogBrushActive.value = true
+    fogPaintMode.value = toolMode.value === 'fog-reveal' ? 'reveal' : 'conceal'
+    const rect = stageEl.value.getBoundingClientRect()
+    const localX = (e.clientX - rect.left) / zoom.value
+    const localY = (e.clientY - rect.top) / zoom.value
+    const cell = cellAtPixel(localX, localY)
+    if (cell) paintFogCell(cell, fogPaintMode.value === 'reveal')
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    e.preventDefault()
   } else if (toolMode.value === 'select') {
     startPan(e)
   }
@@ -1394,6 +1597,15 @@ const onStagePointerDown = (e: PointerEvent) => {
 const onStagePointerMove = (e: PointerEvent) => {
   if (currentStroke.value) {
     continueDrawing(e)
+    return
+  }
+  if (fogBrushActive.value) {
+    if (!stageEl.value) return
+    const rect = stageEl.value.getBoundingClientRect()
+    const localX = (e.clientX - rect.left) / zoom.value
+    const localY = (e.clientY - rect.top) / zoom.value
+    const cell = cellAtPixel(localX, localY)
+    if (cell) paintFogCell(cell, fogPaintMode.value === 'reveal')
     return
   }
   if (pan.active) {
@@ -1407,6 +1619,11 @@ const onStagePointerUp = (e: PointerEvent) => {
     endDrawing()
     return
   }
+  if (fogBrushActive.value) {
+    fogBrushActive.value = false
+    flushFogBrush()
+    return
+  }
   if (pan.active) {
     endPan()
     return
@@ -1417,6 +1634,7 @@ const onStagePointerUp = (e: PointerEvent) => {
 const stageCursor = computed(() => {
   if (toolMode.value === 'draw') return 'crosshair'
   if (toolMode.value === 'erase') return 'cell'
+  if (toolMode.value === 'fog-reveal' || toolMode.value === 'fog-conceal') return 'crosshair'
   return pan.active ? 'grabbing' : 'grab'
 })
 
@@ -1576,6 +1794,22 @@ const endResize = () => {
             <UFormField label="Sichtbar für Spieler" class="sm:col-span-2">
               <UCheckbox v-model="settingsDraft.visible" />
             </UFormField>
+            <UFormField label="Raster sichtbar" class="sm:col-span-3" help="Schaltet das Gitter-Overlay ein/aus.">
+              <UCheckbox v-model="settingsDraft.gridVisible" />
+            </UFormField>
+            <UFormField label="Namens-Bar an Tokens" class="sm:col-span-3" help="Kleine Namens-Plakette unter jedem Token.">
+              <UCheckbox v-model="settingsDraft.showTokenNames" />
+            </UFormField>
+            <UFormField label="Fog of War" class="sm:col-span-3" help="Verdeckt Bereiche, die kein Spieler sieht.">
+              <UCheckbox v-model="settingsDraft.fogEnabled" />
+            </UFormField>
+            <UFormField
+              label="Memory (gesehen = aufgedeckt)"
+              class="sm:col-span-3"
+              help="Sonst wird wieder verdeckt, sobald kein Token mehr in Sicht ist."
+            >
+              <UCheckbox v-model="settingsDraft.fogMemory" :disabled="!settingsDraft.fogEnabled" />
+            </UFormField>
           </div>
           <UButton class="mt-2" color="primary" icon="i-lucide-save" :loading="savingSettings" @click="saveSettings">
             Speichern
@@ -1616,6 +1850,46 @@ const endResize = () => {
           >
             Radieren
           </UButton>
+          <template v-if="isDm && map?.fogEnabled">
+            <UButton
+              size="xs"
+              :variant="toolMode === 'fog-reveal' ? 'solid' : 'outline'"
+              :color="toolMode === 'fog-reveal' ? 'primary' : 'neutral'"
+              icon="i-lucide-eye"
+              title="Mit Pinsel aufdecken"
+              @click="toolMode = 'fog-reveal'"
+            >
+              Aufdecken
+            </UButton>
+            <UButton
+              size="xs"
+              :variant="toolMode === 'fog-conceal' ? 'solid' : 'outline'"
+              :color="toolMode === 'fog-conceal' ? 'primary' : 'neutral'"
+              icon="i-lucide-eye-off"
+              title="Mit Pinsel zudecken"
+              @click="toolMode = 'fog-conceal'"
+            >
+              Zudecken
+            </UButton>
+            <UButton
+              size="xs"
+              variant="ghost"
+              icon="i-lucide-sun"
+              title="Komplette Karte aufdecken"
+              @click="fogRevealAll"
+            >
+              Alles auf
+            </UButton>
+            <UButton
+              size="xs"
+              variant="ghost"
+              icon="i-lucide-cloud-fog"
+              title="Karte wieder zudecken (auch Memory loeschen)"
+              @click="fogClearAll"
+            >
+              Alles zu
+            </UButton>
+          </template>
         </div>
 
         <div v-if="toolMode === 'draw'" class="flex items-center gap-2 flex-wrap pl-3 border-l border-parchment-700/30">
@@ -1778,6 +2052,7 @@ const endResize = () => {
 
             <div
               v-for="t in tokens"
+              v-show="isTokenVisibleToViewer(t)"
               :key="t.id"
               :data-token-id="t.id"
               class="absolute border-2 rounded-full bg-white/80 shadow flex items-center justify-center text-xs font-semibold select-none"
@@ -1862,7 +2137,46 @@ const endResize = () => {
               >
                 {{ tokenCustomLabels(t).join(', ') }}
               </div>
+              <!-- Namens-Bar (per Karten-Setting togglebar) -->
+              <div
+                v-if="map.showTokenNames !== false"
+                class="absolute -bottom-11 left-1/2 -translate-x-1/2 text-[10px] font-semibold bg-black/70 text-white px-1.5 rounded whitespace-nowrap pointer-events-none max-w-[160px] truncate"
+              >
+                {{ t.name }}
+              </div>
             </div>
+
+            <!-- Fog of War: SVG-Mask schneidet sichtbare Zellen aus dem Schleier
+                 heraus. DM sieht nur eine schwache Toenung; Spieler sehen einen
+                 echten Schleier ueber verdeckten Bereichen. -->
+            <svg
+              v-if="map.fogEnabled && imgW && imgH"
+              class="absolute inset-0 pointer-events-none"
+              :width="imgW"
+              :height="imgH"
+              :viewBox="`0 0 ${imgW} ${imgH}`"
+            >
+              <defs>
+                <mask :id="fogOverlayId">
+                  <rect width="100%" height="100%" fill="white" />
+                  <rect
+                    v-for="cell in fogVisibleCellsList"
+                    :key="`${cell[0]}|${cell[1]}`"
+                    :x="cell[0] * map.gridSize"
+                    :y="cell[1] * map.gridSize"
+                    :width="map.gridSize"
+                    :height="map.gridSize"
+                    fill="black"
+                  />
+                </mask>
+              </defs>
+              <rect
+                width="100%"
+                height="100%"
+                :fill="isDm ? 'rgba(20, 20, 60, 0.22)' : 'rgba(8, 10, 22, 0.7)'"
+                :mask="`url(#${fogOverlayId})`"
+              />
+            </svg>
           </div>
           </div>
         </div>
@@ -2447,6 +2761,18 @@ const endResize = () => {
           <UFormField v-if="isDm" label="Versteckt (nur DM sieht)">
             <UCheckbox v-model="editing.hidden" />
           </UFormField>
+          <div v-if="isDm" class="grid grid-cols-2 gap-3">
+            <UFormField label="Sichtweite (Felder)" help="0 = deckt nichts auf">
+              <UInput v-model.number="editing.visionRadius" type="number" min="0" max="60" />
+            </UFormField>
+            <UFormField
+              v-if="editing.characterId === null"
+              label="HP für Spieler sichtbar"
+              help="Aus = nur DM (und Owner) sehen die HP"
+            >
+              <UCheckbox v-model="editing.hpVisibleToPlayers" />
+            </UFormField>
+          </div>
           <!-- NPC-Wuerfler: nur DM, nur fuer Tokens ohne Charakter -->
           <div v-if="isDm && editing.characterId === null" class="border-t border-parchment-700/30 pt-3">
             <NpcAbilitiesEditor

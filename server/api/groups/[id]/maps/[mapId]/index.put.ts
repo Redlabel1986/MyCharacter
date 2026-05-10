@@ -7,12 +7,21 @@ import { useDb } from '~~/server/utils/db'
 import { requireGroupOwner } from '~~/server/utils/group-access'
 import { battleMaps, GRID_TYPES } from '~~/server/database/schema'
 
+const cellTupleSchema = z.tuple([z.number().int(), z.number().int()])
+
 const bodySchema = z.object({
   name: z.string().min(1).max(80).optional(),
   gridType: z.enum(GRID_TYPES).optional(),
   gridSize: z.number().int().min(10).max(500).optional(),
   gridColor: z.string().max(40).optional(),
   visible: z.boolean().optional(),
+  gridVisible: z.boolean().optional(),
+  showTokenNames: z.boolean().optional(),
+  fogEnabled: z.boolean().optional(),
+  fogMemory: z.boolean().optional(),
+  // Cap auf 50k Zellen, damit niemand einen Riesen-Payload schiebt.
+  fogRevealed: z.array(cellTupleSchema).max(50000).optional(),
+  fogExplored: z.array(cellTupleSchema).max(50000).optional(),
 })
 
 export default defineEventHandler(async (event) => {

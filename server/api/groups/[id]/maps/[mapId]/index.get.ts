@@ -65,12 +65,20 @@ export default defineEventHandler(async (event) => {
       .where(inArray(characters.id, charIds))
     for (const c of chars) charsById.set(c.id, { system: c.system as CharSystem, data: c.data })
   }
-  const tokens = visibleTokens.map((t) => {
+  const tokensWithHp = visibleTokens.map((t) => {
     if (t.characterId === null) return t
     const c = charsById.get(t.characterId)
     if (!c) return t
     const hp = readCharacterHp(c.system, c.data)
     return { ...t, hp: hp.current, hpMax: hp.max }
+  })
+  // HP fuer NPC-Tokens, deren DM die Sichtbarkeit fuer Spieler abgeschaltet hat,
+  // im Response auf null setzen — DM (und Token-Owner) sehen weiterhin alles.
+  const tokens = tokensWithHp.map((t) => {
+    if (isDm) return t
+    if (t.ownerUserId === user.id) return t
+    if (t.hpVisibleToPlayers !== false) return t
+    return { ...t, hp: null, hpMax: null }
   })
 
   const drawings = await db
