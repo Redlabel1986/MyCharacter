@@ -15,6 +15,21 @@ import {
   type HtbahCharacterData,
   type HtbahTalent,
 } from '~~/shared/engines/htbah'
+import {
+  DND_ABILITIES,
+  DND_SKILLS,
+  abilityModifier,
+  saveBonus,
+  skillBonus,
+  type DnDAbility,
+  type DnDCharacterData,
+} from '~~/shared/engines/dnd'
+import {
+  DSA_ABILITY_LABELS,
+  dsa5RollProbe,
+  type Dsa5CharacterData,
+  type DsaAbility,
+} from '~~/shared/engines/dsa5'
 import type { Character } from '~~/server/database/schema'
 import type { RollPayload } from '~~/server/database/schema'
 
@@ -126,6 +141,251 @@ export function rollFree(input: FreeRollInput): RollPayload {
     modifier: input.modifier || undefined,
     dice,
     success: true, // freier Wurf: keine Auswertung
+    note: input.note?.trim() || undefined,
+  }
+}
+
+/* ==================================================================== */
+/*  D&D 5e / 2024                                                        */
+/* ==================================================================== */
+
+function rand1to(n: number): number {
+  return Math.floor(Math.random() * n) + 1
+}
+
+export type DndRollMode = 'normal' | 'advantage' | 'disadvantage'
+
+export interface DndSkillRollInput {
+  character: Character
+  skillKey: string
+  modifier?: number
+  dc?: number
+  rollMode?: DndRollMode
+  note?: string
+}
+
+export interface DndSaveRollInput {
+  character: Character
+  ability: DnDAbility
+  modifier?: number
+  dc?: number
+  rollMode?: DndRollMode
+  note?: string
+}
+
+function rollD20(rollMode: DndRollMode): { final: number; rolls: number[] } {
+  if (rollMode === 'advantage') {
+    const a = rand1to(20)
+    const b = rand1to(20)
+    return { final: Math.max(a, b), rolls: [a, b] }
+  }
+  if (rollMode === 'disadvantage') {
+    const a = rand1to(20)
+    const b = rand1to(20)
+    return { final: Math.min(a, b), rolls: [a, b] }
+  }
+  const a = rand1to(20)
+  return { final: a, rolls: [a] }
+}
+
+export function rollDndSkill(input: DndSkillRollInput): RollPayload {
+  if (input.character.system !== 'dnd5e' && input.character.system !== 'dnd2024') {
+    throw createError({ statusCode: 400, statusMessage: 'Charakter ist kein D&D-Bogen.' })
+  }
+  const data = input.character.data as DnDCharacterData
+  const skill = DND_SKILLS.find((s) => s.key === input.skillKey)
+  if (!skill) {
+    throw createError({ statusCode: 404, statusMessage: 'Skill unbekannt.' })
+  }
+  const bonus = skillBonus(data, input.skillKey).value
+  const mod = input.modifier ?? 0
+  const mode = input.rollMode ?? 'normal'
+  const { final, rolls } = rollD20(mode)
+  const total = final + bonus + mod
+  const success = input.dc !== undefined ? total >= input.dc : true
+  const critical = final === 20
+  const fumble = final === 1
+  const labelMode = mode === 'advantage' ? ' (Vorteil)' : mode === 'disadvantage' ? ' (Nachteil)' : ''
+  return {
+    system: input.character.system,
+    label: `${skill.label}${labelMode}`,
+    characterId: input.character.id,
+    characterName: input.character.name,
+    target: input.dc ?? total,
+    modifier: bonus + mod || undefined,
+    dice: rolls,
+    success,
+    critical: critical || undefined,
+    fumble: fumble || undefined,
+    note: input.note?.trim() || undefined,
+  }
+}
+
+export function rollDndSave(input: DndSaveRollInput): RollPayload {
+  if (input.character.system !== 'dnd5e' && input.character.system !== 'dnd2024') {
+    throw createError({ statusCode: 400, statusMessage: 'Charakter ist kein D&D-Bogen.' })
+  }
+  if (!DND_ABILITIES.includes(input.ability)) {
+    throw createError({ statusCode: 400, statusMessage: 'Ungültiges Attribut.' })
+  }
+  const data = input.character.data as DnDCharacterData
+  const bonus = saveBonus(data, input.ability)
+  const mod = input.modifier ?? 0
+  const mode = input.rollMode ?? 'normal'
+  const { final, rolls } = rollD20(mode)
+  const total = final + bonus + mod
+  const success = input.dc !== undefined ? total >= input.dc : true
+  const critical = final === 20
+  const fumble = final === 1
+  const labelMode = mode === 'advantage' ? ' (Vorteil)' : mode === 'disadvantage' ? ' (Nachteil)' : ''
+  return {
+    system: input.character.system,
+    label: `${input.ability}-Rettungswurf${labelMode}`,
+    characterId: input.character.id,
+    characterName: input.character.name,
+    target: input.dc ?? total,
+    modifier: bonus + mod || undefined,
+    dice: rolls,
+    success,
+    critical: critical || undefined,
+    fumble: fumble || undefined,
+    note: input.note?.trim() || undefined,
+  }
+}
+
+export interface DndAbilityCheckInput {
+  character: Character
+  ability: DnDAbility
+  modifier?: number
+  dc?: number
+  rollMode?: DndRollMode
+  note?: string
+}
+
+export function rollDndAbility(input: DndAbilityCheckInput): RollPayload {
+  if (input.character.system !== 'dnd5e' && input.character.system !== 'dnd2024') {
+    throw createError({ statusCode: 400, statusMessage: 'Charakter ist kein D&D-Bogen.' })
+  }
+  const data = input.character.data as DnDCharacterData
+  const bonus = abilityModifier(data.abilities[input.ability].score)
+  const mod = input.modifier ?? 0
+  const mode = input.rollMode ?? 'normal'
+  const { final, rolls } = rollD20(mode)
+  const total = final + bonus + mod
+  const success = input.dc !== undefined ? total >= input.dc : true
+  const critical = final === 20
+  const fumble = final === 1
+  const labelMode = mode === 'advantage' ? ' (Vorteil)' : mode === 'disadvantage' ? ' (Nachteil)' : ''
+  return {
+    system: input.character.system,
+    label: `${input.ability}-Probe${labelMode}`,
+    characterId: input.character.id,
+    characterName: input.character.name,
+    target: input.dc ?? total,
+    modifier: bonus + mod || undefined,
+    dice: rolls,
+    success,
+    critical: critical || undefined,
+    fumble: fumble || undefined,
+    note: input.note?.trim() || undefined,
+  }
+}
+
+/* ==================================================================== */
+/*  DSA 5 — 3W20-Talentprobe                                             */
+/* ==================================================================== */
+
+export interface Dsa5SkillRollInput {
+  character: Character
+  /** ID des Talents in data.skills oder data.spells/liturgies. */
+  skillId: string
+  /** Wo der Skill gefunden wird: skill (Talent), spell, liturgy. */
+  source?: 'skill' | 'spell' | 'liturgy'
+  modifier?: number
+  note?: string
+}
+
+export function rollDsa5Skill(input: Dsa5SkillRollInput): RollPayload {
+  if (input.character.system !== 'dsa5') {
+    throw createError({ statusCode: 400, statusMessage: 'Charakter ist kein DSA-5-Bogen.' })
+  }
+  const data = input.character.data as Dsa5CharacterData
+  const src = input.source ?? 'skill'
+  const collection: Array<{
+    id: string
+    name: string
+    probe: [DsaAbility, DsaAbility, DsaAbility]
+    fw?: number
+    zfw?: number
+    lfw?: number
+  }> =
+    src === 'skill'
+      ? data.skills as never
+      : src === 'spell'
+        ? data.spells as never
+        : data.liturgies as never
+  const t = collection.find((s) => s.id === input.skillId)
+  if (!t) {
+    throw createError({ statusCode: 404, statusMessage: 'Talent/Zauber/Liturgie nicht gefunden.' })
+  }
+  const fw = t.fw ?? t.zfw ?? t.lfw ?? 0
+  const abilities: [number, number, number] = [
+    data.abilities[t.probe[0]],
+    data.abilities[t.probe[1]],
+    data.abilities[t.probe[2]],
+  ]
+  const rolls: [number, number, number] = [rand1to(20), rand1to(20), rand1to(20)]
+  const probe = dsa5RollProbe({
+    rolls,
+    abilities,
+    fw,
+    modifier: input.modifier ?? 0,
+  })
+  const probeLabel = `${t.probe[0]}/${t.probe[1]}/${t.probe[2]}`
+  return {
+    system: 'dsa5',
+    label: `${t.name} — ${probeLabel} (FW ${fw})`,
+    characterId: input.character.id,
+    characterName: input.character.name,
+    target: fw,
+    modifier: input.modifier || undefined,
+    dice: rolls,
+    success: probe.success,
+    critical: probe.spectacular || undefined,
+    fumble: probe.fumble || undefined,
+    qualityStep: probe.qs || undefined,
+    note: input.note?.trim() || undefined,
+  }
+}
+
+export interface Dsa5AbilityCheckInput {
+  character: Character
+  ability: DsaAbility
+  modifier?: number
+  note?: string
+}
+
+export function rollDsa5Ability(input: Dsa5AbilityCheckInput): RollPayload {
+  if (input.character.system !== 'dsa5') {
+    throw createError({ statusCode: 400, statusMessage: 'Charakter ist kein DSA-5-Bogen.' })
+  }
+  const data = input.character.data as Dsa5CharacterData
+  const target = data.abilities[input.ability] + (input.modifier ?? 0)
+  const roll = rand1to(20)
+  const success = roll <= target && roll < 20
+  const critical = roll === 1
+  const fumble = roll === 20
+  return {
+    system: 'dsa5',
+    label: `${DSA_ABILITY_LABELS[input.ability]}-Probe (Eigenschaft)`,
+    characterId: input.character.id,
+    characterName: input.character.name,
+    target,
+    modifier: input.modifier || undefined,
+    dice: [roll],
+    success,
+    critical: critical || undefined,
+    fumble: fumble || undefined,
     note: input.note?.trim() || undefined,
   }
 }
