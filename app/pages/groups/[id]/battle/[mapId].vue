@@ -902,6 +902,50 @@ const initNextTurn = async () => {
     await saveInitiative({ ...s, entries, currentIndex: nextIdx })
   }
 }
+const initPrevTurn = async () => {
+  const s = initiativeState.value
+  if (!s || !s.entries.length) return
+  const sorted = initEntries.value
+  const currentSortedIdx = sorted.findIndex((e) => e.id === initCurrentEntryId.value)
+  const prevIdx = currentSortedIdx - 1
+  if (prevIdx < 0) {
+    // Vorherige Runde — falls round > 1
+    if (s.round > 1) {
+      // hasActed-Flags fuer alle aktivieren (sind ja durch)
+      const entries = s.entries.map((e) => ({ ...e, hasActed: true }))
+      await saveInitiative({
+        ...s,
+        entries,
+        round: s.round - 1,
+        currentIndex: Math.max(0, sorted.length - 1),
+      })
+    }
+    return
+  }
+  // Bei Rückschritt im selben Round: hasActed auf dem vorherigen Eintrag
+  // wieder zurücksetzen, damit man den Zug "nochmal" machen kann.
+  const prevId = sorted[prevIdx]?.id
+  const entries = s.entries.map((e) =>
+    e.id === prevId ? { ...e, hasActed: false } : e,
+  )
+  await saveInitiative({ ...s, entries, currentIndex: prevIdx })
+}
+
+const initSetRound = async (round: number) => {
+  const s = initiativeState.value
+  if (!s) return
+  const r = Math.max(1, Math.min(10000, Math.floor(round) || 1))
+  await saveInitiative({ ...s, round: r })
+}
+
+const initResetRound = async () => {
+  const s = initiativeState.value
+  if (!s) return
+  if (!confirm('Initiative zurücksetzen — Runde 1, alle wieder „nicht gezogen"?')) return
+  const entries = s.entries.map((e) => ({ ...e, hasActed: false }))
+  await saveInitiative({ ...s, entries, round: 1, currentIndex: 0 })
+}
+
 const initEnd = async () => {
   if (!confirm('Kampf-Initiative wirklich beenden?')) return
   await saveInitiative(null)
@@ -1549,10 +1593,51 @@ const endResize = () => {
           <h2 class="font-serif text-lg flex items-center gap-2">
             <UIcon name="i-lucide-swords" />
             Initiative
-            <span v-if="initiativeState?.active" class="text-xs text-ink-400 font-normal">
-              · Runde {{ initiativeState.round }}
-            </span>
           </h2>
+          <!-- Rundenzähler: prominent, fuer DM editierbar mit +/− -->
+          <div v-if="initiativeState" class="flex items-center gap-1">
+            <UButton
+              v-if="isDm"
+              size="xs"
+              variant="outline"
+              icon="i-lucide-minus"
+              :disabled="initiativeState.round <= 1"
+              title="Runde -1"
+              @click="initSetRound(initiativeState.round - 1)"
+            />
+            <div
+              class="px-3 py-1 rounded font-serif font-semibold text-base bg-[var(--color-accent-soft)] border border-[var(--color-accent)]/40 flex items-center gap-2"
+              :title="isDm ? 'Klicken zum Bearbeiten' : ''"
+            >
+              <span class="text-[10px] uppercase tracking-widest text-[var(--color-accent)]">Runde</span>
+              <input
+                v-if="isDm"
+                type="number"
+                min="1"
+                max="9999"
+                :value="initiativeState.round"
+                class="w-14 text-center font-serif font-semibold text-base bg-transparent border-0 outline-none focus:ring-2 focus:ring-[var(--color-accent)] rounded"
+                @change="(ev) => initSetRound(Number((ev.target as HTMLInputElement).value))"
+              >
+              <span v-else>{{ initiativeState.round }}</span>
+            </div>
+            <UButton
+              v-if="isDm"
+              size="xs"
+              variant="outline"
+              icon="i-lucide-plus"
+              title="Runde +1"
+              @click="initSetRound(initiativeState.round + 1)"
+            />
+            <UButton
+              v-if="isDm"
+              size="xs"
+              variant="ghost"
+              icon="i-lucide-rotate-ccw"
+              title="Auf Runde 1 zurücksetzen, alle wieder „nicht gezogen""
+              @click="initResetRound"
+            />
+          </div>
           <div v-if="isDm" class="flex gap-2 flex-wrap">
             <UButton
               v-if="!initiativeState"
@@ -1564,7 +1649,17 @@ const endResize = () => {
               Mit Tokens starten
             </UButton>
             <UButton size="xs" variant="outline" icon="i-lucide-plus" @click="initAddManual">
-              Manuell hinzufügen
+              Manuell
+            </UButton>
+            <UButton
+              v-if="initiativeState"
+              size="xs"
+              variant="outline"
+              icon="i-lucide-skip-back"
+              :disabled="initiativeState.currentIndex === 0 && initiativeState.round === 1"
+              @click="initPrevTurn"
+            >
+              Zurück
             </UButton>
             <UButton
               v-if="initiativeState"
