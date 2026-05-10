@@ -991,12 +991,18 @@ const audioMusicTracks = computed(() => audioTracks.value.filter((t) => t.kind =
 const audioSfxTracks = computed(() => audioTracks.value.filter((t) => t.kind === 'sfx'))
 // (currentTrack ist weiter oben deklariert — gemeinsam mit der Embed-/Stream-Logik)
 
-// Mein Token auf dieser Karte (fuer Mini-Charsheet) — bevorzugt einer mit Charakter-Bindung.
-const myTokenOnMap = computed(() => {
-  if (!user.value) return null
+// Meine Tokens auf dieser Karte (fuer Mini-Charsheet) — Char-gebundene zuerst,
+// damit der DM seine NPCs/Monster ueber Tabs erreicht und der Spieler-Charakter
+// der Default-Tab bleibt.
+const myTokensOnMap = computed<Token[]>(() => {
+  if (!user.value) return []
   const mine = tokens.value.filter((t) => t.ownerUserId === user.value!.id)
-  const withChar = mine.find((t) => t.characterId !== null)
-  return withChar ?? mine[0] ?? null
+  return [...mine].sort((a, b) => {
+    const aHas = a.characterId !== null ? 0 : 1
+    const bHas = b.characterId !== null ? 0 : 1
+    if (aHas !== bHas) return aHas - bHas
+    return a.id - b.id
+  })
 })
 
 // --- Initiative-Tracker ---
@@ -1932,7 +1938,7 @@ const endResize = () => {
       <MiniCharSheet
         :group-id="groupId"
         :map-id="mapId"
-        :token="myTokenOnMap"
+        :tokens="myTokensOnMap"
         @token-updated="fetchMap"
       />
 
