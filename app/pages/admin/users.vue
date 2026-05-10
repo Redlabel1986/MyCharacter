@@ -78,16 +78,132 @@ const selectOnFocus = (e: FocusEvent) => {
 const roles: Array<AdminUser['role']> = ['player', 'dm', 'admin']
 const roleLabel = (r: AdminUser['role']) =>
   r === 'admin' ? 'Admin' : r === 'dm' ? 'Dungeon Master' : 'Spieler'
+
+// Bibliotheks-Passwort
+const { data: libPwState, refresh: refreshLibPw } = await useFetch<{ isSet: boolean }>(
+  '/api/admin/library-password',
+  { default: () => ({ isSet: false }) },
+)
+const libPasswordInput = ref('')
+const libPwSaving = ref(false)
+const libPwMessage = ref<{ kind: 'success' | 'error'; text: string } | null>(null)
+
+const setLibraryPassword = async () => {
+  if (libPasswordInput.value.length < 4) {
+    libPwMessage.value = { kind: 'error', text: 'Mindestens 4 Zeichen.' }
+    return
+  }
+  libPwSaving.value = true
+  libPwMessage.value = null
+  try {
+    await $fetch('/api/admin/library-password', {
+      method: 'PUT',
+      body: { password: libPasswordInput.value },
+    })
+    libPasswordInput.value = ''
+    libPwMessage.value = { kind: 'success', text: 'Bibliotheks-Passwort gespeichert.' }
+    await refreshLibPw()
+  } catch (e: unknown) {
+    libPwMessage.value = {
+      kind: 'error',
+      text: (e as { statusMessage?: string }).statusMessage ?? 'Speichern fehlgeschlagen.',
+    }
+  } finally {
+    libPwSaving.value = false
+  }
+}
+
+const clearLibraryPassword = async () => {
+  if (!confirm('Bibliotheks-Passwort entfernen? Danach kann jeder eingeloggte User die Bibliothek wieder direkt sehen.')) return
+  libPwSaving.value = true
+  libPwMessage.value = null
+  try {
+    await $fetch('/api/admin/library-password', {
+      method: 'PUT',
+      body: { password: null },
+    })
+    libPwMessage.value = { kind: 'success', text: 'Bibliotheks-Passwort entfernt.' }
+    await refreshLibPw()
+  } catch (e: unknown) {
+    libPwMessage.value = {
+      kind: 'error',
+      text: (e as { statusMessage?: string }).statusMessage ?? 'Entfernen fehlgeschlagen.',
+    }
+  } finally {
+    libPwSaving.value = false
+  }
+}
 </script>
 
 <template>
   <div class="space-y-4">
     <div>
-      <h1 class="font-serif text-3xl">Benutzer-Verwaltung</h1>
-      <p class="text-sm text-ink-400">Rollen aller registrierten User vergeben.</p>
+      <h1 class="font-serif text-3xl">Admin</h1>
+      <p class="text-sm text-ink-400">Benutzer und Bibliotheks-Zugang verwalten.</p>
+    </div>
+
+    <div class="parchment-card p-4 space-y-3">
+      <div class="flex items-center gap-3">
+        <UIcon name="i-lucide-library" class="text-2xl text-[var(--color-accent)]" />
+        <div>
+          <h2 class="font-serif text-xl">Bibliotheks-Passwort</h2>
+          <p class="text-xs text-ink-400">
+            Optionaler Code, den User zusätzlich zum Login eingeben müssen, um die Bibliothek zu öffnen.
+          </p>
+        </div>
+        <span
+          v-if="libPwState?.isSet"
+          class="ml-auto text-[10px] uppercase tracking-widest text-green-500 font-semibold"
+        >
+          Aktiv
+        </span>
+        <span
+          v-else
+          class="ml-auto text-[10px] uppercase tracking-widest text-ink-300 font-semibold"
+        >
+          Inaktiv
+        </span>
+      </div>
+      <form
+        class="flex flex-wrap gap-2 items-start"
+        @submit.prevent="setLibraryPassword"
+      >
+        <PasswordInput
+          v-model="libPasswordInput"
+          :placeholder="libPwState?.isSet ? 'Neues Passwort setzen' : 'Passwort festlegen'"
+          autocomplete="new-password"
+          class="min-w-[220px] flex-1"
+        />
+        <UButton
+          type="submit"
+          color="primary"
+          :loading="libPwSaving"
+          :disabled="libPasswordInput.length < 4"
+        >
+          Speichern
+        </UButton>
+        <UButton
+          v-if="libPwState?.isSet"
+          type="button"
+          variant="outline"
+          color="error"
+          :disabled="libPwSaving"
+          @click="clearLibraryPassword"
+        >
+          Schutz entfernen
+        </UButton>
+      </form>
+      <div
+        v-if="libPwMessage"
+        class="text-sm"
+        :class="libPwMessage.kind === 'success' ? 'text-green-500' : 'text-red-400'"
+      >
+        {{ libPwMessage.text }}
+      </div>
     </div>
 
     <div class="parchment-card p-4">
+      <h2 class="font-serif text-xl mb-3">Benutzer</h2>
       <div v-if="pending" class="text-ink-400">Lade…</div>
       <table v-else class="w-full text-sm">
         <thead>

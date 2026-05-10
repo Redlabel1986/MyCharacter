@@ -11,6 +11,8 @@ declare module '#auth-utils' {
 
   interface UserSession {
     user?: User
+    /** True, sobald der Bibliotheks-Code in dieser Session korrekt eingegeben wurde. */
+    libraryUnlocked?: boolean
   }
 }
 

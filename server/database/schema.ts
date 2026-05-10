@@ -343,6 +343,13 @@ export const battleAudioTracks = pgTable(
   }),
 )
 
+// App-weite Einstellungen als Key/Value (z. B. library_password_hash).
+export const appSettings = pgTable('app_settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 export type BattleMap = typeof battleMaps.$inferSelect
 export type NewBattleMap = typeof battleMaps.$inferInsert
 export type BattleToken = typeof battleTokens.$inferSelect

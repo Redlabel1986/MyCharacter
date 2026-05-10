@@ -263,6 +263,14 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE
   `)
+  // App-weite Einstellungen (Key/Value): Bibliotheks-Passwort etc.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
 
   await db.execute(sql`
     UPDATE users SET role = 'admin' WHERE email = ${ADMIN_EMAIL} AND role <> 'admin'

@@ -4,6 +4,16 @@ definePageMeta({ middleware: ['auth'] })
 const route = useRoute()
 const slug = computed(() => String(route.params.slug))
 
+// Falls die Bibliothek mit einem Passwort gesichert ist und diese Session noch
+// nicht entsperrt wurde, zur Bibliotheks-Uebersicht zurueck (dort die Prompt).
+const { data: libStatus } = await useFetch<{ requiresPassword: boolean; unlocked: boolean }>(
+  '/api/library/status',
+  { default: () => ({ requiresPassword: false, unlocked: true }) },
+)
+if (libStatus.value?.requiresPassword && !libStatus.value.unlocked) {
+  await navigateTo('/bibliothek')
+}
+
 interface TranslationDoc {
   slug: string
   sourceLang: string

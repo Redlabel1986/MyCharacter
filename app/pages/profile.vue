@@ -109,11 +109,9 @@ const submitPasswordChange = async () => {
           <label class="text-xs uppercase tracking-widest text-ink-300 block mb-1">
             Aktuelles Passwort
           </label>
-          <UInput
+          <PasswordInput
             v-model="pwCurrent"
-            type="password"
             autocomplete="current-password"
-            class="w-full"
             required
           />
         </div>
@@ -121,11 +119,9 @@ const submitPasswordChange = async () => {
           <label class="text-xs uppercase tracking-widest text-ink-300 block mb-1">
             Neues Passwort
           </label>
-          <UInput
+          <PasswordInput
             v-model="pwNew"
-            type="password"
             autocomplete="new-password"
-            class="w-full"
             required
           />
           <p class="text-xs text-ink-400 mt-1">Mindestens 8 Zeichen.</p>
@@ -134,11 +130,9 @@ const submitPasswordChange = async () => {
           <label class="text-xs uppercase tracking-widest text-ink-300 block mb-1">
             Neues Passwort bestätigen
           </label>
-          <UInput
+          <PasswordInput
             v-model="pwConfirm"
-            type="password"
             autocomplete="new-password"
-            class="w-full"
             required
           />
         </div>

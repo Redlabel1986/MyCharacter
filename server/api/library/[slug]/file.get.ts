@@ -3,9 +3,10 @@
  * Quelle: Vercel Blob (privat) oder lokales Filesystem als Dev-Fallback.
  */
 import { findEntry, fetchSource } from '~~/server/utils/library'
+import { requireLibraryAccess } from '~~/server/utils/library-access'
 
 export default defineEventHandler(async (event) => {
-  await requireUserSession(event)
+  await requireLibraryAccess(event)
   const slug = getRouterParam(event, 'slug')
   if (!slug) {
     throw createError({ statusCode: 400, statusMessage: 'Slug fehlt.' })

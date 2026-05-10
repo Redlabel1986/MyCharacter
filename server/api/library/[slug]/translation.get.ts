@@ -3,9 +3,10 @@
  * Liefert 404, wenn fuer dieses PDF noch keine Uebersetzung erstellt wurde.
  */
 import { findEntry, loadTranslation } from '~~/server/utils/library'
+import { requireLibraryAccess } from '~~/server/utils/library-access'
 
 export default defineEventHandler(async (event) => {
-  await requireUserSession(event)
+  await requireLibraryAccess(event)
   const slug = getRouterParam(event, 'slug')
   if (!slug) {
     throw createError({ statusCode: 400, statusMessage: 'Slug fehlt.' })
