@@ -3,7 +3,7 @@ import { SYSTEM_META, type GameSystem } from '~~/shared/systems'
 
 definePageMeta({ middleware: ['auth'] })
 
-const { user } = useUserSession()
+const { user, fetch: refreshSession } = useUserSession()
 
 interface AccessRow {
   id: number
@@ -24,10 +24,64 @@ const remove = async (id: number) => {
 }
 
 const roleLabel = (r: string) => (r === 'admin' ? 'Admin' : r === 'dm' ? 'DM' : 'Spieler')
+
+// Passwort aendern
+const pwCurrent = ref('')
+const pwNew = ref('')
+const pwConfirm = ref('')
+const pwSaving = ref(false)
+const pwError = ref<string | null>(null)
+const pwSuccess = ref(false)
+
+const submitPasswordChange = async () => {
+  pwError.value = null
+  pwSuccess.value = false
+  if (pwNew.value.length < 8) {
+    pwError.value = 'Neues Passwort muss mindestens 8 Zeichen haben.'
+    return
+  }
+  if (pwNew.value !== pwConfirm.value) {
+    pwError.value = 'Die beiden neuen Passwörter stimmen nicht überein.'
+    return
+  }
+  pwSaving.value = true
+  try {
+    await $fetch('/api/profile/change-password', {
+      method: 'POST',
+      body: { currentPassword: pwCurrent.value, newPassword: pwNew.value },
+    })
+    pwSuccess.value = true
+    pwCurrent.value = ''
+    pwNew.value = ''
+    pwConfirm.value = ''
+    await refreshSession()
+  } catch (e: unknown) {
+    pwError.value =
+      (e as { statusMessage?: string; data?: { statusMessage?: string } }).statusMessage ??
+      (e as { data?: { statusMessage?: string } }).data?.statusMessage ??
+      'Passwort-Änderung fehlgeschlagen.'
+  } finally {
+    pwSaving.value = false
+  }
+}
 </script>
 
 <template>
   <div class="space-y-6 max-w-3xl mx-auto">
+    <div
+      v-if="user?.mustChangePassword"
+      class="parchment-card p-4 border-l-4 border-amber-500/70 flex gap-3 items-start"
+    >
+      <UIcon name="i-lucide-alert-triangle" class="text-amber-500 text-2xl shrink-0 mt-0.5" />
+      <div>
+        <div class="font-serif text-lg">Bitte vergib ein neues Passwort</div>
+        <div class="text-sm text-ink-300">
+          Dein aktuelles Passwort wurde von einem Admin auf ein Einmal-Passwort gesetzt. Trag es
+          unten als „aktuelles Passwort“ ein und wähle ein neues.
+        </div>
+      </div>
+    </div>
+
     <div class="parchment-card p-6">
       <h1 class="font-serif text-3xl">Mein Profil</h1>
       <div class="accent-rule my-3" />
@@ -45,6 +99,53 @@ const roleLabel = (r: string) => (r === 'admin' ? 'Admin' : r === 'dm' ? 'DM' : 
           <dd class="font-semibold">{{ roleLabel(user?.role ?? 'player') }}</dd>
         </div>
       </dl>
+    </div>
+
+    <div class="parchment-card p-6">
+      <h2 class="font-serif text-2xl">Passwort ändern</h2>
+      <div class="accent-rule my-3" />
+      <form class="space-y-3 max-w-md" @submit.prevent="submitPasswordChange">
+        <div>
+          <label class="text-xs uppercase tracking-widest text-ink-300 block mb-1">
+            Aktuelles Passwort
+          </label>
+          <UInput
+            v-model="pwCurrent"
+            type="password"
+            autocomplete="current-password"
+            class="w-full"
+            required
+          />
+        </div>
+        <div>
+          <label class="text-xs uppercase tracking-widest text-ink-300 block mb-1">
+            Neues Passwort
+          </label>
+          <UInput
+            v-model="pwNew"
+            type="password"
+            autocomplete="new-password"
+            class="w-full"
+            required
+          />
+          <p class="text-xs text-ink-400 mt-1">Mindestens 8 Zeichen.</p>
+        </div>
+        <div>
+          <label class="text-xs uppercase tracking-widest text-ink-300 block mb-1">
+            Neues Passwort bestätigen
+          </label>
+          <UInput
+            v-model="pwConfirm"
+            type="password"
+            autocomplete="new-password"
+            class="w-full"
+            required
+          />
+        </div>
+        <div v-if="pwError" class="text-sm text-red-400">{{ pwError }}</div>
+        <div v-if="pwSuccess" class="text-sm text-green-500">Passwort erfolgreich geändert.</div>
+        <UButton type="submit" color="primary" :loading="pwSaving">Speichern</UButton>
+      </form>
     </div>
 
     <div class="parchment-card p-6">

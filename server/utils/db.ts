@@ -259,6 +259,11 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
     ALTER TABLE battle_tokens ADD COLUMN IF NOT EXISTS npc_abilities JSONB NOT NULL DEFAULT '[]'::jsonb
   `)
 
+  // Flag fuer erzwungene Passwort-Aenderung nach Admin-Reset (idempotent).
+  await db.execute(sql`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE
+  `)
+
   await db.execute(sql`
     UPDATE users SET role = 'admin' WHERE email = ${ADMIN_EMAIL} AND role <> 'admin'
   `)
