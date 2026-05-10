@@ -16,6 +16,7 @@ import {
   type TokenCondition,
 } from '~~/shared/conditions'
 import { audioEmbedUrl, parseAudioUrl } from '~~/shared/audio'
+import { loadYouTubeApi, type YouTubePlayer } from '~/composables/useYouTubeApi'
 
 definePageMeta({ middleware: ['auth'], layout: 'wide' })
 
@@ -84,7 +85,7 @@ interface AudioTrack {
   groupId: number
   name: string
   kind: 'music' | 'sfx'
-  provider: 'youtube' | 'spotify'
+  provider: 'youtube' | 'spotify' | 'upload'
   audioUrl: string
 }
 interface AudioState {
@@ -690,12 +691,19 @@ function handleAudioStateUpdate(s: AudioState | null) {
   audioState.value = s
 }
 
-// Embed-URL fuer den aktuell aktiven Music-Track
+// Aktuell aktiver Track (egal welcher Provider)
+const currentTrack = computed(() =>
+  audioState.value?.trackId
+    ? audioTracks.value.find((t) => t.id === audioState.value!.trackId) ?? null
+    : null,
+)
+
+// Embed-URL nur fuer Spotify (fuer YouTube nutzen wir die IFrame API direkt)
 const activeMusicEmbedUrl = computed(() => {
+  const t = currentTrack.value
   const s = audioState.value
-  if (!s?.isPlaying || !s.trackId) return null
-  const t = audioTracks.value.find((x) => x.id === s.trackId)
-  if (!t) return null
+  if (!s?.isPlaying || !t) return null
+  if (t.provider !== 'spotify') return null
   try {
     return audioEmbedUrl(t.audioUrl, { autoplay: true })
   } catch {
@@ -703,8 +711,138 @@ const activeMusicEmbedUrl = computed(() => {
   }
 })
 
-// SFX-Trigger: ueberwacht lastSfxAt, blendet kurz einen autoplay-Iframe ein
+// YouTube-Track aktiv? Dann erzeugen wir einen YT.Player ueber die IFrame API
+const activeYouTubeTrack = computed(() => {
+  const t = currentTrack.value
+  const s = audioState.value
+  if (!s?.isPlaying || !t || t.provider !== 'youtube') return null
+  return t
+})
+
+// Stream-URL nur fuer hochgeladene Tracks (per <audio>-Element abgespielt)
+const activeMusicStreamUrl = computed(() => {
+  const t = currentTrack.value
+  const s = audioState.value
+  if (!s?.isPlaying || !t || t.provider !== 'upload') return null
+  return `/api/groups/${groupId}/audio/tracks/${t.id}/stream`
+})
+
+// Lautstaerke fuer die hochgeladenen Tracks (per <audio>-Element)
+const audioVolume = ref(0.6)
+const audioMuted = ref(false)
+const audioPlayerEl = ref<HTMLAudioElement | null>(null)
+const sfxAudioEl = ref<HTMLAudioElement | null>(null)
+onMounted(() => {
+  if (typeof window === 'undefined') return
+  const v = Number(localStorage.getItem('battlemap.audioVolume'))
+  if (Number.isFinite(v) && v >= 0 && v <= 1) audioVolume.value = v
+  audioMuted.value = localStorage.getItem('battlemap.audioMuted') === '1'
+})
+watch(audioVolume, (v) => {
+  if (typeof window !== 'undefined') localStorage.setItem('battlemap.audioVolume', String(v))
+  if (audioPlayerEl.value) audioPlayerEl.value.volume = v
+  if (sfxAudioEl.value) sfxAudioEl.value.volume = v
+})
+watch(audioMuted, (m) => {
+  if (typeof window !== 'undefined') localStorage.setItem('battlemap.audioMuted', m ? '1' : '0')
+})
+// Wenn Stream-URL kommt: audio-Element starten
+watch(activeMusicStreamUrl, (url) => {
+  nextTick(() => {
+    const el = audioPlayerEl.value
+    if (!el) return
+    if (url) {
+      el.volume = audioVolume.value
+      el.loop = true
+      // src wird via :src-Bindung gesetzt; wir starten nur die Wiedergabe
+      el.play().catch(() => {/* Autoplay-Block ist OK */})
+    } else if (!el.paused) {
+      el.pause()
+    }
+  })
+})
+
+// --- YouTube-Player via IFrame API (volle Volume-Kontrolle) ---
+const ytPlayerContainer = ref<HTMLElement | null>(null)
+const ytPlayer = ref<YouTubePlayer | null>(null)
+
+const destroyYtPlayer = () => {
+  try {
+    ytPlayer.value?.destroy()
+  } catch {
+    // ignore
+  }
+  ytPlayer.value = null
+}
+
+watch(activeYouTubeTrack, async (t) => {
+  // Track gewechselt oder gestoppt
+  if (!t) {
+    destroyYtPlayer()
+    return
+  }
+  await nextTick()
+  const container = ytPlayerContainer.value
+  if (!container) return
+  let parsed
+  try {
+    parsed = parseAudioUrl(t.audioUrl)
+  } catch {
+    return
+  }
+  // Bestehenden Player zerstoeren — neu aufbauen
+  destroyYtPlayer()
+  try {
+    const YT = await loadYouTubeApi()
+    ytPlayer.value = new YT.Player(container, {
+      videoId: parsed.playlistId ? undefined : parsed.id,
+      playerVars: {
+        autoplay: 1,
+        loop: 1,
+        playlist: parsed.playlistId ?? parsed.id,
+        list: parsed.playlistId,
+        listType: parsed.playlistId ? 'playlist' : undefined,
+        modestbranding: 1,
+        rel: 0,
+      },
+      events: {
+        onReady: (e) => {
+          const p = e.target
+          p.setVolume(audioMuted.value ? 0 : Math.round(audioVolume.value * 100))
+          if (audioMuted.value) p.mute()
+          p.playVideo()
+        },
+      },
+    })
+  } catch (err) {
+    console.error('YouTube-Player konnte nicht gestartet werden', err)
+  }
+}, { immediate: false })
+
+onUnmounted(destroyYtPlayer)
+
+// Volume-Aenderungen auf YT-Player durchreichen
+watch(audioVolume, (v) => {
+  if (!ytPlayer.value) return
+  if (audioMuted.value) return
+  try {
+    ytPlayer.value.setVolume(Math.max(0, Math.min(100, Math.round(v * 100))))
+  } catch {/* ignore */}
+})
+watch(audioMuted, (m) => {
+  if (!ytPlayer.value) return
+  try {
+    if (m) ytPlayer.value.mute()
+    else {
+      ytPlayer.value.unMute()
+      ytPlayer.value.setVolume(Math.round(audioVolume.value * 100))
+    }
+  } catch {/* ignore */}
+})
+
+// SFX: bei neuem lastSfxAt einmalig abspielen — je nach Provider
 const sfxEmbedUrl = ref<string | null>(null)
+const sfxStreamUrl = ref<string | null>(null)
 let lastHandledSfxAt: string | null = null
 let sfxClearTimer: ReturnType<typeof setTimeout> | null = null
 watch(
@@ -716,16 +854,27 @@ watch(
     if (!trackId) return
     const t = audioTracks.value.find((x) => x.id === trackId)
     if (!t) return
-    try {
-      sfxEmbedUrl.value = audioEmbedUrl(t.audioUrl, { autoplay: true })
-    } catch {
+    if (t.provider === 'upload') {
+      sfxStreamUrl.value = `/api/groups/${groupId}/audio/tracks/${t.id}/stream`
       sfxEmbedUrl.value = null
+      nextTick(() => {
+        const el = sfxAudioEl.value
+        if (!el) return
+        el.volume = audioVolume.value
+        el.play().catch(() => {})
+      })
+    } else {
+      try {
+        sfxEmbedUrl.value = audioEmbedUrl(t.audioUrl, { autoplay: true })
+      } catch {
+        sfxEmbedUrl.value = null
+      }
+      sfxStreamUrl.value = null
     }
     if (sfxClearTimer) clearTimeout(sfxClearTimer)
-    // Nach 25 s den SFX-Iframe wieder rauswerfen, damit er nicht endlos
-    // weiter spielt (besonders bei Musik-Embeds als SFX missbraucht).
     sfxClearTimer = setTimeout(() => {
       sfxEmbedUrl.value = null
+      sfxStreamUrl.value = null
     }, 25_000)
   },
 )
@@ -755,6 +904,40 @@ const dmDeleteTrack = async (trackId: number) => {
   if (!confirm('Track wirklich löschen?')) return
   await $fetch(`/api/groups/${groupId}/audio/tracks/${trackId}`, { method: 'DELETE' })
   await fetchAudioTracks()
+}
+
+// Track hochladen (DM) — File-Upload, provider='upload'
+const audioUploadFile = ref<File | null>(null)
+const audioUploadName = ref('')
+const audioUploadKind = ref<'music' | 'sfx'>('music')
+const audioUploading = ref(false)
+const audioUploadError = ref<string | null>(null)
+const onAudioUploadFile = (e: Event) => {
+  const t = e.target as HTMLInputElement
+  audioUploadFile.value = t.files?.[0] ?? null
+  if (audioUploadFile.value && !audioUploadName.value) {
+    audioUploadName.value = audioUploadFile.value.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ')
+  }
+}
+const uploadAudio = async () => {
+  if (!audioUploadFile.value) return
+  audioUploading.value = true
+  audioUploadError.value = null
+  try {
+    const fd = new FormData()
+    fd.append('file', audioUploadFile.value)
+    fd.append('name', audioUploadName.value || 'Track')
+    fd.append('kind', audioUploadKind.value)
+    await $fetch(`/api/groups/${groupId}/audio/tracks/upload`, { method: 'POST', body: fd })
+    audioUploadFile.value = null
+    audioUploadName.value = ''
+    await fetchAudioTracks()
+  } catch (e: unknown) {
+    audioUploadError.value =
+      (e as { statusMessage?: string }).statusMessage ?? 'Upload fehlgeschlagen.'
+  } finally {
+    audioUploading.value = false
+  }
 }
 
 // Track hinzufuegen (DM) — YouTube/Spotify-Link
@@ -1744,6 +1927,22 @@ const endResize = () => {
           </h2>
           <div class="flex items-center gap-2">
             <UButton
+              size="xs"
+              variant="ghost"
+              :icon="audioMuted ? 'i-lucide-volume-x' : 'i-lucide-volume-2'"
+              @click="audioMuted = !audioMuted"
+            />
+            <input
+              v-model.number="audioVolume"
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              class="w-20"
+              :disabled="audioMuted"
+              title="Lautstärke (YouTube + eigene Uploads — Spotify regelt den Ton selbst)"
+            >
+            <UButton
               v-if="isDm && audioState?.isPlaying"
               size="xs"
               variant="outline"
@@ -1761,24 +1960,45 @@ const endResize = () => {
           </div>
         </div>
 
-        <!-- Aktiver Player (alle sehen ihn) -->
+        <!-- YouTube-Player (per IFrame-API, voll lautstärke-regelbar) -->
+        <div
+          v-show="activeYouTubeTrack"
+          class="rounded overflow-hidden bg-black/5"
+          style="height: 180px"
+        >
+          <div ref="ytPlayerContainer" class="w-full h-full" />
+        </div>
+        <!-- Spotify-Embed (kann von außen nicht in der Lautstärke gesteuert werden) -->
         <div v-if="activeMusicEmbedUrl" class="rounded overflow-hidden bg-black/5">
           <iframe
             :src="activeMusicEmbedUrl"
             class="w-full"
-            :style="{ height: currentTrack?.provider === 'spotify' ? '152px' : '180px' }"
+            style="height: 152px"
             allow="autoplay; encrypted-media; fullscreen"
             allowfullscreen
             loading="lazy"
             frameborder="0"
-            title="Audio-Player"
+            title="Spotify-Player"
           />
+          <p class="text-[10px] text-ink-300 italic px-2 py-1">
+            Spotify-Lautstärke regelst du im Spotify-Player oben (kein API-Zugriff von außen).
+          </p>
         </div>
-        <div v-else-if="audioState?.isPlaying" class="text-xs text-ink-400 italic">
+        <!-- Hochgeladene Tracks: HTML5-Audio-Element (mit Controls fuer Spieler) -->
+        <audio
+          v-if="activeMusicStreamUrl"
+          ref="audioPlayerEl"
+          :src="activeMusicStreamUrl"
+          :muted="audioMuted"
+          loop
+          controls
+          class="w-full"
+        />
+        <div v-else-if="audioState?.isPlaying && !activeMusicEmbedUrl" class="text-xs text-ink-400 italic">
           Track wird vorbereitet …
         </div>
 
-        <!-- Verstecktes SFX-iframe (verschwindet nach 25 s) -->
+        <!-- Verstecktes SFX-iframe (YT/Spotify, verschwindet nach 25 s) -->
         <iframe
           v-if="sfxEmbedUrl"
           :src="sfxEmbedUrl"
@@ -1786,15 +2006,25 @@ const endResize = () => {
           allow="autoplay; encrypted-media"
           frameborder="0"
         />
+        <!-- Verstecktes SFX-Audio (Uploads) -->
+        <audio
+          v-if="sfxStreamUrl"
+          ref="sfxAudioEl"
+          :src="sfxStreamUrl"
+          :muted="audioMuted"
+          autoplay
+          class="hidden"
+        />
 
         <div v-if="!audioCollapsed && isDm">
-          <!-- URL-Add-Form -->
+          <!-- URL-Add-Form (YouTube / Spotify) -->
+          <div class="text-[10px] uppercase tracking-widest text-ink-300 mb-1">Link hinzufügen (YouTube / Spotify)</div>
           <div class="grid sm:grid-cols-12 gap-2 items-end mb-2">
-            <UFormField label="YouTube- oder Spotify-URL" class="sm:col-span-6">
+            <UFormField label="URL" class="sm:col-span-6">
               <UInput
                 v-model="audioAddUrl"
                 size="xs"
-                placeholder="https://www.youtube.com/watch?v=… oder https://open.spotify.com/playlist/…"
+                placeholder="https://www.youtube.com/watch?v=… oder https://open.spotify.com/…"
               />
             </UFormField>
             <UFormField label="Name" class="sm:col-span-3">
@@ -1831,6 +2061,45 @@ const endResize = () => {
           </p>
           <p v-if="audioAddError" class="text-xs text-red-700 mb-2">{{ audioAddError }}</p>
 
+          <!-- Upload-Form (eigene Audiodatei) -->
+          <div class="text-[10px] uppercase tracking-widest text-ink-300 mb-1 mt-3">Eigene Datei hochladen (MP3/OGG/WAV, max 20 MB)</div>
+          <div class="grid sm:grid-cols-12 gap-2 items-end mb-2">
+            <UFormField label="Audiodatei" class="sm:col-span-5">
+              <input
+                type="file"
+                accept="audio/*"
+                class="block w-full text-xs"
+                @change="onAudioUploadFile"
+              >
+            </UFormField>
+            <UFormField label="Name" class="sm:col-span-3">
+              <UInput v-model="audioUploadName" size="xs" />
+            </UFormField>
+            <UFormField label="Typ" class="sm:col-span-2">
+              <USelect
+                v-model="audioUploadKind"
+                :items="[
+                  { label: 'Musik (Loop)', value: 'music' },
+                  { label: 'SFX (1×)', value: 'sfx' },
+                ]"
+                value-key="value"
+                size="xs"
+              />
+            </UFormField>
+            <UButton
+              color="primary"
+              size="xs"
+              icon="i-lucide-upload"
+              :disabled="!audioUploadFile"
+              :loading="audioUploading"
+              class="sm:col-span-2"
+              @click="uploadAudio"
+            >
+              Hochladen
+            </UButton>
+          </div>
+          <p v-if="audioUploadError" class="text-xs text-red-700 mb-2">{{ audioUploadError }}</p>
+
           <!-- Musik-Liste -->
           <div v-if="audioMusicTracks.length" class="space-y-1">
             <div class="text-[10px] uppercase tracking-widest text-ink-300">Musik</div>
@@ -1842,10 +2111,14 @@ const endResize = () => {
               >
                 <span
                   class="text-[10px] uppercase font-bold"
-                  :style="{ color: t.provider === 'youtube' ? '#dc2626' : '#10b981' }"
+                  :style="{
+                    color: t.provider === 'youtube' ? '#dc2626'
+                      : t.provider === 'spotify' ? '#10b981'
+                      : '#3b82f6',
+                  }"
                   :title="t.provider"
                 >
-                  {{ t.provider === 'youtube' ? 'YT' : 'SP' }}
+                  {{ t.provider === 'youtube' ? 'YT' : t.provider === 'spotify' ? 'SP' : 'UP' }}
                 </span>
                 <button
                   type="button"
