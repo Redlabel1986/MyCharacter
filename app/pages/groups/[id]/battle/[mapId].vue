@@ -2134,7 +2134,7 @@ const endResize = () => {
                 <div
                   v-for="c in tokenConditions(t).slice(0, 6)"
                   :key="c.id"
-                  class="w-5 h-5 rounded-full border-2 flex items-center justify-center shadow"
+                  class="w-5 h-5 rounded-full border-2 flex items-center justify-center shadow pointer-events-auto cursor-default"
                   :style="condStyle(c)"
                   :title="c.label + ' — ' + c.hint"
                 >
@@ -2142,7 +2142,7 @@ const endResize = () => {
                 </div>
                 <div
                   v-if="tokenConditions(t).length > 6"
-                  class="w-5 h-5 rounded-full text-[10px] flex items-center justify-center border-2"
+                  class="w-5 h-5 rounded-full text-[10px] flex items-center justify-center border-2 pointer-events-auto cursor-default"
                   :style="{ background: '#1f2937', color: '#fff', borderColor: '#000' }"
                   :title="tokenConditions(t).slice(6).map((c) => c.label).join(', ')"
                 >
@@ -2152,7 +2152,8 @@ const endResize = () => {
               <!-- Frei-Text-Status als kleine Strip darunter, falls vorhanden -->
               <div
                 v-if="tokenCustomLabels(t).length"
-                class="absolute -bottom-7 left-1/2 -translate-x-1/2 text-[10px] bg-amber-500 text-black px-1 rounded whitespace-nowrap pointer-events-none"
+                class="absolute -bottom-7 left-1/2 -translate-x-1/2 text-[10px] bg-amber-500 text-black px-1 rounded whitespace-nowrap pointer-events-auto cursor-default"
+                :title="tokenCustomLabels(t).join(', ')"
               >
                 {{ tokenCustomLabels(t).join(', ') }}
               </div>
