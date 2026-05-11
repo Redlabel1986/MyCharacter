@@ -34,6 +34,7 @@ export default defineEventHandler(async (event) => {
     email: user.email,
     username: user.username,
     role: user.role,
+    actualRole: user.role,
     mustChangePassword: user.mustChangePassword,
     canBeDm: user.canBeDm,
   }

@@ -121,7 +121,7 @@ const submitPasswordChange = async () => {
       </dl>
 
       <div
-        v-if="user?.canBeDm && user.role !== 'admin'"
+        v-if="user?.canBeDm && user.role !== 'admin' && user.actualRole !== 'admin'"
         class="mt-4 pt-4 border-t border-parchment-700/30 flex items-center gap-3 flex-wrap"
       >
         <div class="text-xs uppercase tracking-widest text-ink-300">Rolle wechseln</div>

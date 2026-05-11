@@ -16,7 +16,10 @@ export default defineEventHandler(async (event) => {
   const { user } = await requireUserSession(event)
   const body = await readValidatedBody(event, bodySchema.parse)
 
-  if (user.role === 'admin') {
+  // Auf actualRole pruefen, sonst koennte ein Admin im viewAs-Spieler-Modus
+  // sich selbst dauerhaft depromoten (DB-Update).
+  const realRole = user.actualRole ?? user.role
+  if (realRole === 'admin') {
     throw createError({
       statusCode: 400,
       statusMessage: 'Admin-Account: Rolle darf nicht per Self-Service gewechselt werden.',
@@ -59,6 +62,7 @@ export default defineEventHandler(async (event) => {
       email: updated.email,
       username: updated.username,
       role: updated.role,
+      actualRole: updated.role,
       canBeDm: updated.canBeDm,
       mustChangePassword: updated.mustChangePassword,
     },

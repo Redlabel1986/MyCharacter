@@ -3,7 +3,7 @@
  * Volle Bildschirmbreite — fuer Battle-Map-Ansicht. Header ist gleich wie
  * default.vue, nur das <main> hat keinen max-w-Container.
  */
-const { loggedIn, user, clear } = useUserSession()
+const { loggedIn, user, fetch: refreshSession, clear } = useUserSession()
 
 const logout = async () => {
   await $fetch('/api/auth/logout', { method: 'POST' })
@@ -14,14 +14,34 @@ const logout = async () => {
 const isDm = computed(() => user.value?.role === 'dm' || user.value?.role === 'admin')
 const isAdmin = computed(() => user.value?.role === 'admin')
 
-const roleBadge = computed(() => {
-  switch (user.value?.role) {
+const roleLabel = (r?: string) => {
+  switch (r) {
     case 'admin': return 'Admin'
     case 'dm': return 'Dungeon Master'
     case 'player': return 'Spieler'
     default: return ''
   }
-})
+}
+const roleBadge = computed(() => roleLabel(user.value?.role))
+
+const viewAsActive = computed(
+  () =>
+    !!user.value &&
+    user.value.actualRole === 'admin' &&
+    user.value.role !== user.value.actualRole,
+)
+const returningToAdmin = ref(false)
+const returnToAdminView = async () => {
+  if (returningToAdmin.value) return
+  returningToAdmin.value = true
+  try {
+    await $fetch('/api/admin/view-as', { method: 'POST', body: { role: 'admin' } })
+    await refreshSession()
+    await navigateTo({ path: '/admin/users', force: true })
+  } finally {
+    returningToAdmin.value = false
+  }
+}
 </script>
 
 <template>
@@ -71,6 +91,33 @@ const roleBadge = computed(() => {
             <NuxtLink to="/register" class="hover:text-[var(--color-accent)]">Registrieren</NuxtLink>
           </template>
         </nav>
+      </div>
+      <div
+        v-if="viewAsActive"
+        class="no-print border-t border-amber-500/40 bg-amber-500/15"
+      >
+        <div
+          class="w-full px-4 py-2 flex items-center gap-3 flex-wrap text-sm"
+        >
+          <UIcon name="i-lucide-eye" class="text-amber-500 shrink-0" />
+          <span>
+            Du siehst die Seite gerade als
+            <strong>{{ roleLabel(user?.role) }}</strong>
+            (Admin-Account
+            <span class="text-ink-300">{{ user?.username }}</span>).
+            Admin-Funktionen sind in dieser Ansicht ausgeblendet.
+          </span>
+          <UButton
+            class="ml-auto"
+            size="xs"
+            color="warning"
+            icon="i-lucide-shield-check"
+            :loading="returningToAdmin"
+            @click="returnToAdminView"
+          >
+            Zurück zur Admin-Ansicht
+          </UButton>
+        </div>
       </div>
     </header>
 

@@ -1,12 +1,42 @@
 <script setup lang="ts">
 definePageMeta({ middleware: ['admin'] })
 
+const { user, fetch: refreshSession } = useUserSession()
+
+type ViewRole = 'player' | 'dm' | 'admin'
+
 interface AdminUser {
   id: number
   email: string
   username: string
-  role: 'player' | 'dm' | 'admin'
+  role: ViewRole
   createdAt: string
+}
+
+// Ansicht-Override: Admin kann temporaer als Spieler oder DM agieren, ohne
+// seine DB-Rolle anzufassen. Steuert nur die Session.
+const viewSwitching = ref<ViewRole | null>(null)
+const viewError = ref<string | null>(null)
+const switchView = async (role: ViewRole) => {
+  if (!user.value || user.value.role === role) return
+  viewError.value = null
+  viewSwitching.value = role
+  try {
+    await $fetch('/api/admin/view-as', { method: 'POST', body: { role } })
+    await refreshSession()
+    if (role === 'player') {
+      await navigateTo({ path: '/characters', force: true })
+    } else if (role === 'dm') {
+      await navigateTo({ path: '/dm/characters', force: true })
+    } else {
+      await navigateTo({ path: '/admin/users', force: true })
+    }
+  } catch (e: unknown) {
+    viewError.value =
+      (e as { statusMessage?: string }).statusMessage ?? 'Ansicht-Wechsel fehlgeschlagen.'
+  } finally {
+    viewSwitching.value = null
+  }
 }
 
 const { data, refresh, pending } = await useFetch<{ users: AdminUser[] }>('/api/admin/users', {
@@ -140,6 +170,53 @@ const clearLibraryPassword = async () => {
     <div>
       <h1 class="font-serif text-3xl">Admin</h1>
       <p class="text-sm text-ink-400">Benutzer und Bibliotheks-Zugang verwalten.</p>
+    </div>
+
+    <div class="parchment-card p-4 space-y-3">
+      <div class="flex items-center gap-3">
+        <UIcon name="i-lucide-eye" class="text-2xl text-[var(--color-accent)]" />
+        <div>
+          <h2 class="font-serif text-xl">Ansicht umschalten</h2>
+          <p class="text-xs text-ink-400">
+            Schau dir die App so an, wie ein Spieler oder DM sie sieht. Deine DB-Rolle
+            bleibt Admin – nur die Anzeige und Berechtigungen in dieser Session werden
+            angepasst. Über das Banner oben kommst du jederzeit zurück.
+          </p>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2 items-center">
+        <UButton
+          size="sm"
+          :variant="user?.role === 'admin' ? 'solid' : 'outline'"
+          :color="user?.role === 'admin' ? 'primary' : 'neutral'"
+          :loading="viewSwitching === 'admin'"
+          :disabled="user?.role === 'admin' || viewSwitching !== null"
+          @click="switchView('admin')"
+        >
+          Admin (normale Ansicht)
+        </UButton>
+        <UButton
+          size="sm"
+          :variant="user?.role === 'dm' ? 'solid' : 'outline'"
+          :color="user?.role === 'dm' ? 'primary' : 'neutral'"
+          :loading="viewSwitching === 'dm'"
+          :disabled="user?.role === 'dm' || viewSwitching !== null"
+          @click="switchView('dm')"
+        >
+          Als Dungeon Master anschauen
+        </UButton>
+        <UButton
+          size="sm"
+          :variant="user?.role === 'player' ? 'solid' : 'outline'"
+          :color="user?.role === 'player' ? 'primary' : 'neutral'"
+          :loading="viewSwitching === 'player'"
+          :disabled="user?.role === 'player' || viewSwitching !== null"
+          @click="switchView('player')"
+        >
+          Als Spieler anschauen
+        </UButton>
+      </div>
+      <p v-if="viewError" class="text-sm text-red-400">{{ viewError }}</p>
     </div>
 
     <div class="parchment-card p-4 space-y-3">
