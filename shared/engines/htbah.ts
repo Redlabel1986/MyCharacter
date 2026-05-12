@@ -79,6 +79,17 @@ export interface HtbahCharacterData {
   backstory: { text: string; points: number }
   inventory: string
   beute: string
+  /**
+   * Strukturierter Geldbeutel — wird vom Mini-Charsheet (Battle-Map) und vom
+   * vollen Bogen gemeinsam gepflegt. Werte sind Ganzzahlen >= 0.
+   * Umrechnung: 100 Kupfer = 1 Silber, 100 Silber = 1 Gold.
+   */
+  purse: HtbahPurse
+  /**
+   * Magie / Zauberei — Freitext. HtbaH definiert keine festen Magie-Regeln;
+   * der Spieler/SL pflegt Zauberlisten, Foki, Mana o.aE. selbst.
+   */
+  magic: string
   notes: string
 }
 
@@ -110,8 +121,35 @@ export function createBlankHtbah(name: string): HtbahCharacterData {
     backstory: { text: '', points: 0 },
     inventory: '',
     beute: '',
+    purse: { copper: 0, silver: 0, gold: 0 },
+    magic: '',
     notes: '',
   }
+}
+
+/**
+ * Geldbeutel: 100 Kupfer = 1 Silber, 100 Silber = 1 Gold.
+ * Normalisiert die Werte; clamped negative Eingaben auf 0.
+ */
+export interface HtbahPurse {
+  copper: number
+  silver: number
+  gold: number
+}
+
+export function normalizeHtbahPurse(p: HtbahPurse): HtbahPurse {
+  let copper = Math.max(0, Math.floor(p.copper || 0))
+  let silver = Math.max(0, Math.floor(p.silver || 0))
+  let gold = Math.max(0, Math.floor(p.gold || 0))
+  if (copper >= 100) {
+    silver += Math.floor(copper / 100)
+    copper = copper % 100
+  }
+  if (silver >= 100) {
+    gold += Math.floor(silver / 100)
+    silver = silver % 100
+  }
+  return { copper, silver, gold }
 }
 
 /**

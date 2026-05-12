@@ -15,6 +15,7 @@ import {
   HTBAH_TALENT_LABELS,
   htbahSkillTotal,
   htbahTalentValue,
+  normalizeHtbahPurse,
   type HtbahCharacterData,
   type HtbahTalent,
 } from '~~/shared/engines/htbah'
@@ -655,11 +656,15 @@ const savePurse = async () => {
   const c = character.value
   // Volle data-Kopie bauen, damit kein anderes Feld am Server verloren geht.
   const nextData: Record<string, unknown> = { ...(c.data as Record<string, unknown>) }
-  const next = {
+  // Roh-Werte ganzzahlig und nicht-negativ machen; HtbaH zusaetzlich nach
+  // 100 Kupfer = 1 Silber, 100 Silber = 1 Gold normalisieren. D&D/DSA folgen
+  // ihren eigenen Regelwerken — dort bleiben die Werte unangetastet.
+  const raw: Purse = {
     copper: Math.max(0, Math.floor(purseDraft.value.copper || 0)),
     silver: Math.max(0, Math.floor(purseDraft.value.silver || 0)),
     gold: Math.max(0, Math.floor(purseDraft.value.gold || 0)),
   }
+  const next: Purse = isHtbah.value ? normalizeHtbahPurse(raw) : raw
   if (isDnd.value) {
     const oldCur = (nextData.currency as DnDCharacterData['currency']) ?? {
       cp: 0,
@@ -849,6 +854,9 @@ const onImageError = (tokenId: number) => {
           <UIcon name="i-lucide-coins" class="size-4 text-[var(--color-accent)]" />
           <div class="text-[10px] uppercase tracking-widest text-ink-300 flex-1">
             Geldbeutel
+            <span v-if="isHtbah" class="normal-case tracking-normal text-ink-300/70">
+              · 100 K = 1 S, 100 S = 1 G
+            </span>
           </div>
           <UButton
             v-if="purseDirty"

@@ -15,11 +15,13 @@ import {
   htbahCritThreshold,
   htbahFumbleThreshold,
   htbahQualityLabel,
+  normalizeHtbahPurse,
   createBlankHtbah,
   type HtbahCharacterData,
   type HtbahTalent,
   type HtbahSkill,
   type HtbahPerk,
+  type HtbahPurse,
 } from '~~/shared/engines/htbah'
 import type { GameSystem } from '~~/shared/systems'
 import SheetSection from '~/components/ui/SheetSection.vue'
@@ -77,6 +79,12 @@ const sheet = computed<HtbahCharacterData>(() => {
     backstory: { ...blank.backstory, ...(incoming.backstory ?? {}) },
     inventory: incoming.inventory ?? '',
     beute: incoming.beute ?? '',
+    purse: {
+      copper: Number(incoming.purse?.copper ?? 0),
+      silver: Number(incoming.purse?.silver ?? 0),
+      gold: Number(incoming.purse?.gold ?? 0),
+    },
+    magic: incoming.magic ?? '',
     notes: incoming.notes ?? '',
   }
 })
@@ -118,8 +126,21 @@ const removePerk = (kind: 'advantages' | 'disadvantages', idx: number) => {
 const setInsightCurrent = (t: HtbahTalent, v: number) => {
   const n = clone(); n.talents[t].insightCurrent = v; update(n)
 }
-const setText = <K extends 'inventory' | 'notes' | 'beute'>(k: K, v: string) => {
+const setText = <K extends 'inventory' | 'notes' | 'beute' | 'magic'>(k: K, v: string) => {
   const n = clone(); n[k] = v; update(n)
+}
+// Geldbeutel: erst die Rohzahl uebernehmen, beim Verlassen des Felds
+// normalisieren (100 Kupfer -> 1 Silber, 100 Silber -> 1 Gold). So bleibt
+// "150" beim Tippen sichtbar und wird erst nach Blur in 50/1 zerlegt.
+const setPurseRaw = <K extends keyof HtbahPurse>(k: K, v: number) => {
+  const n = clone()
+  n.purse = { ...n.purse, [k]: Number.isFinite(v) ? Math.floor(v) : 0 }
+  update(n)
+}
+const applyPurseNormalize = () => {
+  const n = clone()
+  n.purse = normalizeHtbahPurse(n.purse)
+  update(n)
 }
 const refreshAllInsights = () => {
   const n = clone()
@@ -745,13 +766,94 @@ const postRollToGroup = async () => {
           @update:model-value="setText('inventory', String($event))"
         />
       </UFormField>
-      <UFormField label="Beute / Münzen" class="mt-2">
+      <div class="mt-3">
+        <div class="flex items-baseline justify-between mb-1">
+          <div class="text-xs uppercase tracking-widest text-ink-300">
+            Geldbeutel
+            <span class="text-[10px] normal-case tracking-normal text-ink-300/70">
+              · 100 Kupfer = 1 Silber · 100 Silber = 1 Gold
+            </span>
+          </div>
+          <UButton
+            size="xs"
+            variant="ghost"
+            icon="i-lucide-refresh-cw"
+            title="Münzen umrechnen (100 Kupfer → 1 Silber, 100 Silber → 1 Gold)"
+            @click="applyPurseNormalize"
+          >
+            Umrechnen
+          </UButton>
+        </div>
+        <div class="grid grid-cols-3 gap-2">
+          <UFormField>
+            <template #label>
+              <span class="inline-flex items-center gap-1">
+                <span class="inline-block w-2 h-2 rounded-full" style="background:#b45309" />
+                Kupfer
+              </span>
+            </template>
+            <UInput
+              type="number"
+              min="0"
+              :model-value="sheet.purse.copper"
+              @update:model-value="setPurseRaw('copper', Number($event))"
+              @blur="applyPurseNormalize"
+            />
+          </UFormField>
+          <UFormField>
+            <template #label>
+              <span class="inline-flex items-center gap-1">
+                <span class="inline-block w-2 h-2 rounded-full" style="background:#9ca3af" />
+                Silber
+              </span>
+            </template>
+            <UInput
+              type="number"
+              min="0"
+              :model-value="sheet.purse.silver"
+              @update:model-value="setPurseRaw('silver', Number($event))"
+              @blur="applyPurseNormalize"
+            />
+          </UFormField>
+          <UFormField>
+            <template #label>
+              <span class="inline-flex items-center gap-1">
+                <span class="inline-block w-2 h-2 rounded-full" style="background:#d4af37" />
+                Gold
+              </span>
+            </template>
+            <UInput
+              type="number"
+              min="0"
+              :model-value="sheet.purse.gold"
+              @update:model-value="setPurseRaw('gold', Number($event))"
+              @blur="applyPurseNormalize"
+            />
+          </UFormField>
+        </div>
+      </div>
+      <UFormField label="Sonstige Beute" class="mt-3" help="Edelsteine, Wertgegenstände, Schuldscheine — nicht-monetäre Beute.">
         <UTextarea
           rows="3"
-          placeholder="z.B. 0 Kupfer, 30 Silber, 53 Gold"
+          placeholder="z.B. Rubin (geschätzt 50 Gold), Goldkette, Schuldschein über 200 Silber …"
           :model-value="sheet.beute"
           class="w-full"
           @update:model-value="setText('beute', String($event))"
+        />
+      </UFormField>
+    </SheetSection>
+
+    <SheetSection title="Magie" class="lg:col-span-2">
+      <UFormField
+        label="Zauber, Foki, Mana, Sprüche"
+        help="HtbaH hat keine festen Magie-Regeln — pflege Zauberlisten, magische Gegenstände und ggf. einen eigenen Mana-Pool hier frei."
+      >
+        <UTextarea
+          rows="6"
+          placeholder="z.B. Lichtball (1 Mana, Reichweite 10 m), Feuerstrahl (3 Mana, 2W10 Schaden) …"
+          :model-value="sheet.magic"
+          class="w-full"
+          @update:model-value="setText('magic', String($event))"
         />
       </UFormField>
     </SheetSection>
