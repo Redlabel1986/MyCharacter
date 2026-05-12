@@ -2647,11 +2647,16 @@ const endResize = () => {
                   transition: draggingObjectId === o.id ? 'none' : 'transform 120ms ease',
                 }"
               >
+              <!-- object-fill statt object-contain: die konfigurierte
+                   Breite × Hoehe (in Rasterzellen) ist autoritativ. Eingebaute
+                   SVGs sind mit passendem viewBox gebaut; Custom-Uploads
+                   sollten im konfigurierten Seitenverhaeltnis exportiert
+                   werden, sonst wird das Bild gestreckt. -->
               <img
                 v-if="objectDisplayImage(o)"
                 :src="objectDisplayImage(o) ?? ''"
                 :alt="o.name"
-                class="w-full h-full object-contain"
+                class="w-full h-full object-fill"
                 draggable="false"
               >
               <div
@@ -3607,7 +3612,7 @@ const endResize = () => {
                   v-if="tpl.imageUrl"
                   :src="tpl.imageUrl"
                   :alt="tpl.name"
-                  class="max-w-full max-h-full object-contain"
+                  class="w-full h-full object-fill"
                   draggable="false"
                 >
                 <UIcon v-else name="i-lucide-image-off" class="size-6 text-ink-300" />
@@ -3715,8 +3720,14 @@ const endResize = () => {
               v-if="objectDisplayImage(editingObject)"
               :src="objectDisplayImage(editingObject) ?? ''"
               :alt="editingObject.name"
-              class="max-h-32 object-contain"
-              :style="{ transform: `rotate(${editingObject.rotation}deg)` }"
+              class="object-fill"
+              :style="{
+                width: (editingObject.width * 60) + 'px',
+                height: (editingObject.height * 60) + 'px',
+                transform: `rotate(${editingObject.rotation}deg)`,
+                maxWidth: '100%',
+                maxHeight: '8rem',
+              }"
             >
           </div>
           <UFormField label="Name">

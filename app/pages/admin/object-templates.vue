@@ -198,7 +198,7 @@ const categoryLabel = (cat: string): string =>
             <img
               :src="builtinImage(b)"
               :alt="b.name"
-              class="max-w-full max-h-full object-contain"
+              class="w-full h-full object-fill"
               draggable="false"
             >
           </div>
@@ -258,7 +258,7 @@ const categoryLabel = (cat: string): string =>
               v-if="g.imageUrl"
               :src="`/api/admin/object-templates/${g.id}/image`"
               :alt="g.name"
-              class="max-w-full max-h-full object-contain"
+              class="w-full h-full object-fill"
               draggable="false"
             >
           </div>
