@@ -584,6 +584,120 @@ const inventoryText = computed(() => {
   return ''
 })
 
+// — Geldbeutel —
+// D&D nutzt das bestehende `currency.cp/sp/gp`-Feld (bleibt mit dem vollen
+// Bogen synchron). Andere Regelwerke haben keine getypte Waehrungs-Struktur,
+// dort speichern wir den Geldbeutel an `data.purse.{copper,silver,gold}`.
+interface Purse {
+  copper: number
+  silver: number
+  gold: number
+}
+const BLANK_PURSE: Purse = { copper: 0, silver: 0, gold: 0 }
+const purseLabels = computed(() => {
+  if (isDsa5.value) return { copper: 'Heller', silver: 'Silber', gold: 'Dukaten' }
+  return { copper: 'Kupfer', silver: 'Silber', gold: 'Gold' }
+})
+
+const currentPurse = computed<Purse | null>(() => {
+  if (!character.value) return null
+  if (isDnd.value && dndData.value) {
+    const c = dndData.value.currency
+    return {
+      copper: c?.cp ?? 0,
+      silver: c?.sp ?? 0,
+      gold: c?.gp ?? 0,
+    }
+  }
+  // Generischer Geldbeutel fuer DSA/HtbaH/Unbekannt
+  const data = character.value.data as { purse?: Partial<Purse> }
+  return {
+    copper: Number(data.purse?.copper ?? 0),
+    silver: Number(data.purse?.silver ?? 0),
+    gold: Number(data.purse?.gold ?? 0),
+  }
+})
+
+const purseDraft = ref<Purse>({ ...BLANK_PURSE })
+const purseLastServer = ref<Purse>({ ...BLANK_PURSE })
+
+const sameP = (a: Purse, b: Purse) =>
+  a.copper === b.copper && a.silver === b.silver && a.gold === b.gold
+
+watch(
+  currentPurse,
+  (p: Purse | null) => {
+    if (!p) {
+      purseDraft.value = { ...BLANK_PURSE }
+      purseLastServer.value = { ...BLANK_PURSE }
+      return
+    }
+    // Nur uebernehmen, wenn der Nutzer nichts veraendert hat — analog zum HP-Editor.
+    if (sameP(purseDraft.value, purseLastServer.value)) {
+      purseDraft.value = { ...p }
+    }
+    purseLastServer.value = { ...p }
+  },
+  { immediate: true },
+)
+
+const purseDirty = computed(() => {
+  const cur = currentPurse.value
+  if (!cur) return false
+  return !sameP(purseDraft.value, cur)
+})
+
+const purseSaving = ref(false)
+const purseError = ref<string | null>(null)
+
+const savePurse = async () => {
+  if (!character.value) return
+  const c = character.value
+  // Volle data-Kopie bauen, damit kein anderes Feld am Server verloren geht.
+  const nextData: Record<string, unknown> = { ...(c.data as Record<string, unknown>) }
+  const next = {
+    copper: Math.max(0, Math.floor(purseDraft.value.copper || 0)),
+    silver: Math.max(0, Math.floor(purseDraft.value.silver || 0)),
+    gold: Math.max(0, Math.floor(purseDraft.value.gold || 0)),
+  }
+  if (isDnd.value) {
+    const oldCur = (nextData.currency as DnDCharacterData['currency']) ?? {
+      cp: 0,
+      sp: 0,
+      ep: 0,
+      gp: 0,
+      pp: 0,
+    }
+    nextData.currency = {
+      ...oldCur,
+      cp: next.copper,
+      sp: next.silver,
+      gp: next.gold,
+    }
+  } else {
+    nextData.purse = next
+  }
+  purseSaving.value = true
+  purseError.value = null
+  try {
+    const res = (await $fetch(`/api/characters/${c.id}`, {
+      method: 'PUT',
+      body: { data: nextData },
+    })) as { character: CharacterFull }
+    if (res.character) {
+      character.value = res.character
+      cacheByCharId.set(c.id, res.character)
+    }
+    purseDraft.value = { ...next }
+    purseLastServer.value = { ...next }
+  } catch (e: unknown) {
+    purseError.value =
+      (e as { statusMessage?: string }).statusMessage ?? 'Geldbeutel konnte nicht gespeichert werden.'
+  } finally {
+    purseSaving.value = false
+  }
+}
+
 const hpPercent = computed(() => {
   const t = activeToken.value
   if (!t || !t.hpMax) return 0
@@ -727,6 +841,55 @@ const onImageError = (tokenId: number) => {
         <UButton size="xs" variant="outline" color="success" icon="i-lucide-plus" @click="applyHpDelta(1)">
           Heilung
         </UButton>
+      </div>
+
+      <!-- Geldbeutel (nur fuer Charakter-Tokens) -->
+      <div v-if="character" class="space-y-2 border-t border-parchment-700/30 pt-3">
+        <div class="flex items-center gap-2">
+          <UIcon name="i-lucide-coins" class="size-4 text-[var(--color-accent)]" />
+          <div class="text-[10px] uppercase tracking-widest text-ink-300 flex-1">
+            Geldbeutel
+          </div>
+          <UButton
+            v-if="purseDirty"
+            size="xs"
+            color="primary"
+            :loading="purseSaving"
+            @click="savePurse"
+          >
+            Speichern
+          </UButton>
+        </div>
+        <div class="grid grid-cols-3 gap-2">
+          <UFormField>
+            <template #label>
+              <span class="inline-flex items-center gap-1">
+                <span class="inline-block w-2 h-2 rounded-full" style="background:#b45309" />
+                {{ purseLabels.copper }}
+              </span>
+            </template>
+            <UInput v-model.number="purseDraft.copper" type="number" min="0" size="xs" class="w-full" />
+          </UFormField>
+          <UFormField>
+            <template #label>
+              <span class="inline-flex items-center gap-1">
+                <span class="inline-block w-2 h-2 rounded-full" style="background:#9ca3af" />
+                {{ purseLabels.silver }}
+              </span>
+            </template>
+            <UInput v-model.number="purseDraft.silver" type="number" min="0" size="xs" class="w-full" />
+          </UFormField>
+          <UFormField>
+            <template #label>
+              <span class="inline-flex items-center gap-1">
+                <span class="inline-block w-2 h-2 rounded-full" style="background:#d4af37" />
+                {{ purseLabels.gold }}
+              </span>
+            </template>
+            <UInput v-model.number="purseDraft.gold" type="number" min="0" size="xs" class="w-full" />
+          </UFormField>
+        </div>
+        <p v-if="purseError" class="text-xs text-red-700">{{ purseError }}</p>
       </div>
 
       <!-- Skill-/Begabungs-Würfler (HtbaH, D&D 5e/2024, DSA 5) -->
