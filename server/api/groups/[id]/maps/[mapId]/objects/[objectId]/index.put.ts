@@ -1,14 +1,21 @@
 /**
  * PUT /api/groups/:id/maps/:mapId/objects/:objectId — Map-Objekt bewegen,
- * drehen, verstecken oder umbenennen. Nur DM (Gruppen-Owner).
+ * drehen, verstecken oder umbenennen. Eigentuemer des Objekts (= wer es
+ * platziert hat) und DM (Gruppen-Owner) duerfen aendern. Nur DM darf
+ * versteckt-Status setzen.
  *
  * Bewegen mit Lichtquelle aktualisiert auch fog_explored (analog zu Tokens).
  */
 import { z } from 'zod'
 import { and, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
-import { requireGroupOwner } from '~~/server/utils/group-access'
-import { battleMaps, battleTokens, mapObjects } from '~~/server/database/schema'
+import { requireGroupMember } from '~~/server/utils/group-access'
+import {
+  battleMaps,
+  battleTokens,
+  groups,
+  mapObjects,
+} from '~~/server/database/schema'
 import { cellsInTokenVision, uniqueCells, type CellTuple } from '~~/shared/fog'
 
 const bodySchema = z.object({
@@ -28,7 +35,9 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Ungültige IDs.' })
   }
   const db = useDb()
-  await requireGroupOwner(db, groupId, user.id)
+  await requireGroupMember(db, groupId, user.id)
+  const [g] = await db.select().from(groups).where(eq(groups.id, groupId)).limit(1)
+  const isDm = !!g && g.ownerUserId === user.id
 
   const [map] = await db
     .select()
@@ -46,8 +55,22 @@ export default defineEventHandler(async (event) => {
   if (!obj) {
     throw createError({ statusCode: 404, statusMessage: 'Objekt nicht gefunden.' })
   }
+  if (obj.ownerUserId !== user.id && !isDm) {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'Du darfst nur eigene Objekte aendern.',
+    })
+  }
 
   const body = await readValidatedBody(event, bodySchema.parse)
+
+  // Versteckt-Status darf nur DM aendern.
+  if (body.hidden !== undefined && !isDm) {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'Versteckt-Status darf nur der DM aendern.',
+    })
+  }
   const patch: Record<string, unknown> = { updatedAt: new Date() }
   if (typeof body.x === 'number') patch.x = Math.round(body.x)
   if (typeof body.y === 'number') patch.y = Math.round(body.y)

@@ -1,15 +1,18 @@
 /**
  * POST /api/groups/:id/maps/:mapId/objects — neues Map-Objekt platzieren.
  *
- * Nur DM (Gruppen-Owner) darf Objekte setzen. Built-in-Templates werden ueber
- * `templateKey` referenziert, Custom-Templates des DM ueber `templateId`.
+ * Jedes Gruppen-Mitglied darf Objekte aus der Bibliothek platzieren; das eigene
+ * Mitglied wird als ownerUserId gespeichert und darf das Objekt spaeter
+ * bewegen/loeschen. DM (Gruppen-Owner) darf alle Objekte verwalten und ist der
+ * einzige, der versteckte Objekte setzen kann.
  */
 import { z } from 'zod'
 import { and, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
-import { requireGroupOwner } from '~~/server/utils/group-access'
+import { requireGroupMember } from '~~/server/utils/group-access'
 import {
   battleMaps,
+  groups,
   mapObjectTemplates,
   mapObjects,
 } from '~~/server/database/schema'
@@ -36,9 +39,19 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Ungültige IDs.' })
   }
   const db = useDb()
-  await requireGroupOwner(db, groupId, user.id)
+  await requireGroupMember(db, groupId, user.id)
+  const [g] = await db.select().from(groups).where(eq(groups.id, groupId)).limit(1)
+  const isDm = !!g && g.ownerUserId === user.id
 
   const body = await readValidatedBody(event, bodySchema.parse)
+
+  // Nur DM darf versteckt platzieren.
+  if (body.hidden && !isDm) {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'Versteckte Objekte darf nur der DM platzieren.',
+    })
+  }
 
   const [map] = await db
     .select()

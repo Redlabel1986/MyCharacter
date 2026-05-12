@@ -1,11 +1,11 @@
 /**
  * DELETE /api/groups/:id/maps/:mapId/objects/:objectId — Map-Objekt entfernen.
- * Nur DM (Gruppen-Owner).
+ * Eigentuemer des Objekts oder DM (Gruppen-Owner).
  */
 import { and, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
-import { requireGroupOwner } from '~~/server/utils/group-access'
-import { battleMaps, mapObjects } from '~~/server/database/schema'
+import { requireGroupMember } from '~~/server/utils/group-access'
+import { battleMaps, groups, mapObjects } from '~~/server/database/schema'
 
 export default defineEventHandler(async (event) => {
   const { user } = await requireUserSession(event)
@@ -16,7 +16,9 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Ungültige IDs.' })
   }
   const db = useDb()
-  await requireGroupOwner(db, groupId, user.id)
+  await requireGroupMember(db, groupId, user.id)
+  const [g] = await db.select().from(groups).where(eq(groups.id, groupId)).limit(1)
+  const isDm = !!g && g.ownerUserId === user.id
 
   const [map] = await db
     .select()
@@ -25,6 +27,20 @@ export default defineEventHandler(async (event) => {
     .limit(1)
   if (!map) {
     throw createError({ statusCode: 404, statusMessage: 'Karte nicht gefunden.' })
+  }
+  const [obj] = await db
+    .select()
+    .from(mapObjects)
+    .where(and(eq(mapObjects.id, objectId), eq(mapObjects.mapId, mapId)))
+    .limit(1)
+  if (!obj) {
+    throw createError({ statusCode: 404, statusMessage: 'Objekt nicht gefunden.' })
+  }
+  if (obj.ownerUserId !== user.id && !isDm) {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'Du darfst nur eigene Objekte entfernen.',
+    })
   }
   await db
     .delete(mapObjects)

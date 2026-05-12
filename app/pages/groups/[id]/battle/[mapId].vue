@@ -609,7 +609,10 @@ const objDragOffset = ref({ x: 0, y: 0 })
 const objDragStartPx = ref({ x: 0, y: 0 })
 const objDragStarted = ref(false)
 
-const canMoveObject = () => isDm.value
+// Wer darf ein Objekt bewegen/loeschen? Der DM darf alles; ein Spieler darf
+// nur Objekte aendern, die er selbst platziert hat.
+const canMoveObject = (o: MapObject) =>
+  isDm.value || (user.value !== null && o.ownerUserId === user.value.id)
 
 // Sichtbare Ausdehnung des Objekts unter Beruecksichtigung der Rotation:
 // 90°/270° vertauscht Breite und Hoehe, damit ein gedrehtes 2×1-Boot tatsaechlich
@@ -621,7 +624,7 @@ const displayH = (o: { width: number; height: number; rotation: number }) =>
 
 const startObjectDrag = (e: PointerEvent, o: MapObject) => {
   if (toolMode.value !== 'select') return
-  if (!canMoveObject() || !stageEl.value || !map.value) return
+  if (!canMoveObject(o) || !stageEl.value || !map.value) return
   e.stopPropagation()
   e.preventDefault()
   const rect = stageEl.value.getBoundingClientRect()
@@ -659,7 +662,7 @@ const onObjectPointerUp = async (e: PointerEvent) => {
   if (!o) return
   if (!wasDragged) {
     // Klick ohne Drag → Edit-Modal oeffnen.
-    if (canMoveObject()) editingObjectId.value = id
+    if (canMoveObject(o)) editingObjectId.value = id
     return
   }
   if (!e.shiftKey && map.value) {
@@ -712,10 +715,12 @@ const rotateObject = async (delta: 90 | -90) => {
 const saveObjectEdit = async () => {
   const o = editingObject.value
   if (!o) return
+  const body: Record<string, unknown> = { name: o.name }
+  if (isDm.value) body.hidden = o.hidden
   try {
     await $fetch(`/api/groups/${groupId}/maps/${mapId}/objects/${o.id}`, {
       method: 'PUT',
-      body: { name: o.name, hidden: o.hidden },
+      body,
     })
   } catch {
     await fetchMap()
@@ -2175,7 +2180,6 @@ const endResize = () => {
             Token
           </UButton>
           <UButton
-            v-if="isDm"
             color="primary"
             variant="outline"
             icon="i-lucide-shapes"
@@ -2567,7 +2571,7 @@ const endResize = () => {
               :data-object-id="o.id"
               class="absolute select-none"
               :class="[
-                isDm ? 'cursor-move' : 'cursor-default',
+                canMoveObject(o) ? 'cursor-move' : 'cursor-default',
                 o.hidden ? 'opacity-50' : '',
               ]"
               :style="{
@@ -3688,7 +3692,7 @@ const endResize = () => {
             <span class="text-sm font-mono w-12 text-center">{{ editingObject.rotation }}°</span>
             <UButton size="xs" variant="outline" icon="i-lucide-rotate-cw" @click="rotateObject(90)">+90°</UButton>
           </div>
-          <UFormField label="Versteckt (nur DM sieht)">
+          <UFormField v-if="isDm" label="Versteckt (nur DM sieht)">
             <UCheckbox v-model="editingObject.hidden" />
           </UFormField>
         </div>
