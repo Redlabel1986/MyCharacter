@@ -143,7 +143,8 @@ interface MapObject {
 
 interface CustomObjectTemplate {
   id: number
-  groupId: number
+  groupId: number | null
+  builtInKey?: string | null
   name: string
   category: string
   imageUrl: string | null
@@ -164,6 +165,7 @@ const drawings = ref<Drawing[]>([])
 const pings = ref<Ping[]>([])
 const objects = ref<MapObject[]>([])
 const customObjectTemplates = ref<CustomObjectTemplate[]>([])
+const globalObjectTemplates = ref<CustomObjectTemplate[]>([])
 const initiativeState = ref<InitiativeState | null>(null)
 const audioState = ref<AudioState | null>(null)
 const isDm = ref(false)
@@ -506,7 +508,7 @@ const objectCategoryFilter = ref<MapObjectCategory | 'all'>('all')
 
 // Templates aus Built-ins + Custom kombiniert.
 interface PickerTemplate {
-  source: 'builtin' | 'custom'
+  source: 'builtin' | 'custom' | 'global'
   key?: string
   id?: number
   name: string
@@ -520,27 +522,69 @@ interface PickerTemplate {
 
 const fetchObjectTemplates = async () => {
   try {
-    const res = await $fetch<{ templates: CustomObjectTemplate[] }>(
-      `/api/groups/${groupId}/object-templates`,
-    )
+    const res = await $fetch<{
+      templates: CustomObjectTemplate[]
+      globals?: CustomObjectTemplate[]
+    }>(`/api/groups/${groupId}/object-templates`)
     customObjectTemplates.value = res.templates ?? []
+    globalObjectTemplates.value = res.globals ?? []
   } catch {
     customObjectTemplates.value = []
+    globalObjectTemplates.value = []
   }
 }
 
+// Built-in-Overrides: built_in_key -> globales Template, das das Standard-SVG
+// ersetzt. Wird im Picker und beim Render der Karte angewendet.
+const builtInOverrideByKey = computed<Record<string, CustomObjectTemplate>>(() => {
+  const m: Record<string, CustomObjectTemplate> = {}
+  for (const g of globalObjectTemplates.value) {
+    if (g.builtInKey) m[g.builtInKey] = g
+  }
+  return m
+})
+
+// Bild-URL fuer ein platziertes Objekt — beruecksichtigt aktuelle Admin-
+// Overrides fuer Built-ins, damit ein neu hochgeladenes Bild sofort fuer
+// bereits platzierte Built-in-Instanzen erscheint.
+const objectDisplayImage = (o: MapObject): string | null => {
+  if (o.templateKey) {
+    const ov = builtInOverrideByKey.value[o.templateKey]
+    if (ov && ov.imageUrl) return `/api/admin/object-templates/${ov.id}/image`
+  }
+  return o.imageUrl
+}
+
 const allObjectTemplates = computed<PickerTemplate[]>(() => {
-  const built: PickerTemplate[] = BUILT_IN_MAP_OBJECTS.map((b: MapObjectTemplateBuiltin) => ({
-    source: 'builtin',
-    key: b.key,
-    name: b.name,
-    category: b.category,
-    imageUrl: b.imageUrl,
-    width: b.width,
-    height: b.height,
-    rotatable: b.rotatable,
-    lightRadius: b.lightRadius,
-  }))
+  const overrides = builtInOverrideByKey.value
+  const built: PickerTemplate[] = BUILT_IN_MAP_OBJECTS.map((b: MapObjectTemplateBuiltin) => {
+    const ov = overrides[b.key]
+    return {
+      source: 'builtin' as const,
+      key: b.key,
+      name: ov?.name ?? b.name,
+      category: b.category,
+      imageUrl: ov?.imageUrl ? `/api/admin/object-templates/${ov.id}/image` : b.imageUrl,
+      width: ov?.width ?? b.width,
+      height: ov?.height ?? b.height,
+      rotatable: ov?.rotatable ?? b.rotatable,
+      lightRadius: ov?.lightRadius ?? b.lightRadius,
+    }
+  })
+  // Neue Admin-Globals (ohne builtInKey) erscheinen unterhalb der Built-ins.
+  const globals: PickerTemplate[] = globalObjectTemplates.value
+    .filter((g: CustomObjectTemplate) => !g.builtInKey)
+    .map((g: CustomObjectTemplate) => ({
+      source: 'global' as const,
+      id: g.id,
+      name: g.name,
+      category: g.category,
+      imageUrl: g.imageUrl ? `/api/admin/object-templates/${g.id}/image` : '',
+      width: g.width,
+      height: g.height,
+      rotatable: g.rotatable,
+      lightRadius: g.lightRadius,
+    }))
   const custom: PickerTemplate[] = customObjectTemplates.value.map((c) => ({
     source: 'custom',
     id: c.id,
@@ -554,7 +598,7 @@ const allObjectTemplates = computed<PickerTemplate[]>(() => {
     rotatable: c.rotatable,
     lightRadius: c.lightRadius,
   }))
-  return [...built, ...custom]
+  return [...built, ...globals, ...custom]
 })
 
 const objectCategories = computed<Array<MapObjectCategory | 'all' | string>>(() => {
@@ -1250,6 +1294,9 @@ const fetchAudioTracks = async () => {
   }
 }
 onMounted(fetchAudioTracks)
+// Templates (inkl. globaler Admin-Overrides) frueh laden, damit Built-in-
+// Bilder auf der Karte sofort die ggf. ausgetauschte Variante zeigen.
+onMounted(fetchObjectTemplates)
 
 function handleAudioStateUpdate(s: AudioState | null) {
   audioState.value = s
@@ -2602,8 +2649,8 @@ const endResize = () => {
                 }"
               >
               <img
-                v-if="o.imageUrl"
-                :src="o.imageUrl"
+                v-if="objectDisplayImage(o)"
+                :src="objectDisplayImage(o) ?? ''"
                 :alt="o.name"
                 class="w-full h-full object-contain"
                 draggable="false"
@@ -3666,8 +3713,8 @@ const endResize = () => {
         <div v-if="editingObject" class="space-y-3">
           <div class="flex justify-center bg-black/5 rounded p-2">
             <img
-              v-if="editingObject.imageUrl"
-              :src="editingObject.imageUrl"
+              v-if="objectDisplayImage(editingObject)"
+              :src="objectDisplayImage(editingObject) ?? ''"
               :alt="editingObject.name"
               class="max-h-32 object-contain"
               :style="{ transform: `rotate(${editingObject.rotation}deg)` }"

@@ -384,17 +384,23 @@ export const battleAudioTracks = pgTable(
 )
 
 /**
- * Gruppen-spezifische Custom-Templates fuer Map-Objekte (Inventar des DM).
- * Built-in-Templates leben als Konstanten in shared/map-objects.ts und
- * brauchen keine DB-Eintraege.
+ * Templates fuer Map-Objekte.
+ *
+ * - `groupId IS NULL`: globale Templates, vom Admin gepflegt. Sind in allen
+ *   Gruppen sichtbar.
+ * - `groupId = X`: gruppen-spezifische Custom-Templates (vom Owner/DM angelegt).
+ * - `builtInKey IS NOT NULL` UND `groupId IS NULL`: Override fuer ein eingebautes
+ *   Template (siehe shared/map-objects.ts) — das uploadete Bild ersetzt das
+ *   Standard-SVG global. Pro builtInKey nur ein Override.
  */
 export const mapObjectTemplates = pgTable(
   'map_object_templates',
   {
     id: serial('id').primaryKey(),
-    groupId: integer('group_id')
-      .notNull()
-      .references(() => groups.id, { onDelete: 'cascade' }),
+    /** NULL = global (Admin-Bibliothek). */
+    groupId: integer('group_id').references(() => groups.id, { onDelete: 'cascade' }),
+    /** Wenn gesetzt, ersetzt dieses Template das eingebaute Built-in mit diesem Key. */
+    builtInKey: text('built_in_key'),
     name: text('name').notNull(),
     category: text('category').notNull().default('misc'),
     /** Blob-URL oder Pfad zum Bild des Templates. */

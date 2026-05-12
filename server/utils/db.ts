@@ -314,7 +314,7 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS map_object_templates (
       id SERIAL PRIMARY KEY,
-      group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
       category TEXT NOT NULL DEFAULT 'misc',
       image_url TEXT,
@@ -327,6 +327,15 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   `)
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_map_object_templates_group ON map_object_templates(group_id)
+  `)
+  // group_id darf NULL sein (globale Admin-Templates).
+  await db.execute(sql`
+    ALTER TABLE map_object_templates ALTER COLUMN group_id DROP NOT NULL
+  `)
+  // built_in_key: wenn gesetzt, ersetzt dieses Template global das gleichnamige
+  // eingebaute Template (z.B. ein neues Bild fuer "boot").
+  await db.execute(sql`
+    ALTER TABLE map_object_templates ADD COLUMN IF NOT EXISTS built_in_key TEXT
   `)
   // Map-Objekte: konkrete Instanzen auf einer Battle-Map.
   await db.execute(sql`

@@ -167,9 +167,18 @@ const clearLibraryPassword = async () => {
 
 <template>
   <div class="space-y-4">
-    <div>
-      <h1 class="font-serif text-3xl">Admin</h1>
-      <p class="text-sm text-ink-400">Benutzer und Bibliotheks-Zugang verwalten.</p>
+    <div class="flex items-baseline justify-between flex-wrap gap-2">
+      <div>
+        <h1 class="font-serif text-3xl">Admin</h1>
+        <p class="text-sm text-ink-400">Benutzer und Bibliotheks-Zugang verwalten.</p>
+      </div>
+      <NuxtLink
+        to="/admin/object-templates"
+        class="text-sm text-[var(--color-accent)] hover:underline inline-flex items-center gap-1"
+      >
+        <UIcon name="i-lucide-shapes" class="size-4" />
+        Map-Objekt-Bibliothek
+      </NuxtLink>
     </div>
 
     <div class="parchment-card p-4 space-y-3">

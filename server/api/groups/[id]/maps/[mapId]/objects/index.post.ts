@@ -7,7 +7,7 @@
  * einzige, der versteckte Objekte setzen kann.
  */
 import { z } from 'zod'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, isNull, or } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
 import {
@@ -81,17 +81,59 @@ export default defineEventHandler(async (event) => {
     height = t.height
     lightRadius = t.lightRadius
     rotatable = t.rotatable
+    // Globaler Admin-Override: falls vorhanden, dessen Bild/Metadaten verwenden.
+    const [override] = await db
+      .select()
+      .from(mapObjectTemplates)
+      .where(
+        and(
+          isNull(mapObjectTemplates.groupId),
+          eq(mapObjectTemplates.builtInKey, body.templateKey),
+        ),
+      )
+      .limit(1)
+    if (override) {
+      if (override.imageUrl) {
+        // imageUrl im Snapshot zeigt direkt auf den Admin-Endpoint, damit
+        // bestehende Instanzen das gleiche Bild liefern.
+        imageUrl = `/api/admin/object-templates/${override.id}/image`
+      }
+      if (override.name) name = override.name
+      if (override.width) width = override.width
+      if (override.height) height = override.height
+      if (typeof override.lightRadius === 'number') lightRadius = override.lightRadius
+      rotatable = override.rotatable
+    }
   } else if (body.templateId) {
+    // Template muss zur Gruppe gehoeren ODER global (groupId IS NULL) sein.
     const [t] = await db
       .select()
       .from(mapObjectTemplates)
-      .where(and(eq(mapObjectTemplates.id, body.templateId), eq(mapObjectTemplates.groupId, groupId)))
+      .where(
+        and(
+          eq(mapObjectTemplates.id, body.templateId),
+          or(
+            eq(mapObjectTemplates.groupId, groupId),
+            isNull(mapObjectTemplates.groupId),
+          ),
+        ),
+      )
       .limit(1)
     if (!t) {
       throw createError({ statusCode: 404, statusMessage: 'Template nicht gefunden.' })
     }
     name = t.name
-    imageUrl = t.imageUrl ?? null
+    // Globale Templates haben einen geschuetzten Image-Endpoint, gruppen-eigene
+    // einen gruppen-spezifischen — beide werden im Snapshot festgehalten.
+    if (t.groupId === null) {
+      imageUrl = t.imageUrl
+        ? `/api/admin/object-templates/${t.id}/image`
+        : null
+    } else {
+      imageUrl = t.imageUrl
+        ? `/api/groups/${groupId}/object-templates/${t.id}/image`
+        : null
+    }
     width = t.width
     height = t.height
     lightRadius = t.lightRadius
