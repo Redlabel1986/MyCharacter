@@ -192,7 +192,7 @@ const categoryLabel = (cat: string): string =>
           class="parchment-card p-2 flex flex-col items-center gap-1 relative"
         >
           <div
-            class="w-full bg-black/5 rounded flex items-center justify-center overflow-hidden"
+            class="w-full checker rounded flex items-center justify-center overflow-hidden"
             :style="{ aspectRatio: `${b.width} / ${b.height}` }"
           >
             <img
@@ -251,7 +251,7 @@ const categoryLabel = (cat: string): string =>
           class="parchment-card p-2 flex flex-col items-center gap-1 relative"
         >
           <div
-            class="w-full bg-black/5 rounded flex items-center justify-center overflow-hidden"
+            class="w-full checker rounded flex items-center justify-center overflow-hidden"
             :style="{ aspectRatio: `${g.width} / ${g.height}` }"
           >
             <img
@@ -376,3 +376,17 @@ const categoryLabel = (cat: string): string =>
     <p v-if="pending" class="text-xs text-ink-300 italic">Lade…</p>
   </div>
 </template>
+
+<style scoped>
+/* Schachbrett-Hintergrund — zeigt Transparenz im PNG sichtbar an. */
+.checker {
+  background-color: #f4ead2;
+  background-image:
+    linear-gradient(45deg, rgba(0, 0, 0, 0.08) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(0, 0, 0, 0.08) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(0, 0, 0, 0.08) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(0, 0, 0, 0.08) 75%);
+  background-size: 14px 14px;
+  background-position: 0 0, 0 7px, 7px -7px, -7px 0;
+}
+</style>

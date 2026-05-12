@@ -2645,7 +2645,6 @@ const endResize = () => {
                   transform: `translate(-50%, -50%) rotate(${o.rotation}deg)`,
                   transformOrigin: 'center center',
                   transition: draggingObjectId === o.id ? 'none' : 'transform 120ms ease',
-                  filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.45))',
                 }"
               >
               <img
@@ -3601,7 +3600,7 @@ const endResize = () => {
               @click="placeObjectFromTemplate(tpl)"
             >
               <div
-                class="w-full bg-black/5 rounded flex items-center justify-center overflow-hidden"
+                class="w-full checker rounded flex items-center justify-center overflow-hidden"
                 :style="{ aspectRatio: `${tpl.width} / ${tpl.height}` }"
               >
                 <img
@@ -3711,7 +3710,7 @@ const endResize = () => {
     <UModal v-model:open="editingObjectId" :title="editingObject?.name ?? 'Objekt'">
       <template #body>
         <div v-if="editingObject" class="space-y-3">
-          <div class="flex justify-center bg-black/5 rounded p-2">
+          <div class="flex justify-center checker rounded p-2">
             <img
               v-if="objectDisplayImage(editingObject)"
               :src="objectDisplayImage(editingObject) ?? ''"
@@ -3764,5 +3763,18 @@ const endResize = () => {
   box-shadow:
     0 0 0 2px var(--color-accent),
     0 0 14px 4px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+/* Schachbrett-Hintergrund: macht transparente Bereiche eines PNG sichtbar,
+   damit man im Picker und Edit-Modal sofort sieht, dass das Bild keinen
+   eigenen Hintergrund hat. */
+.checker {
+  background-color: #f4ead2;
+  background-image:
+    linear-gradient(45deg, rgba(0, 0, 0, 0.08) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(0, 0, 0, 0.08) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(0, 0, 0, 0.08) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(0, 0, 0, 0.08) 75%);
+  background-size: 14px 14px;
+  background-position: 0 0, 0 7px, 7px -7px, -7px 0;
 }
 </style>
