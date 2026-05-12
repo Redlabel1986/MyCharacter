@@ -72,6 +72,8 @@ const sheet = computed<HtbahCharacterData>(() => {
       talent: s.talent,
       spentPoints: s.spentPoints || 0,
       modifier: s.modifier || 0,
+      dayBonus: s.dayBonus || 0,
+      nightBonus: s.nightBonus || 0,
       note: s.note || '',
     })),
     advantages: incoming.advantages ?? [],
@@ -152,11 +154,24 @@ const refreshAllInsights = () => {
 
 const addSkill = (talent: HtbahTalent) => {
   const n = clone()
-  n.skills.push({ id: crypto.randomUUID(), name: '', talent, spentPoints: 0, modifier: 0, note: '' })
+  n.skills.push({
+    id: crypto.randomUUID(),
+    name: '',
+    talent,
+    spentPoints: 0,
+    modifier: 0,
+    dayBonus: 0,
+    nightBonus: 0,
+    note: '',
+  })
   update(n)
 }
 const updateSkill = (idx: number, patch: Partial<HtbahSkill>) => {
-  const n = clone(); n.skills[idx] = { ...n.skills[idx], ...patch }; update(n)
+  const n = clone()
+  const existing = n.skills[idx]
+  if (!existing) return
+  n.skills[idx] = { ...existing, ...patch }
+  update(n)
 }
 const removeSkill = (idx: number) => { const n = clone(); n.skills.splice(idx, 1); update(n) }
 
@@ -448,7 +463,10 @@ const postRollToGroup = async () => {
         <div class="col-span-4">Name</div>
         <div class="col-span-2 text-center">Punkte</div>
         <div class="col-span-1 text-center">+Beg.</div>
-        <div class="col-span-2 text-center">Mod</div>
+        <div
+          class="col-span-2 text-center"
+          title="Allgemeiner Modifikator. Wird immer zur Probe addiert (Vor- oder Nachteil aus Eigenschaften, Wunden o.aE.)."
+        >Mod</div>
         <div class="col-span-2 text-center">Total</div>
         <div class="col-span-1"></div>
       </div>
@@ -497,12 +515,37 @@ const postRollToGroup = async () => {
               @click="removeSkill(entry.idx)"
             />
           </div>
-          <UInput
-            size="xs"
-            placeholder="Notiz (z.B. Nachteil X reduziert um 10)"
-            :model-value="entry.skill.note"
-            @update:model-value="updateSkill(entry.idx, { note: String($event) })"
-          />
+          <div class="grid grid-cols-12 gap-1 items-center">
+            <div class="col-span-3 flex items-center gap-1">
+              <UIcon name="i-lucide-sun" class="size-3.5 text-amber-600 shrink-0" />
+              <UInput
+                size="xs"
+                type="number"
+                placeholder="Tag ±"
+                :model-value="entry.skill.dayBonus"
+                title="Bonus/Malus nur bei Tag (Morgen + Mittag) — wird automatisch zur Probe addiert, wenn die Karte tagsüber ist."
+                @update:model-value="updateSkill(entry.idx, { dayBonus: Number($event) || 0 })"
+              />
+            </div>
+            <div class="col-span-3 flex items-center gap-1">
+              <UIcon name="i-lucide-moon" class="size-3.5 text-indigo-500 shrink-0" />
+              <UInput
+                size="xs"
+                type="number"
+                placeholder="Nacht ±"
+                :model-value="entry.skill.nightBonus"
+                title="Bonus/Malus nur bei Nacht (Abend + Nacht) — wird automatisch zur Probe addiert, wenn die Karte abends/nachts ist."
+                @update:model-value="updateSkill(entry.idx, { nightBonus: Number($event) || 0 })"
+              />
+            </div>
+            <UInput
+              class="col-span-6"
+              size="xs"
+              placeholder="Notiz (z.B. Nachteil X reduziert um 10)"
+              :model-value="entry.skill.note"
+              @update:model-value="updateSkill(entry.idx, { note: String($event) })"
+            />
+          </div>
         </div>
       </div>
       <UButton size="xs" variant="ghost" icon="i-lucide-plus" class="mt-2" @click="addSkill(talent)">

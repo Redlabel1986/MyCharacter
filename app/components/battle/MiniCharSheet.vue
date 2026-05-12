@@ -17,6 +17,7 @@ import {
   htbahTalentValue,
   normalizeHtbahPurse,
   type HtbahCharacterData,
+  type HtbahSkill,
   type HtbahTalent,
 } from '~~/shared/engines/htbah'
 import {
@@ -36,7 +37,7 @@ import {
 } from '~~/shared/engines/dsa5'
 import type { GameSystem } from '~~/shared/systems'
 import type { NpcAbility } from '~~/shared/npc'
-import { timeBonusFor, type TimeOfDay } from '~~/shared/time-of-day'
+import { timeBonusFor, isDayTime, type TimeOfDay } from '~~/shared/time-of-day'
 
 interface Token {
   id: number
@@ -469,7 +470,9 @@ const rollIt = async () => {
     const opt = pickedRollOption.value
     const characterId = character.value?.id ?? 0
     const tokenId = activeToken.value?.id ?? 0
-    // Tageszeit-Bonus an NPC-Faehigkeiten auflösen und in die Modifier mischen.
+    // Tageszeit-Bonus auflösen und in die Modifier mischen — sowohl an
+    // NPC-Faehigkeiten (timeBonuses je Phase) als auch an HtbaH-Charakter-
+    // Skills (dayBonus / nightBonus, Tag = Morgen+Mittag, Nacht = Abend+Nacht).
     let todBonus = 0
     let todNoteSuffix = ''
     if (
@@ -480,6 +483,18 @@ const rollIt = async () => {
       if (todBonus !== 0) {
         const sign = todBonus > 0 ? '+' : ''
         todNoteSuffix = ` (Tageszeit ${sign}${todBonus})`
+      }
+    } else if (opt.kind === 'htbahSkill' && htbahData.value && props.timeOfDay) {
+      const skill = htbahData.value.skills.find((s: HtbahSkill) => s.id === opt.id)
+      if (skill) {
+        const day = skill.dayBonus || 0
+        const night = skill.nightBonus || 0
+        todBonus = isDayTime(props.timeOfDay) ? day : night
+        if (todBonus !== 0) {
+          const sign = todBonus > 0 ? '+' : ''
+          const phase = isDayTime(props.timeOfDay) ? 'Tag' : 'Nacht'
+          todNoteSuffix = ` (${phase} ${sign}${todBonus})`
+        }
       }
     }
     const combinedMod = (rollMod.value || 0) + todBonus

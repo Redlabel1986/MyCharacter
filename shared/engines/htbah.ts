@@ -23,10 +23,23 @@ export interface HtbahSkill {
   /** Vergebene Fähigkeitspunkte (mittlere Spalte im Bogen). */
   spentPoints: number
   /**
-   * Signierter Modifikator. Wird zum Skill-Total addiert (negativ = abgezogen).
-   * Z.B. fuer "Nachteil X reduziert diese Faehigkeit um 10 Punkte" → -10.
+   * Allgemeiner signierter Modifikator. Wird zum Skill-Total addiert
+   * (negativ = abgezogen). Z.B. fuer "Nachteil X reduziert diese
+   * Faehigkeit um 10 Punkte" → -10.
    */
   modifier: number
+  /**
+   * Bonus/Malus nur bei Tag (Morgen + Mittag). Wird zusaetzlich zur
+   * Probe addiert, wenn die Battle-Map gerade Tageszeit "morning"
+   * oder "noon" hat. 0 = kein Effekt.
+   */
+  dayBonus: number
+  /**
+   * Bonus/Malus nur bei Nacht (Abend + Nacht). Wird zusaetzlich zur
+   * Probe addiert, wenn die Battle-Map gerade Tageszeit "evening"
+   * oder "night" hat. 0 = kein Effekt.
+   */
+  nightBonus: number
   /** Freitext-Notiz fuer diesen Skill (z.B. Begruendung des Modifikators). */
   note: string
 }

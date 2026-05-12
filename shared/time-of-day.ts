@@ -46,6 +46,13 @@ export const nextTimeOfDay = (t: TimeOfDay): TimeOfDay => {
 }
 
 /**
+ * Grob-Klassifikation: Tag (heller) vs. Nacht (dunkler).
+ * Morgen + Mittag zaehlen als Tag, Abend + Nacht als Nacht — Daemmerung
+ * geht damit ueblicher Konvention nach bereits zur Nacht-Seite.
+ */
+export const isDayTime = (t: TimeOfDay): boolean => t === 'morning' || t === 'noon'
+
+/**
  * Beleuchtungs-Beschreibung fuer die jeweilige Tageszeit.
  *  - `tintGradient` ist ein CSS-Linear-Gradient, der ueber die Karte gelegt wird.
  *  - `tintOpacity` legt die Gesamt-Intensitaet fest.
