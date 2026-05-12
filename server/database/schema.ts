@@ -210,6 +210,9 @@ export type GroupSharedCharacter = typeof groupSharedCharacters.$inferSelect
 export const GRID_TYPES = ['square', 'hex'] as const
 export type GridType = (typeof GRID_TYPES)[number]
 
+export const TIMES_OF_DAY = ['morning', 'noon', 'evening', 'night'] as const
+export type TimeOfDay = (typeof TIMES_OF_DAY)[number]
+
 export const battleMaps = pgTable(
   'battle_maps',
   {
@@ -249,6 +252,12 @@ export const battleMaps = pgTable(
       .notNull()
       .$type<Array<[number, number]>>()
       .default([]),
+    /**
+     * Tageszeit auf der Karte. Steuert das Beleuchtungs-Overlay
+     * (Sonnenaufgang/Tageslicht/Daemmerung/Nacht) und kann ueber
+     * NPC-Faehigkeiten Boni oder Malus ergeben.
+     */
+    timeOfDay: text('time_of_day').notNull().$type<TimeOfDay>().default('noon'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

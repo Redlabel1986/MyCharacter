@@ -7,6 +7,7 @@
  *   dsa5:  3W20 vs (probe-Eigenschaften + abilityValues + FW)
  */
 import type { DsaAbility } from './engines/dsa5'
+import type { TimeBonusMap } from './time-of-day'
 
 export type NpcAbilitySystem = 'htbah' | 'dnd' | 'dsa5'
 
@@ -16,6 +17,8 @@ export interface NpcAbilityHtbah {
   label: string
   /** Zielwert (Talent + Skill-Bonus, vorgerechnet). 1W100 <= value = Erfolg. */
   value: number
+  /** Optional: Boni/Malus pro Tageszeit, z.B. { night: 10, noon: -10 }. */
+  timeBonuses?: TimeBonusMap
 }
 
 export interface NpcAbilityDnd {
@@ -24,6 +27,7 @@ export interface NpcAbilityDnd {
   label: string
   /** Modifier auf 1W20. */
   mod: number
+  timeBonuses?: TimeBonusMap
 }
 
 export interface NpcAbilityDsa5 {
@@ -36,6 +40,7 @@ export interface NpcAbilityDsa5 {
   abilityValues: [number, number, number]
   /** Fertigkeits-/Zauber-/Liturgiewert. */
   fw: number
+  timeBonuses?: TimeBonusMap
 }
 
 export type NpcAbility = NpcAbilityHtbah | NpcAbilityDnd | NpcAbilityDsa5

@@ -27,6 +27,16 @@ import {
   type MapObjectCategory,
   type MapObjectTemplateBuiltin,
 } from '~~/shared/map-objects'
+import {
+  TIMES_OF_DAY,
+  TIME_OF_DAY_LABELS,
+  TIME_OF_DAY_ICONS,
+  TIME_OF_DAY_ARC,
+  TIME_OF_DAY_OVERLAYS,
+  NIGHT_DM_DARK_COLOR,
+  nextTimeOfDay,
+  type TimeOfDay,
+} from '~~/shared/time-of-day'
 
 definePageMeta({ middleware: ['auth'], layout: 'wide' })
 
@@ -45,6 +55,7 @@ interface BattleMap {
   fogMemory: boolean
   fogRevealed: Array<[number, number]>
   fogExplored: Array<[number, number]>
+  timeOfDay: TimeOfDay
 }
 interface Token {
   id: number
@@ -1163,6 +1174,7 @@ const settingsDraft = ref({
   showTokenNames: true,
   fogEnabled: false,
   fogMemory: true,
+  timeOfDay: 'noon' as TimeOfDay,
 })
 // Settings nur beim echten Karten-Wechsel aus dem Server-Snapshot uebernehmen,
 // nicht bei jedem 2s-Poll — sonst klobbert der Poll Eingaben mitten im Tippen.
@@ -1181,6 +1193,7 @@ watch(
       showTokenNames: m.showTokenNames ?? true,
       fogEnabled: m.fogEnabled ?? false,
       fogMemory: m.fogMemory ?? true,
+      timeOfDay: m.timeOfDay ?? 'noon',
     }
   },
   { immediate: true },
@@ -1957,6 +1970,51 @@ const fogClearAll = async () => {
   await fetchMap()
 }
 
+// --- Tageszeit (Beleuchtungs-Overlay + Sonnen-Anzeige) ---
+const currentTimeOfDay = computed<TimeOfDay>(() => {
+  const t = map.value?.timeOfDay
+  return (t && TIMES_OF_DAY.includes(t)) ? t : 'noon'
+})
+const currentTodOverlay = computed(() => TIME_OF_DAY_OVERLAYS[currentTimeOfDay.value])
+// Nacht-Maske: zeigt nur die Zellen, in denen Token-Sicht oder Lichtquellen
+// gerade etwas erhellen. Wenn der DM zusaetzlich mit dem Fog of War Pinsel
+// Bereiche aufdeckt, bleiben diese auch nachts „bekannt" sichtbar.
+const nightVisibleCellsList = computed<Array<[number, number]>>(() => {
+  if (currentTimeOfDay.value !== 'night' || !map.value) return []
+  const cols = fogGridCols.value
+  const rows = fogGridRows.value
+  const out: Array<[number, number]> = []
+  const set = new Set<string>(fogCurrentVisionSet.value)
+  // Manuell aufgedeckte Zellen bleiben "erinnert" auch im Dunkeln zu sehen,
+  // damit der DM Areale gezielt beleuchten kann (z.B. Lagerfeuer).
+  for (const [c, r] of map.value.fogRevealed ?? []) set.add(`${c}|${r}`)
+  for (const key of set) {
+    const parts = key.split('|')
+    const c = Number(parts[0])
+    const r = Number(parts[1])
+    if (!Number.isFinite(c) || !Number.isFinite(r)) continue
+    if (c < 0 || r < 0 || c >= cols || r >= rows) continue
+    out.push([c, r])
+  }
+  return out
+})
+const nightMaskId = computed(() => `night-mask-${mapId}`)
+const nightDarkColor = computed(() => (isDm.value ? NIGHT_DM_DARK_COLOR : currentTodOverlay.value.darkColor))
+const cycleTimeOfDay = async () => {
+  if (!isDm.value || !map.value) return
+  const next = nextTimeOfDay(currentTimeOfDay.value)
+  settingsDraft.value.timeOfDay = next
+  try {
+    await $fetch(`/api/groups/${groupId}/maps/${mapId}`, {
+      method: 'PUT',
+      body: { timeOfDay: next },
+    })
+    await fetchMap()
+  } catch (e) {
+    console.error('Tageszeit speichern fehlgeschlagen', e)
+  }
+}
+
 // --- Zeichnen ---
 const DRAW_COLORS = [
   '#ef4444', // rot
@@ -2359,6 +2417,27 @@ const endResize = () => {
             >
               <UCheckbox v-model="settingsDraft.fogMemory" :disabled="!settingsDraft.fogEnabled" />
             </UFormField>
+            <UFormField
+              label="Tageszeit"
+              class="sm:col-span-6"
+              help="Morgens warm + heller, mittags am hellsten, abends Daemmerung, nachts dunkel (nur Token-Sicht + Lichtquellen erhellen)."
+            >
+              <div class="grid grid-cols-4 gap-1">
+                <button
+                  v-for="t in TIMES_OF_DAY"
+                  :key="t"
+                  type="button"
+                  class="flex items-center justify-center gap-1 px-2 py-1.5 rounded text-xs border transition"
+                  :class="settingsDraft.timeOfDay === t
+                    ? 'bg-[var(--color-accent)] text-white border-[var(--color-accent)]'
+                    : 'bg-white/40 border-parchment-700/30 hover:bg-white/70'"
+                  @click="settingsDraft.timeOfDay = t"
+                >
+                  <UIcon :name="TIME_OF_DAY_ICONS[t]" class="size-4" />
+                  <span>{{ TIME_OF_DAY_LABELS[t] }}</span>
+                </button>
+              </div>
+            </UFormField>
           </div>
           <UButton class="mt-2" color="primary" icon="i-lucide-save" :loading="savingSettings" @click="saveSettings">
             Speichern
@@ -2484,7 +2563,52 @@ const endResize = () => {
         </div>
       </div>
 
-      <div class="parchment-card p-2">
+      <div class="parchment-card p-2 relative">
+        <!-- Sonnen-/Mondanzeige oben mittig der Karte. Klick (DM) zyklisiert
+             die Tageszeit. Spieler sehen sie nur als Information. -->
+        <div
+          class="absolute left-1/2 top-3 -translate-x-1/2 z-20 pointer-events-none"
+          aria-hidden="false"
+        >
+          <button
+            type="button"
+            class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-sm text-white shadow-lg pointer-events-auto transition hover:bg-black/75 disabled:cursor-default disabled:hover:bg-black/60"
+            :disabled="!isDm"
+            :title="isDm ? 'Tageszeit weiterschalten' : TIME_OF_DAY_LABELS[currentTimeOfDay] + ' — ' + currentTodOverlay.flavor"
+            @click="cycleTimeOfDay"
+          >
+            <!-- Sun-Arc-Indikator -->
+            <svg width="60" height="22" viewBox="0 0 60 22" class="overflow-visible">
+              <path
+                d="M 4 20 A 26 26 0 0 1 56 20"
+                fill="none"
+                stroke="rgba(255,255,255,0.35)"
+                stroke-width="1"
+                stroke-dasharray="2 2"
+              />
+              <circle
+                :cx="4 + 52 * TIME_OF_DAY_ARC[currentTimeOfDay]"
+                :cy="currentTimeOfDay === 'night' ? 8 : 4 + 16 * (1 - Math.sin(Math.PI * TIME_OF_DAY_ARC[currentTimeOfDay]))"
+                r="5"
+                :fill="currentTimeOfDay === 'morning' ? '#fbbf24'
+                  : currentTimeOfDay === 'noon' ? '#fde047'
+                  : currentTimeOfDay === 'evening' ? '#f97316'
+                  : '#e5e7eb'"
+                :stroke="currentTimeOfDay === 'night' ? '#94a3b8' : 'rgba(255,255,255,0.7)'"
+                stroke-width="1"
+              />
+            </svg>
+            <div class="flex items-center gap-1.5 text-xs">
+              <UIcon :name="TIME_OF_DAY_ICONS[currentTimeOfDay]" class="size-4" />
+              <span class="font-semibold">{{ TIME_OF_DAY_LABELS[currentTimeOfDay] }}</span>
+            </div>
+            <UIcon
+              v-if="isDm"
+              name="i-lucide-chevron-right"
+              class="size-3 opacity-60"
+            />
+          </button>
+        </div>
         <div
           ref="stageWrapperEl"
           class="overflow-auto bg-black/5 rounded flex"
@@ -2803,6 +2927,48 @@ const endResize = () => {
                 :mask="`url(#${fogOverlayId})`"
               />
             </svg>
+
+            <!-- Tageszeit-Beleuchtung: legt einen Farbton ueber die Karte.
+                 Tags warm/hell, abends roetlich, nachts dunkel mit Mask-Cut-out
+                 fuer Token-Sicht + Lichtquellen (wie Fog of War). -->
+            <div
+              v-if="currentTodOverlay.tintGradient && imgW && imgH"
+              class="absolute inset-0 pointer-events-none"
+              :style="{
+                width: imgW + 'px',
+                height: imgH + 'px',
+                background: currentTodOverlay.tintGradient,
+                mixBlendMode: 'multiply',
+              }"
+            />
+            <svg
+              v-if="currentTodOverlay.requiresVisionMask && imgW && imgH"
+              class="absolute inset-0 pointer-events-none"
+              :width="imgW"
+              :height="imgH"
+              :viewBox="`0 0 ${imgW} ${imgH}`"
+            >
+              <defs>
+                <mask :id="nightMaskId">
+                  <rect width="100%" height="100%" fill="white" />
+                  <rect
+                    v-for="cell in nightVisibleCellsList"
+                    :key="`night-${cell[0]}|${cell[1]}`"
+                    :x="cell[0] * map.gridSize"
+                    :y="cell[1] * map.gridSize"
+                    :width="map.gridSize"
+                    :height="map.gridSize"
+                    fill="black"
+                  />
+                </mask>
+              </defs>
+              <rect
+                width="100%"
+                height="100%"
+                :fill="nightDarkColor"
+                :mask="`url(#${nightMaskId})`"
+              />
+            </svg>
           </div>
           </div>
         </div>
@@ -2949,6 +3115,7 @@ const endResize = () => {
         :group-id="groupId"
         :map-id="mapId"
         :tokens="myTokensOnMap"
+        :time-of-day="currentTimeOfDay"
         @token-updated="fetchMap"
       />
 

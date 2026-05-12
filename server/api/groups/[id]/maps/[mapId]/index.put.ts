@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { and, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupOwner } from '~~/server/utils/group-access'
-import { battleMaps, GRID_TYPES } from '~~/server/database/schema'
+import { battleMaps, GRID_TYPES, TIMES_OF_DAY } from '~~/server/database/schema'
 
 const cellTupleSchema = z.tuple([z.number().int(), z.number().int()])
 
@@ -22,6 +22,7 @@ const bodySchema = z.object({
   // Cap auf 50k Zellen, damit niemand einen Riesen-Payload schiebt.
   fogRevealed: z.array(cellTupleSchema).max(50000).optional(),
   fogExplored: z.array(cellTupleSchema).max(50000).optional(),
+  timeOfDay: z.enum(TIMES_OF_DAY).optional(),
 })
 
 export default defineEventHandler(async (event) => {

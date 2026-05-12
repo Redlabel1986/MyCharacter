@@ -13,17 +13,27 @@ import { DSA_ABILITIES } from '~~/shared/engines/dsa5'
 import { readCharacterHp, writeCharacterHp, type CharSystem } from '~~/shared/character-hp'
 import { cellsInTokenVision, uniqueCells, type CellTuple } from '~~/shared/fog'
 
+const timeBonusesSchema = z
+  .object({
+    morning: z.number().int().min(-50).max(50).optional(),
+    noon: z.number().int().min(-50).max(50).optional(),
+    evening: z.number().int().min(-50).max(50).optional(),
+    night: z.number().int().min(-50).max(50).optional(),
+  })
+  .optional()
 const npcAbilityHtbahSchema = z.object({
   id: z.string().min(1).max(40),
   system: z.literal('htbah'),
   label: z.string().min(1).max(60),
   value: z.number().int().min(0).max(100),
+  timeBonuses: timeBonusesSchema,
 })
 const npcAbilityDndSchema = z.object({
   id: z.string().min(1).max(40),
   system: z.literal('dnd'),
   label: z.string().min(1).max(60),
   mod: z.number().int().min(-30).max(30),
+  timeBonuses: timeBonusesSchema,
 })
 const npcAbilityDsa5Schema = z.object({
   id: z.string().min(1).max(40),
@@ -36,6 +46,7 @@ const npcAbilityDsa5Schema = z.object({
     z.number().int().min(0).max(30),
   ]),
   fw: z.number().int().min(0).max(25),
+  timeBonuses: timeBonusesSchema,
 })
 const npcAbilitySchema = z.discriminatedUnion('system', [
   npcAbilityHtbahSchema,

@@ -36,6 +36,7 @@ import {
 } from '~~/shared/engines/dsa5'
 import type { GameSystem } from '~~/shared/systems'
 import type { NpcAbility } from '~~/shared/npc'
+import { timeBonusFor, type TimeOfDay } from '~~/shared/time-of-day'
 
 interface Token {
   id: number
@@ -62,6 +63,7 @@ const props = defineProps<{
   groupId: number
   mapId: number
   tokens: Token[]
+  timeOfDay?: TimeOfDay
 }>()
 
 const emit = defineEmits<{
@@ -467,8 +469,23 @@ const rollIt = async () => {
     const opt = pickedRollOption.value
     const characterId = character.value?.id ?? 0
     const tokenId = activeToken.value?.id ?? 0
-    const modifier = rollMod.value || undefined
-    const note = rollNote.value.trim() || undefined
+    // Tageszeit-Bonus an NPC-Faehigkeiten auflösen und in die Modifier mischen.
+    let todBonus = 0
+    let todNoteSuffix = ''
+    if (
+      opt.kind === 'npcHtbah' || opt.kind === 'npcDnd' || opt.kind === 'npcDsa5'
+    ) {
+      const ability = activeToken.value?.npcAbilities.find((a: NpcAbility) => a.id === opt.id)
+      todBonus = timeBonusFor(ability?.timeBonuses, props.timeOfDay)
+      if (todBonus !== 0) {
+        const sign = todBonus > 0 ? '+' : ''
+        todNoteSuffix = ` (Tageszeit ${sign}${todBonus})`
+      }
+    }
+    const combinedMod = (rollMod.value || 0) + todBonus
+    const modifier = combinedMod !== 0 ? combinedMod : undefined
+    const baseNote = rollNote.value.trim()
+    const note = (baseNote + todNoteSuffix).trim() || undefined
     const dc = rollDc.value || undefined
     const mode = rollMode.value
     let body: Record<string, unknown>

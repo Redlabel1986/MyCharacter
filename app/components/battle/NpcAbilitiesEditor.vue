@@ -5,6 +5,12 @@
  */
 import type { NpcAbility } from '~~/shared/npc'
 import { DSA_ABILITIES, DSA_ABILITY_LABELS, type DsaAbility } from '~~/shared/engines/dsa5'
+import {
+  TIMES_OF_DAY,
+  TIME_OF_DAY_ICONS,
+  TIME_OF_DAY_LABELS,
+  type TimeOfDay,
+} from '~~/shared/time-of-day'
 
 type NpcSystem = 'htbah' | 'dnd' | 'dsa5' | null
 
@@ -66,6 +72,37 @@ function remove(id: string) {
 function patched() {
   emit('update:abilities', [...props.abilities])
 }
+
+// Tageszeit-Boni-Editor (klappt pro Faehigkeit auf).
+const expandedBonuses = ref(new Set<string>())
+function toggleBonusPanel(id: string) {
+  const next = new Set(expandedBonuses.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  expandedBonuses.value = next
+}
+function bonusVal(a: NpcAbility, t: TimeOfDay): number {
+  return a.timeBonuses?.[t] ?? 0
+}
+function setBonus(a: NpcAbility, t: TimeOfDay, v: number) {
+  const n = Math.max(-50, Math.min(50, Math.trunc(Number(v) || 0)))
+  const next: Record<string, number> = { ...(a.timeBonuses ?? {}) }
+  if (n === 0) delete next[t]
+  else next[t] = n
+  ;(a as { timeBonuses?: Record<string, number> }).timeBonuses =
+    Object.keys(next).length ? next : undefined
+  patched()
+}
+function bonusSummary(a: NpcAbility): string {
+  const parts: string[] = []
+  for (const t of TIMES_OF_DAY) {
+    const v = a.timeBonuses?.[t]
+    if (typeof v === 'number' && v !== 0) {
+      parts.push(`${TIME_OF_DAY_LABELS[t]} ${v > 0 ? '+' : ''}${v}`)
+    }
+  }
+  return parts.join(' · ')
+}
 </script>
 
 <template>
@@ -97,32 +134,70 @@ function patched() {
         <div
           v-for="a in (abilities as Extract<NpcAbility, { system: 'htbah' }>[])"
           :key="a.id"
-          class="grid grid-cols-12 gap-2 items-center"
+          class="space-y-1"
         >
-          <UInput
-            v-model="a.label"
-            class="col-span-7"
-            placeholder="z.B. Wahrnehmung"
-            :maxlength="60"
-            @update:model-value="patched"
-          />
-          <UInput
-            v-model.number="a.value"
-            class="col-span-3"
-            type="number"
-            min="0"
-            max="100"
-            placeholder="Zielwert"
-            @update:model-value="patched"
-          />
-          <UButton
-            class="col-span-2"
-            size="xs"
-            variant="ghost"
-            color="error"
-            icon="i-lucide-x"
-            @click="remove(a.id)"
-          />
+          <div class="grid grid-cols-12 gap-2 items-center">
+            <UInput
+              v-model="a.label"
+              class="col-span-6"
+              placeholder="z.B. Wahrnehmung"
+              :maxlength="60"
+              @update:model-value="patched"
+            />
+            <UInput
+              v-model.number="a.value"
+              class="col-span-3"
+              type="number"
+              min="0"
+              max="100"
+              placeholder="Zielwert"
+              @update:model-value="patched"
+            />
+            <UButton
+              class="col-span-2"
+              size="xs"
+              variant="soft"
+              :color="bonusSummary(a) ? 'primary' : 'neutral'"
+              icon="i-lucide-sun-moon"
+              :title="bonusSummary(a) || 'Tageszeit-Boni einstellen'"
+              @click="toggleBonusPanel(a.id)"
+            >
+              <span class="truncate text-[10px]">{{ bonusSummary(a) || 'Tageszeit' }}</span>
+            </UButton>
+            <UButton
+              class="col-span-1"
+              size="xs"
+              variant="ghost"
+              color="error"
+              icon="i-lucide-x"
+              @click="remove(a.id)"
+            />
+          </div>
+          <div
+            v-if="expandedBonuses.has(a.id)"
+            class="grid grid-cols-4 gap-2 pl-2 border-l-2 border-amber-400/40"
+          >
+            <UFormField
+              v-for="t in TIMES_OF_DAY"
+              :key="t"
+              :label="TIME_OF_DAY_LABELS[t]"
+              size="xs"
+            >
+              <UInput
+                :model-value="bonusVal(a, t)"
+                type="number"
+                min="-50"
+                max="50"
+                size="xs"
+                :ui="{ leading: 'pointer-events-none' }"
+                @update:model-value="(v) => setBonus(a, t, Number(v))"
+              >
+                <template #leading>
+                  <UIcon :name="TIME_OF_DAY_ICONS[t]" class="size-3 text-ink-300" />
+                </template>
+              </UInput>
+            </UFormField>
+          </div>
         </div>
       </template>
 
@@ -131,32 +206,69 @@ function patched() {
         <div
           v-for="a in (abilities as Extract<NpcAbility, { system: 'dnd' }>[])"
           :key="a.id"
-          class="grid grid-cols-12 gap-2 items-center"
+          class="space-y-1"
         >
-          <UInput
-            v-model="a.label"
-            class="col-span-7"
-            placeholder="z.B. Stealth"
-            :maxlength="60"
-            @update:model-value="patched"
-          />
-          <UInput
-            v-model.number="a.mod"
-            class="col-span-3"
-            type="number"
-            min="-30"
-            max="30"
-            placeholder="Mod"
-            @update:model-value="patched"
-          />
-          <UButton
-            class="col-span-2"
-            size="xs"
-            variant="ghost"
-            color="error"
-            icon="i-lucide-x"
-            @click="remove(a.id)"
-          />
+          <div class="grid grid-cols-12 gap-2 items-center">
+            <UInput
+              v-model="a.label"
+              class="col-span-6"
+              placeholder="z.B. Stealth"
+              :maxlength="60"
+              @update:model-value="patched"
+            />
+            <UInput
+              v-model.number="a.mod"
+              class="col-span-3"
+              type="number"
+              min="-30"
+              max="30"
+              placeholder="Mod"
+              @update:model-value="patched"
+            />
+            <UButton
+              class="col-span-2"
+              size="xs"
+              variant="soft"
+              :color="bonusSummary(a) ? 'primary' : 'neutral'"
+              icon="i-lucide-sun-moon"
+              :title="bonusSummary(a) || 'Tageszeit-Boni einstellen'"
+              @click="toggleBonusPanel(a.id)"
+            >
+              <span class="truncate text-[10px]">{{ bonusSummary(a) || 'Tageszeit' }}</span>
+            </UButton>
+            <UButton
+              class="col-span-1"
+              size="xs"
+              variant="ghost"
+              color="error"
+              icon="i-lucide-x"
+              @click="remove(a.id)"
+            />
+          </div>
+          <div
+            v-if="expandedBonuses.has(a.id)"
+            class="grid grid-cols-4 gap-2 pl-2 border-l-2 border-amber-400/40"
+          >
+            <UFormField
+              v-for="t in TIMES_OF_DAY"
+              :key="t"
+              :label="TIME_OF_DAY_LABELS[t]"
+              size="xs"
+            >
+              <UInput
+                :model-value="bonusVal(a, t)"
+                type="number"
+                min="-50"
+                max="50"
+                size="xs"
+                @update:model-value="(v) => setBonus(a, t, Number(v))"
+              >
+                <template #leading>
+                  <UIcon :name="TIME_OF_DAY_ICONS[t]" class="size-3 text-ink-300" />
+                </template>
+              </UInput>
+            </UFormField>
+          </div>
         </div>
       </template>
 
@@ -170,7 +282,7 @@ function patched() {
           <div class="grid grid-cols-12 gap-2 items-center">
             <UInput
               v-model="a.label"
-              class="col-span-9"
+              class="col-span-7"
               placeholder="z.B. Schleichen"
               :maxlength="60"
               @update:model-value="patched"
@@ -185,6 +297,17 @@ function patched() {
               @update:model-value="patched"
             />
             <UButton
+              class="col-span-2"
+              size="xs"
+              variant="soft"
+              :color="bonusSummary(a) ? 'primary' : 'neutral'"
+              icon="i-lucide-sun-moon"
+              :title="bonusSummary(a) || 'Tageszeit-Boni einstellen'"
+              @click="toggleBonusPanel(a.id)"
+            >
+              <span class="truncate text-[10px]">{{ bonusSummary(a) || 'Tageszeit' }}</span>
+            </UButton>
+            <UButton
               class="col-span-1"
               size="xs"
               variant="ghost"
@@ -192,6 +315,30 @@ function patched() {
               icon="i-lucide-x"
               @click="remove(a.id)"
             />
+          </div>
+          <div
+            v-if="expandedBonuses.has(a.id)"
+            class="grid grid-cols-4 gap-2 pl-2 border-l-2 border-amber-400/40"
+          >
+            <UFormField
+              v-for="t in TIMES_OF_DAY"
+              :key="t"
+              :label="TIME_OF_DAY_LABELS[t]"
+              size="xs"
+            >
+              <UInput
+                :model-value="bonusVal(a, t)"
+                type="number"
+                min="-50"
+                max="50"
+                size="xs"
+                @update:model-value="(v) => setBonus(a, t, Number(v))"
+              >
+                <template #leading>
+                  <UIcon :name="TIME_OF_DAY_ICONS[t]" class="size-3 text-ink-300" />
+                </template>
+              </UInput>
+            </UFormField>
           </div>
           <div class="grid grid-cols-6 gap-2 items-center">
             <USelect
