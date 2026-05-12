@@ -274,6 +274,11 @@ export const battleTokens = pgTable(
     name: text('name').notNull(),
     /** Bild-URL — entweder Portrait des Charakters oder eigenes Token-Bild. */
     imageUrl: text('image_url'),
+    /**
+     * Zusaetzliche Bilder fuer die Info-Karte (Galerie). Liste von Blob-URLs;
+     * werden als Thumbnail-Galerie unter dem Haupt-Bild gezeigt.
+     */
+    images: jsonb('images').notNull().$type<string[]>().default([]),
     /** Position in Pixeln (Karten-Koordinaten am Originalbild). */
     x: integer('x').notNull().default(0),
     y: integer('y').notNull().default(0),

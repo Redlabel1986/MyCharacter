@@ -47,6 +47,8 @@ interface Token {
   characterId: number | null
   name: string
   imageUrl: string | null
+  /** Zusaetzliche Galerie-Bilder. Werden in der Info-Karte als Thumbnails gezeigt. */
+  images: string[]
   x: number
   y: number
   sizeMultiplier: number
@@ -337,22 +339,56 @@ const dragStartPx = ref({ x: 0, y: 0 })
 
 const canMoveToken = (t: Token) => isDm.value || t.ownerUserId === user.value?.id
 
+/**
+ * Findet das oberste Token unter (localX, localY), das ich bewegen darf. Wird
+ * genutzt, wenn der Klick eigentlich auf einem fremden Token landet, der den
+ * eigenen Token komplett verdeckt — so kann der Spieler trotzdem seinen
+ * eigenen Token greifen. Tokens werden in der gleichen Stapel-Reihenfolge
+ * durchsucht wie sie gerendert werden (spaeter = oben).
+ */
+const findMovableTokenAt = (localX: number, localY: number): Token | null => {
+  if (!map.value) return null
+  const g = map.value.gridSize
+  for (let i = tokens.value.length - 1; i >= 0; i--) {
+    const t = tokens.value[i]!
+    if (!canMoveToken(t)) continue
+    if (!isTokenVisibleToViewer(t)) continue
+    const half = (t.sizeMultiplier * g) / 2
+    if (
+      localX >= t.x - half &&
+      localX <= t.x + half &&
+      localY >= t.y - half &&
+      localY <= t.y + half
+    ) {
+      return t
+    }
+  }
+  return null
+}
+
 const startDrag = (e: PointerEvent, t: Token) => {
   // Im Zeichnen-/Erase-Modus ignorieren wir Token-Drags — der Klick fliesst
   // dann zur Stage durch und triggert das jeweilige Werkzeug.
   if (toolMode.value !== 'select') return
-  if (!canMoveToken(t)) {
-    // Spieler kann fremde Token nur ansehen — Klick = Info-Karte
-    return
-  }
   if (!stageEl.value || !map.value) return
-  e.preventDefault()
   const rect = stageEl.value.getBoundingClientRect()
   const localX = (e.clientX - rect.left) / zoom.value
   const localY = (e.clientY - rect.top) / zoom.value
-  dragOffset.value = { x: localX - t.x, y: localY - t.y }
+  let target: Token | null = t
+  if (!canMoveToken(t)) {
+    // Klick liegt auf einem fremden Token — wenn unterm Cursor zusaetzlich ein
+    // eigenes Token liegt (z.B. Stack/Overlap), packen wir das stattdessen.
+    const fallback = findMovableTokenAt(localX, localY)
+    if (!fallback) {
+      // Wirklich nichts zu bewegen — Klick = Info-Karte des Originals.
+      return
+    }
+    target = fallback
+  }
+  e.preventDefault()
+  dragOffset.value = { x: localX - target.x, y: localY - target.y }
   dragStartPx.value = { x: e.clientX, y: e.clientY }
-  draggingTokenId.value = t.id
+  draggingTokenId.value = target.id
   dragStarted.value = false
   ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
 }
@@ -622,6 +658,78 @@ const removeToken = async () => {
 // --- Info-Karte (NPC-Card) ---
 const infoTokenId = ref<number | null>(null)
 const infoToken = computed(() => tokens.value.find((t) => t.id === infoTokenId.value) ?? null)
+// Aktuelles Bild in der Info-Galerie (0 = Haupt-/Token-Bild, 1..N = Galerie-Bilder).
+const infoImageIdx = ref(0)
+watch(infoTokenId, () => {
+  infoImageIdx.value = 0
+})
+
+const infoTokenGalleryUrls = computed<string[]>(() => {
+  const t = infoToken.value
+  if (!t) return []
+  const list = t.images ?? []
+  return list.map(
+    (_url: string, idx: number) =>
+      `/api/groups/${groupId}/maps/${mapId}/tokens/${t.id}/images/${idx}`,
+  )
+})
+
+const infoTokenImageList = computed<string[]>(() => {
+  const t = infoToken.value
+  if (!t) return []
+  const main = tokenImageSrc(t)
+  const gallery = infoTokenGalleryUrls.value
+  return main ? [main, ...gallery] : gallery
+})
+
+// --- Galerie-Upload (Token-Edit) ---
+const galleryUploading = ref(false)
+const galleryUploadError = ref<string | null>(null)
+const onGalleryFiles = async (e: Event) => {
+  const input = e.target as HTMLInputElement
+  const files = input.files
+  const t = editing.value
+  if (!files?.length || !t) return
+  galleryUploading.value = true
+  galleryUploadError.value = null
+  try {
+    for (const file of Array.from(files)) {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = (await $fetch(
+        `/api/groups/${groupId}/maps/${mapId}/tokens/${t.id}/images`,
+        { method: 'POST', body: fd },
+      )) as { token: Token }
+      if (res.token) t.images = res.token.images ?? []
+    }
+  } catch (err: unknown) {
+    galleryUploadError.value =
+      (err as { statusMessage?: string }).statusMessage ?? 'Bild konnte nicht hochgeladen werden.'
+  } finally {
+    galleryUploading.value = false
+    input.value = ''
+  }
+}
+const removeGalleryImage = async (idx: number) => {
+  const t = editing.value
+  if (!t) return
+  if (!confirm('Bild aus Galerie entfernen?')) return
+  try {
+    const res = (await $fetch(
+      `/api/groups/${groupId}/maps/${mapId}/tokens/${t.id}/images/${idx}`,
+      { method: 'DELETE' },
+    )) as { token: Token }
+    if (res.token) t.images = res.token.images ?? []
+  } catch (err: unknown) {
+    galleryUploadError.value =
+      (err as { statusMessage?: string }).statusMessage ?? 'Bild konnte nicht geloescht werden.'
+  }
+}
+const editGalleryUrl = (idx: number) => {
+  const t = editing.value
+  if (!t) return ''
+  return `/api/groups/${groupId}/maps/${mapId}/tokens/${t.id}/images/${idx}`
+}
 
 // --- Token-Bild-URL ---
 // Bild wird IMMER ueber den Token-Image-Endpoint geladen (auch fuer Charakter-
@@ -2775,8 +2883,49 @@ const endResize = () => {
           <UFormField label="Größe (Rasterzellen)">
             <UInput v-model.number="editing.sizeMultiplier" type="number" min="1" max="8" />
           </UFormField>
-          <UFormField label="Bild ersetzen (optional)" help="JPEG/PNG/WEBP, max 4 MB">
+          <UFormField label="Haupt-Bild ersetzen (optional)" help="JPEG/PNG/WEBP, max 4 MB">
             <input type="file" accept="image/jpeg,image/png,image/webp" class="block w-full text-sm" @change="onEditFile">
+          </UFormField>
+          <UFormField
+            label="Weitere Bilder (Galerie)"
+            help="Werden Mitspielern beim Klick auf den Token als Galerie gezeigt."
+          >
+            <div class="space-y-2">
+              <div
+                v-if="editing.images && editing.images.length"
+                class="grid grid-cols-4 sm:grid-cols-6 gap-2"
+              >
+                <div
+                  v-for="(_url, idx) in editing.images"
+                  :key="idx"
+                  class="relative group aspect-square rounded overflow-hidden border border-parchment-700/30 bg-white/50"
+                >
+                  <img
+                    :src="editGalleryUrl(idx)"
+                    :alt="`Bild ${idx + 1}`"
+                    class="w-full h-full object-cover"
+                  >
+                  <button
+                    type="button"
+                    class="absolute top-0 right-0 m-0.5 w-5 h-5 rounded-full bg-black/70 text-white text-[10px] flex items-center justify-center hover:bg-red-600 opacity-0 group-hover:opacity-100 transition"
+                    title="Bild entfernen"
+                    @click="removeGalleryImage(idx)"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                multiple
+                class="block w-full text-sm"
+                :disabled="galleryUploading"
+                @change="onGalleryFiles"
+              >
+              <p v-if="galleryUploading" class="text-xs text-ink-300 italic">Lade hoch …</p>
+              <p v-if="galleryUploadError" class="text-xs text-red-700">{{ galleryUploadError }}</p>
+            </div>
           </UFormField>
           <UFormField v-if="isDm" label="Versteckt (nur DM sieht)">
             <UCheckbox v-model="editing.hidden" />
@@ -2817,12 +2966,54 @@ const endResize = () => {
     <UModal v-model:open="infoTokenId" :title="infoToken?.name ?? ''">
       <template #body>
         <div v-if="infoToken" class="space-y-3">
-          <div v-if="tokenImageSrc(infoToken)" class="flex justify-center">
-            <img
-              :src="tokenImageSrc(infoToken) ?? ''"
-              :alt="infoToken.name"
-              class="max-h-80 max-w-full rounded-lg shadow-lg"
+          <div v-if="infoTokenImageList.length" class="space-y-2">
+            <div class="flex justify-center relative">
+              <img
+                :src="infoTokenImageList[infoImageIdx] ?? infoTokenImageList[0]"
+                :alt="infoToken.name"
+                class="max-h-80 max-w-full rounded-lg shadow-lg"
+              >
+              <template v-if="infoTokenImageList.length > 1">
+                <button
+                  type="button"
+                  class="absolute left-2 top-1/2 -translate-y-1/2 bg-black/60 text-white rounded-full w-9 h-9 flex items-center justify-center hover:bg-black/80"
+                  title="Vorheriges Bild"
+                  @click="infoImageIdx = (infoImageIdx - 1 + infoTokenImageList.length) % infoTokenImageList.length"
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  class="absolute right-2 top-1/2 -translate-y-1/2 bg-black/60 text-white rounded-full w-9 h-9 flex items-center justify-center hover:bg-black/80"
+                  title="Nächstes Bild"
+                  @click="infoImageIdx = (infoImageIdx + 1) % infoTokenImageList.length"
+                >
+                  ›
+                </button>
+                <div
+                  class="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/60 text-white text-[10px] px-2 py-0.5 rounded-full"
+                >
+                  {{ infoImageIdx + 1 }} / {{ infoTokenImageList.length }}
+                </div>
+              </template>
+            </div>
+            <div
+              v-if="infoTokenImageList.length > 1"
+              class="flex gap-1 overflow-x-auto pb-1"
             >
+              <button
+                v-for="(src, i) in infoTokenImageList"
+                :key="i"
+                type="button"
+                class="flex-none w-14 h-14 rounded overflow-hidden border-2 transition"
+                :class="i === infoImageIdx
+                  ? 'border-[var(--color-accent)] ring-1 ring-[var(--color-accent)]'
+                  : 'border-parchment-700/30 hover:border-[var(--color-accent)]/60'"
+                @click="infoImageIdx = i"
+              >
+                <img :src="src" :alt="`Bild ${i + 1}`" class="w-full h-full object-cover">
+              </button>
+            </div>
           </div>
           <div class="text-sm">
             <div v-if="infoToken.hp !== null && infoToken.hpMax" class="mb-3">

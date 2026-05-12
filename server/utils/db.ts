@@ -305,6 +305,11 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     ALTER TABLE battle_tokens ADD COLUMN IF NOT EXISTS hp_visible_to_players BOOLEAN NOT NULL DEFAULT TRUE
   `)
+  // Token-Bilder-Galerie: weitere Bilder (z.B. Verwandlungen, Zustaende),
+  // die in der Info-Karte als Thumbnail-Galerie gezeigt werden.
+  await db.execute(sql`
+    ALTER TABLE battle_tokens ADD COLUMN IF NOT EXISTS images JSONB NOT NULL DEFAULT '[]'::jsonb
+  `)
 
   await db.execute(sql`
     UPDATE users SET role = 'admin' WHERE email = ${ADMIN_EMAIL} AND role <> 'admin'
