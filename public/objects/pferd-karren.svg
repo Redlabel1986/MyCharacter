@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100">
+  <defs>
+    <linearGradient id="pkg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7a5230"/>
+      <stop offset="1" stop-color="#3a2510"/>
+    </linearGradient>
+    <linearGradient id="pkw" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a06030"/>
+      <stop offset="1" stop-color="#3a1a08"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="150" cy="92" rx="140" ry="5" fill="rgba(0,0,0,0.4)"/>
+  <!-- Karren-Ladefläche -->
+  <polygon points="20,46 130,46 138,70 22,70" fill="url(#pkw)" stroke="#1a0a04" stroke-width="2"/>
+  <!-- Brettstruktur -->
+  <line x1="44" y1="48" x2="46" y2="68" stroke="#1a0a04" stroke-width="1" opacity="0.6"/>
+  <line x1="74" y1="46" x2="76" y2="70" stroke="#1a0a04" stroke-width="1" opacity="0.6"/>
+  <line x1="104" y1="46" x2="106" y2="70" stroke="#1a0a04" stroke-width="1" opacity="0.6"/>
+  <!-- Bordwand vorne (Detail) -->
+  <rect x="20" y="36" width="6" height="14" fill="#5a3a18" stroke="#1a0a04" stroke-width="1"/>
+  <rect x="124" y="36" width="6" height="14" fill="#5a3a18" stroke="#1a0a04" stroke-width="1"/>
+  <!-- Inhalt: ein Fass + eine Kiste -->
+  <ellipse cx="46" cy="42" rx="14" ry="6" fill="#3a2510" stroke="#1a0a04" stroke-width="1"/>
+  <rect x="32" y="20" width="28" height="26" fill="#7a4a20" stroke="#1a0a04" stroke-width="1.5"/>
+  <line x1="32" y1="33" x2="60" y2="33" stroke="#1a0a04" stroke-width="0.8"/>
+  <rect x="76" y="22" width="36" height="22" rx="2" fill="#a06030" stroke="#1a0a04" stroke-width="1.5"/>
+  <line x1="76" y1="33" x2="112" y2="33" stroke="#1a0a04" stroke-width="0.8"/>
+  <!-- Räder -->
+  <circle cx="44" cy="74" r="14" fill="#3a1a08" stroke="#1a0a04" stroke-width="2"/>
+  <circle cx="44" cy="74" r="3" fill="#5a3a18"/>
+  <line x1="44" y1="60" x2="44" y2="88" stroke="#1a0a04" stroke-width="1"/>
+  <line x1="30" y1="74" x2="58" y2="74" stroke="#1a0a04" stroke-width="1"/>
+  <line x1="34" y1="64" x2="54" y2="84" stroke="#1a0a04" stroke-width="1"/>
+  <line x1="54" y1="64" x2="34" y2="84" stroke="#1a0a04" stroke-width="1"/>
+  <circle cx="116" cy="74" r="14" fill="#3a1a08" stroke="#1a0a04" stroke-width="2"/>
+  <circle cx="116" cy="74" r="3" fill="#5a3a18"/>
+  <line x1="116" y1="60" x2="116" y2="88" stroke="#1a0a04" stroke-width="1"/>
+  <line x1="102" y1="74" x2="130" y2="74" stroke="#1a0a04" stroke-width="1"/>
+  <line x1="106" y1="64" x2="126" y2="84" stroke="#1a0a04" stroke-width="1"/>
+  <line x1="126" y1="64" x2="106" y2="84" stroke="#1a0a04" stroke-width="1"/>
+  <!-- Deichsel -->
+  <line x1="130" y1="60" x2="200" y2="62" stroke="#5a3a18" stroke-width="3" stroke-linecap="round"/>
+  <!-- Pferd (rechts) -->
+  <ellipse cx="220" cy="56" rx="48" ry="20" fill="url(#pkg)" stroke="#1a0a04" stroke-width="2"/>
+  <path d="M 258 52 Q 274 36, 282 30 L 286 38 Q 278 46, 264 56 Z" fill="url(#pkg)" stroke="#1a0a04" stroke-width="2"/>
+  <path d="M 278 28 Q 296 22, 296 38 Q 296 48, 284 46 Q 276 44, 274 38 Z" fill="#7a5230" stroke="#1a0a04" stroke-width="2"/>
+  <path d="M 280 28 L 282 20 L 286 28 Z" fill="#3a1a08" stroke="#1a0a04" stroke-width="1"/>
+  <circle cx="288" cy="34" r="1.3" fill="#0a0805"/>
+  <path d="M 258 40 Q 264 28, 274 26 L 276 34 Q 264 38, 260 48 Z" fill="#3a1a08" stroke="#1a0a04" stroke-width="1.2"/>
+  <rect x="190" y="70" width="6" height="20" rx="2" fill="#3a2510" stroke="#1a0a04" stroke-width="1.5"/>
+  <rect x="246" y="70" width="6" height="20" rx="2" fill="#3a2510" stroke="#1a0a04" stroke-width="1.5"/>
+  <rect x="188" y="86" width="10" height="4" fill="#0a0805"/>
+  <rect x="244" y="86" width="10" height="4" fill="#0a0805"/>
+  <path d="M 178 50 Q 168 60, 168 76" stroke="#3a1a08" stroke-width="3" fill="none" stroke-linecap="round"/>
+</svg>

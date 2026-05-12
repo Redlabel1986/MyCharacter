@@ -21,6 +21,12 @@ import { audioEmbedUrl, parseAudioUrl, YOUTUBE_NOCOOKIE_HOST } from '~~/shared/a
 import { loadYouTubeApi, type YouTubePlayer } from '~/composables/useYouTubeApi'
 import type { NpcAbility } from '~~/shared/npc'
 import { cellsInTokenVision as computeCellsInVision } from '~~/shared/fog'
+import {
+  BUILT_IN_MAP_OBJECTS,
+  CATEGORY_LABELS,
+  type MapObjectCategory,
+  type MapObjectTemplateBuiltin,
+} from '~~/shared/map-objects'
 
 definePageMeta({ middleware: ['auth'], layout: 'wide' })
 
@@ -118,6 +124,35 @@ interface CharacterSummary {
   portraitUrl?: string | null
 }
 
+interface MapObject {
+  id: number
+  mapId: number
+  ownerUserId: number
+  templateKey: string | null
+  templateId: number | null
+  name: string
+  imageUrl: string | null
+  width: number
+  height: number
+  rotation: number
+  lightRadius: number
+  x: number
+  y: number
+  hidden: boolean
+}
+
+interface CustomObjectTemplate {
+  id: number
+  groupId: number
+  name: string
+  category: string
+  imageUrl: string | null
+  width: number
+  height: number
+  rotatable: boolean
+  lightRadius: number
+}
+
 const route = useRoute()
 const groupId = Number(route.params.id)
 const mapId = Number(route.params.mapId)
@@ -127,6 +162,8 @@ const map = ref<BattleMap | null>(null)
 const tokens = ref<Token[]>([])
 const drawings = ref<Drawing[]>([])
 const pings = ref<Ping[]>([])
+const objects = ref<MapObject[]>([])
+const customObjectTemplates = ref<CustomObjectTemplate[]>([])
 const initiativeState = ref<InitiativeState | null>(null)
 const audioState = ref<AudioState | null>(null)
 const isDm = ref(false)
@@ -137,6 +174,8 @@ const allMapsForSwitcher = ref<BattleMap[]>([])
 // allerersten Aufruf (top-level await unten) keine TDZ entsteht.
 const draggingTokenId = ref<number | null>(null)
 const editingTokenId = ref<number | null>(null)
+const draggingObjectId = ref<number | null>(null)
+const editingObjectId = ref<number | null>(null)
 
 const fetchMap = async () => {
   try {
@@ -145,6 +184,7 @@ const fetchMap = async () => {
       tokens: Token[]
       drawings: Drawing[]
       pings: Ping[]
+      objects: MapObject[]
       isDm: boolean
       activeMapId: number | null
       initiativeState: InitiativeState | null
@@ -156,6 +196,21 @@ const fetchMap = async () => {
     pings.value = res.pings ?? []
     initiativeState.value = res.initiativeState
     handleAudioStateUpdate(res.audioState)
+    // Objekte: gerade gezogene/editierte nicht ueberschreiben.
+    const protectedObjIds = new Set<number>()
+    if (draggingObjectId.value !== null) protectedObjIds.add(draggingObjectId.value)
+    if (editingObjectId.value !== null) protectedObjIds.add(editingObjectId.value)
+    if (protectedObjIds.size === 0) {
+      objects.value = res.objects ?? []
+    } else {
+      objects.value = (res.objects ?? []).map((o: MapObject) => {
+        if (protectedObjIds.has(o.id)) {
+          const local = objects.value.find((x: MapObject) => x.id === o.id)
+          return local ?? o
+        }
+        return o
+      })
+    }
     // Spieler werden automatisch auf die aktuell aktive Karte geleitet,
     // wenn der DM eine andere setzt.
     if (!res.isDm && res.activeMapId && res.activeMapId !== mapId) {
@@ -439,6 +494,311 @@ const onPointerUp = async (e: PointerEvent) => {
 // --- Token-Klick (fuer Token, die ich nicht bewegen darf) ---
 const openInfoFromClick = (t: Token) => {
   if (!canMoveToken(t)) infoTokenId.value = t.id
+}
+
+// ================================================================
+// Map-Objekte (Props/Szenerie)
+// ================================================================
+
+const showObjectPicker = ref(false)
+const showObjectUpload = ref(false)
+const objectCategoryFilter = ref<MapObjectCategory | 'all'>('all')
+
+// Templates aus Built-ins + Custom kombiniert.
+interface PickerTemplate {
+  source: 'builtin' | 'custom'
+  key?: string
+  id?: number
+  name: string
+  category: MapObjectCategory | string
+  imageUrl: string
+  width: number
+  height: number
+  rotatable: boolean
+  lightRadius: number
+}
+
+const fetchObjectTemplates = async () => {
+  try {
+    const res = await $fetch<{ templates: CustomObjectTemplate[] }>(
+      `/api/groups/${groupId}/object-templates`,
+    )
+    customObjectTemplates.value = res.templates ?? []
+  } catch {
+    customObjectTemplates.value = []
+  }
+}
+
+const allObjectTemplates = computed<PickerTemplate[]>(() => {
+  const built: PickerTemplate[] = BUILT_IN_MAP_OBJECTS.map((b: MapObjectTemplateBuiltin) => ({
+    source: 'builtin',
+    key: b.key,
+    name: b.name,
+    category: b.category,
+    imageUrl: b.imageUrl,
+    width: b.width,
+    height: b.height,
+    rotatable: b.rotatable,
+    lightRadius: b.lightRadius,
+  }))
+  const custom: PickerTemplate[] = customObjectTemplates.value.map((c) => ({
+    source: 'custom',
+    id: c.id,
+    name: c.name,
+    category: c.category,
+    imageUrl: c.imageUrl
+      ? `/api/groups/${groupId}/object-templates/${c.id}/image`
+      : '',
+    width: c.width,
+    height: c.height,
+    rotatable: c.rotatable,
+    lightRadius: c.lightRadius,
+  }))
+  return [...built, ...custom]
+})
+
+const objectCategories = computed<Array<MapObjectCategory | 'all' | string>>(() => {
+  const set = new Set<string>()
+  for (const t of allObjectTemplates.value) set.add(String(t.category))
+  return ['all', ...Array.from(set)]
+})
+
+const categoryLabel = (cat: string): string => {
+  if (cat === 'all') return 'Alle'
+  return (CATEGORY_LABELS as Record<string, string>)[cat] ?? cat
+}
+const setObjectCategoryFilter = (cat: string) => {
+  objectCategoryFilter.value = cat as MapObjectCategory | 'all'
+}
+
+const filteredObjectTemplates = computed<PickerTemplate[]>(() => {
+  if (objectCategoryFilter.value === 'all') return allObjectTemplates.value
+  return allObjectTemplates.value.filter((t) => t.category === objectCategoryFilter.value)
+})
+
+const openObjectPicker = async () => {
+  showObjectPicker.value = true
+  await fetchObjectTemplates()
+}
+
+const placingObject = ref(false)
+const placeObjectFromTemplate = async (tpl: PickerTemplate) => {
+  if (!map.value || placingObject.value) return
+  placingObject.value = true
+  try {
+    // Platzieren so, dass die linke obere Ecke der Bounding-Box in der Mitte
+    // des Bildbereichs landet (Objekte sind top-left positioniert).
+    const cx = Math.round(imgW.value / 2 - (tpl.width * map.value.gridSize) / 2)
+    const cy = Math.round(imgH.value / 2 - (tpl.height * map.value.gridSize) / 2)
+    const body: Record<string, unknown> = { x: cx, y: cy }
+    if (tpl.source === 'builtin') body.templateKey = tpl.key
+    else body.templateId = tpl.id
+    await $fetch(`/api/groups/${groupId}/maps/${mapId}/objects`, {
+      method: 'POST',
+      body,
+    })
+    showObjectPicker.value = false
+    await fetchMap()
+  } finally {
+    placingObject.value = false
+  }
+}
+
+// Drag-Logik fuer Objekte. Vom DM gesteuert.
+const objDragOffset = ref({ x: 0, y: 0 })
+const objDragStartPx = ref({ x: 0, y: 0 })
+const objDragStarted = ref(false)
+
+const canMoveObject = () => isDm.value
+
+// Sichtbare Ausdehnung des Objekts unter Beruecksichtigung der Rotation:
+// 90°/270° vertauscht Breite und Hoehe, damit ein gedrehtes 2×1-Boot tatsaechlich
+// 1×2 Zellen einnimmt (und nicht visuell ueber das Raster ueberlappt).
+const displayW = (o: { width: number; height: number; rotation: number }) =>
+  o.rotation === 90 || o.rotation === 270 ? o.height : o.width
+const displayH = (o: { width: number; height: number; rotation: number }) =>
+  o.rotation === 90 || o.rotation === 270 ? o.width : o.height
+
+const startObjectDrag = (e: PointerEvent, o: MapObject) => {
+  if (toolMode.value !== 'select') return
+  if (!canMoveObject() || !stageEl.value || !map.value) return
+  e.stopPropagation()
+  e.preventDefault()
+  const rect = stageEl.value.getBoundingClientRect()
+  const localX = (e.clientX - rect.left) / zoom.value
+  const localY = (e.clientY - rect.top) / zoom.value
+  objDragOffset.value = { x: localX - o.x, y: localY - o.y }
+  objDragStartPx.value = { x: e.clientX, y: e.clientY }
+  draggingObjectId.value = o.id
+  objDragStarted.value = false
+  ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+}
+
+const onObjectPointerMove = (e: PointerEvent) => {
+  if (!draggingObjectId.value || !stageEl.value) return
+  const dx = e.clientX - objDragStartPx.value.x
+  const dy = e.clientY - objDragStartPx.value.y
+  if (!objDragStarted.value && Math.hypot(dx, dy) < 4) return
+  objDragStarted.value = true
+  const rect = stageEl.value.getBoundingClientRect()
+  const localX = (e.clientX - rect.left) / zoom.value
+  const localY = (e.clientY - rect.top) / zoom.value
+  const o = objects.value.find((x: MapObject) => x.id === draggingObjectId.value)
+  if (!o) return
+  o.x = Math.round(localX - objDragOffset.value.x)
+  o.y = Math.round(localY - objDragOffset.value.y)
+}
+
+const onObjectPointerUp = async (e: PointerEvent) => {
+  if (!draggingObjectId.value) return
+  const id = draggingObjectId.value
+  const o = objects.value.find((x: MapObject) => x.id === id)
+  const wasDragged = objDragStarted.value
+  draggingObjectId.value = null
+  objDragStarted.value = false
+  if (!o) return
+  if (!wasDragged) {
+    // Klick ohne Drag → Edit-Modal oeffnen.
+    if (canMoveObject()) editingObjectId.value = id
+    return
+  }
+  if (!e.shiftKey && map.value) {
+    const g = map.value.gridSize
+    // Snap an Raster (top-left).
+    o.x = Math.round(o.x / g) * g
+    o.y = Math.round(o.y / g) * g
+  }
+  try {
+    await $fetch(`/api/groups/${groupId}/maps/${mapId}/objects/${id}`, {
+      method: 'PUT',
+      body: { x: o.x, y: o.y },
+    })
+  } catch {
+    await fetchMap()
+  }
+}
+
+const editingObject = computed<MapObject | null>(
+  () => objects.value.find((o: MapObject) => o.id === editingObjectId.value) ?? null,
+)
+
+// Pruefe, ob das aktuell editierte Objekt drehbar ist — sowohl built-in als
+// auch custom Templates haben das Flag, Snapshot speichert es nicht. Wir lesen
+// es zur Render-Zeit aus den Templates.
+const isObjectRotatable = (o: MapObject) => {
+  if (o.templateKey) {
+    return BUILT_IN_MAP_OBJECTS.find((b) => b.key === o.templateKey)?.rotatable ?? false
+  }
+  if (o.templateId) {
+    return customObjectTemplates.value.find((c) => c.id === o.templateId)?.rotatable ?? false
+  }
+  return false
+}
+
+const rotateObject = async (delta: 90 | -90) => {
+  const o = editingObject.value
+  if (!o) return
+  o.rotation = (((o.rotation + delta) % 360) + 360) % 360
+  try {
+    await $fetch(`/api/groups/${groupId}/maps/${mapId}/objects/${o.id}`, {
+      method: 'PUT',
+      body: { rotation: o.rotation },
+    })
+  } catch {
+    await fetchMap()
+  }
+}
+
+const saveObjectEdit = async () => {
+  const o = editingObject.value
+  if (!o) return
+  try {
+    await $fetch(`/api/groups/${groupId}/maps/${mapId}/objects/${o.id}`, {
+      method: 'PUT',
+      body: { name: o.name, hidden: o.hidden },
+    })
+  } catch {
+    await fetchMap()
+  }
+  editingObjectId.value = null
+  await fetchMap()
+}
+
+const removeObject = async () => {
+  const o = editingObject.value
+  if (!o) return
+  if (!confirm(`Objekt „${o.name}" entfernen?`)) return
+  await $fetch(`/api/groups/${groupId}/maps/${mapId}/objects/${o.id}`, {
+    method: 'DELETE',
+  })
+  editingObjectId.value = null
+  await fetchMap()
+}
+
+// Custom-Template-Upload (DM).
+const customTplDraft = ref({
+  name: '',
+  category: 'misc',
+  width: 1,
+  height: 1,
+  lightRadius: 0,
+  rotatable: false,
+  file: null as File | null,
+})
+const customTplUploading = ref(false)
+const customTplError = ref<string | null>(null)
+const onCustomTplFile = (e: Event) => {
+  const t = e.target as HTMLInputElement
+  customTplDraft.value.file = t.files?.[0] ?? null
+}
+const uploadCustomTemplate = async () => {
+  const d = customTplDraft.value
+  if (!d.file || !d.name.trim()) {
+    customTplError.value = 'Name und Bild benötigt.'
+    return
+  }
+  customTplUploading.value = true
+  customTplError.value = null
+  try {
+    const fd = new FormData()
+    fd.append('file', d.file)
+    fd.append('name', d.name.trim())
+    fd.append('category', d.category)
+    fd.append('width', String(d.width))
+    fd.append('height', String(d.height))
+    fd.append('lightRadius', String(d.lightRadius))
+    fd.append('rotatable', d.rotatable ? 'true' : 'false')
+    await $fetch(`/api/groups/${groupId}/object-templates`, {
+      method: 'POST',
+      body: fd,
+    })
+    customTplDraft.value = {
+      name: '',
+      category: 'misc',
+      width: 1,
+      height: 1,
+      lightRadius: 0,
+      rotatable: false,
+      file: null,
+    }
+    showObjectUpload.value = false
+    await fetchObjectTemplates()
+  } catch (err: unknown) {
+    customTplError.value =
+      (err as { statusMessage?: string }).statusMessage ?? 'Upload fehlgeschlagen.'
+  } finally {
+    customTplUploading.value = false
+  }
+}
+const deleteCustomTemplate = async (id: number | undefined) => {
+  if (id === undefined) return
+  if (!confirm('Custom-Objekt aus der Bibliothek entfernen?')) return
+  try {
+    await $fetch(`/api/groups/${groupId}/object-templates/${id}`, { method: 'DELETE' })
+    await fetchObjectTemplates()
+  } catch {
+    /* ignore */
+  }
 }
 
 // --- Conditions ---
@@ -1377,7 +1737,8 @@ const fogGridRows = computed(() =>
   imgH.value && fogCellSize.value ? Math.ceil(imgH.value / fogCellSize.value) : 0,
 )
 
-// Zellen, die durch aktuelle Token-Sicht gerade live aufgedeckt sind.
+// Zellen, die durch aktuelle Token-Sicht + Objekt-Lichtquellen live
+// aufgedeckt sind (Fackel, Feuerstelle, Laterne …).
 const fogCurrentVisionSet = computed(() => {
   const set = new Set<string>()
   if (!map.value || !fogCellSize.value) return set
@@ -1387,6 +1748,18 @@ const fogCurrentVisionSet = computed(() => {
     const halfPx = (t.sizeMultiplier * g) / 2
     const cells = computeCellsInVision(
       { centerX: t.x + halfPx, centerY: t.y + halfPx, visionRadius: t.visionRadius },
+      g,
+    )
+    for (const [c, r] of cells) set.add(`${c}|${r}`)
+  }
+  for (const o of objects.value) {
+    if (o.lightRadius <= 0) continue
+    const cells = computeCellsInVision(
+      {
+        centerX: o.x + (displayW(o) * g) / 2,
+        centerY: o.y + (displayH(o) * g) / 2,
+        visionRadius: o.lightRadius,
+      },
       g,
     )
     for (const [c, r] of cells) set.add(`${c}|${r}`)
@@ -1802,6 +2175,16 @@ const endResize = () => {
             Token
           </UButton>
           <UButton
+            v-if="isDm"
+            color="primary"
+            variant="outline"
+            icon="i-lucide-shapes"
+            size="sm"
+            @click="openObjectPicker"
+          >
+            Objekt
+          </UButton>
+          <UButton
             class="lg:hidden"
             size="sm"
             variant="ghost"
@@ -2176,6 +2559,66 @@ const endResize = () => {
                 />
               </g>
             </svg>
+
+            <!-- Map-Objekte (Props/Szenerie) — unter den Tokens, ueber dem Karten-Bild -->
+            <div
+              v-for="o in objects"
+              :key="`obj-${o.id}`"
+              :data-object-id="o.id"
+              class="absolute select-none"
+              :class="[
+                isDm ? 'cursor-move' : 'cursor-default',
+                o.hidden ? 'opacity-50' : '',
+              ]"
+              :style="{
+                left: o.x + 'px',
+                top: o.y + 'px',
+                width: (map.gridSize * displayW(o)) + 'px',
+                height: (map.gridSize * displayH(o)) + 'px',
+                touchAction: 'none',
+              }"
+              @pointerdown="startObjectDrag($event, o)"
+              @pointermove="onObjectPointerMove"
+              @pointerup="onObjectPointerUp"
+            >
+              <!-- Bild wird in einem Inner-Container in der natuerlichen Groesse
+                   (width × height) gezeichnet und gedreht; die aeussere Box ist
+                   bereits displayW × displayH, sodass 90°/270° korrekt passt. -->
+              <div
+                class="absolute pointer-events-none"
+                :style="{
+                  left: '50%',
+                  top: '50%',
+                  width: (map.gridSize * o.width) + 'px',
+                  height: (map.gridSize * o.height) + 'px',
+                  transform: `translate(-50%, -50%) rotate(${o.rotation}deg)`,
+                  transformOrigin: 'center center',
+                  transition: draggingObjectId === o.id ? 'none' : 'transform 120ms ease',
+                  filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.45))',
+                }"
+              >
+              <img
+                v-if="o.imageUrl"
+                :src="o.imageUrl"
+                :alt="o.name"
+                class="w-full h-full object-contain"
+                draggable="false"
+              >
+              <div
+                v-else
+                class="w-full h-full flex items-center justify-center bg-white/60 border-2 border-dashed border-ink-300 text-[10px] text-ink-400 rounded"
+              >
+                {{ o.name }}
+              </div>
+              </div>
+              <!-- Versteckt-Indikator fuer DM -->
+              <div
+                v-if="o.hidden && isDm"
+                class="absolute top-1 right-1 bg-amber-500 text-white text-[8px] uppercase px-1 rounded pointer-events-none"
+              >
+                versteckt
+              </div>
+            </div>
 
             <div
               v-for="t in tokens"
@@ -3066,6 +3509,197 @@ const endResize = () => {
             Bearbeiten
           </UButton>
           <UButton variant="ghost" @click="infoTokenId = null">Schließen</UButton>
+        </div>
+      </template>
+    </UModal>
+
+    <!-- Objekt-Picker: Bibliothek aus Built-ins + Custom-Templates des DM -->
+    <UModal v-model:open="showObjectPicker" title="Objekt auf Karte platzieren" :ui="{ content: 'max-w-3xl' }">
+      <template #body>
+        <div class="space-y-3">
+          <div class="flex flex-wrap items-center gap-2">
+            <div class="flex flex-wrap gap-1 flex-1">
+              <UButton
+                v-for="cat in objectCategories"
+                :key="cat"
+                size="xs"
+                :variant="objectCategoryFilter === cat ? 'solid' : 'outline'"
+                :color="objectCategoryFilter === cat ? 'primary' : 'neutral'"
+                @click="setObjectCategoryFilter(cat)"
+              >
+                {{ categoryLabel(cat) }}
+              </UButton>
+            </div>
+            <UButton
+              v-if="isDm"
+              size="xs"
+              variant="outline"
+              icon="i-lucide-upload"
+              @click="showObjectUpload = true"
+            >
+              Eigenes hochladen
+            </UButton>
+          </div>
+          <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 max-h-[60vh] overflow-auto">
+            <button
+              v-for="tpl in filteredObjectTemplates"
+              :key="`${tpl.source}-${tpl.key ?? tpl.id}`"
+              type="button"
+              class="parchment-card p-2 flex flex-col items-center gap-1 hover:ring-2 hover:ring-[var(--color-accent)] transition relative group"
+              :disabled="placingObject"
+              @click="placeObjectFromTemplate(tpl)"
+            >
+              <div
+                class="w-full bg-black/5 rounded flex items-center justify-center overflow-hidden"
+                :style="{ aspectRatio: `${tpl.width} / ${tpl.height}` }"
+              >
+                <img
+                  v-if="tpl.imageUrl"
+                  :src="tpl.imageUrl"
+                  :alt="tpl.name"
+                  class="max-w-full max-h-full object-contain"
+                  draggable="false"
+                >
+                <UIcon v-else name="i-lucide-image-off" class="size-6 text-ink-300" />
+              </div>
+              <div class="text-[11px] font-semibold text-center leading-tight">
+                {{ tpl.name }}
+              </div>
+              <div class="text-[9px] text-ink-300 uppercase tracking-widest">
+                {{ tpl.width }}×{{ tpl.height }}
+                <span v-if="tpl.rotatable">·↻</span>
+                <span v-if="tpl.lightRadius > 0" class="text-amber-700">·☀{{ tpl.lightRadius }}</span>
+              </div>
+              <button
+                v-if="tpl.source === 'custom' && isDm && tpl.id !== undefined"
+                type="button"
+                class="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-700 text-white text-[10px] opacity-0 group-hover:opacity-100 transition"
+                title="Aus Bibliothek entfernen"
+                @click.stop="deleteCustomTemplate(tpl.id)"
+              >
+                ✕
+              </button>
+            </button>
+          </div>
+          <p v-if="!filteredObjectTemplates.length" class="text-xs text-ink-300 italic text-center">
+            Keine Objekte in dieser Kategorie.
+          </p>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex justify-end">
+          <UButton variant="ghost" @click="showObjectPicker = false">Schließen</UButton>
+        </div>
+      </template>
+    </UModal>
+
+    <!-- Custom-Template-Upload (DM) -->
+    <UModal v-model:open="showObjectUpload" title="Eigenes Objekt zur Bibliothek hinzufügen">
+      <template #body>
+        <div class="space-y-3">
+          <UFormField label="Name">
+            <UInput v-model="customTplDraft.name" placeholder="z.B. Verzaubertes Idol" />
+          </UFormField>
+          <UFormField label="Bild" help="JPEG/PNG/WEBP/SVG, max 4 MB. Transparenter Hintergrund empfohlen.">
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/svg+xml"
+              class="block w-full text-sm"
+              @change="onCustomTplFile"
+            >
+          </UFormField>
+          <div class="grid grid-cols-3 gap-2">
+            <UFormField label="Breite (Zellen)">
+              <UInput v-model.number="customTplDraft.width" type="number" min="1" max="8" />
+            </UFormField>
+            <UFormField label="Höhe (Zellen)">
+              <UInput v-model.number="customTplDraft.height" type="number" min="1" max="8" />
+            </UFormField>
+            <UFormField label="Licht (Zellen)" help="0 = kein Licht">
+              <UInput v-model.number="customTplDraft.lightRadius" type="number" min="0" max="20" />
+            </UFormField>
+          </div>
+          <UFormField label="Kategorie">
+            <USelect
+              v-model="customTplDraft.category"
+              :items="[
+                { label: 'Transport', value: 'transport' },
+                { label: 'Lagerung', value: 'storage' },
+                { label: 'Licht', value: 'light' },
+                { label: 'Lager', value: 'camp' },
+                { label: 'Beute', value: 'loot' },
+                { label: 'Natur', value: 'nature' },
+                { label: 'Möbel', value: 'furniture' },
+                { label: 'Sonstiges', value: 'misc' },
+              ]"
+              value-key="value"
+            />
+          </UFormField>
+          <UFormField label="Drehbar">
+            <UCheckbox v-model="customTplDraft.rotatable" />
+          </UFormField>
+          <p v-if="customTplError" class="text-sm text-red-700">{{ customTplError }}</p>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex gap-2 justify-end">
+          <UButton variant="ghost" @click="showObjectUpload = false">Abbrechen</UButton>
+          <UButton
+            color="primary"
+            :loading="customTplUploading"
+            :disabled="!customTplDraft.file || !customTplDraft.name.trim()"
+            @click="uploadCustomTemplate"
+          >
+            Hinzufügen
+          </UButton>
+        </div>
+      </template>
+    </UModal>
+
+    <!-- Objekt-Edit-Modal -->
+    <UModal v-model:open="editingObjectId" :title="editingObject?.name ?? 'Objekt'">
+      <template #body>
+        <div v-if="editingObject" class="space-y-3">
+          <div class="flex justify-center bg-black/5 rounded p-2">
+            <img
+              v-if="editingObject.imageUrl"
+              :src="editingObject.imageUrl"
+              :alt="editingObject.name"
+              class="max-h-32 object-contain"
+              :style="{ transform: `rotate(${editingObject.rotation}deg)` }"
+            >
+          </div>
+          <UFormField label="Name">
+            <UInput v-model="editingObject.name" :maxlength="120" />
+          </UFormField>
+          <div class="grid grid-cols-2 gap-3">
+            <UFormField label="Größe">
+              <div class="text-sm">{{ editingObject.width }}×{{ editingObject.height }} Zellen</div>
+            </UFormField>
+            <UFormField label="Lichtradius">
+              <div class="text-sm">
+                {{ editingObject.lightRadius > 0 ? `${editingObject.lightRadius} Zellen` : '—' }}
+              </div>
+            </UFormField>
+          </div>
+          <div v-if="isObjectRotatable(editingObject)" class="flex items-center gap-2">
+            <span class="text-xs uppercase tracking-widest text-ink-300">Rotation:</span>
+            <UButton size="xs" variant="outline" icon="i-lucide-rotate-ccw" @click="rotateObject(-90)">−90°</UButton>
+            <span class="text-sm font-mono w-12 text-center">{{ editingObject.rotation }}°</span>
+            <UButton size="xs" variant="outline" icon="i-lucide-rotate-cw" @click="rotateObject(90)">+90°</UButton>
+          </div>
+          <UFormField label="Versteckt (nur DM sieht)">
+            <UCheckbox v-model="editingObject.hidden" />
+          </UFormField>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex gap-2 justify-end">
+          <UButton variant="ghost" color="error" icon="i-lucide-trash-2" @click="removeObject">
+            Entfernen
+          </UButton>
+          <UButton variant="ghost" @click="editingObjectId = null">Schließen</UButton>
+          <UButton color="primary" @click="saveObjectEdit">Speichern</UButton>
         </div>
       </template>
     </UModal>

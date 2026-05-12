@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <radialGradient id="ff" cx="0.5" cy="0.55" r="0.5">
+      <stop offset="0" stop-color="#fff7c0"/>
+      <stop offset="0.45" stop-color="#ffb33d"/>
+      <stop offset="1" stop-color="#ff5510" stop-opacity="0.85"/>
+    </radialGradient>
+    <linearGradient id="fs" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a06030"/>
+      <stop offset="1" stop-color="#3a1a08"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="50" cy="92" rx="14" ry="3" fill="rgba(0,0,0,0.45)"/>
+  <!-- Stiel -->
+  <rect x="46" y="48" width="8" height="42" rx="2" fill="url(#fs)" stroke="#2a160a" stroke-width="1.5"/>
+  <!-- Bindung -->
+  <rect x="42" y="48" width="16" height="6" fill="#5a3a18" stroke="#2a160a" stroke-width="1"/>
+  <line x1="44" y1="51" x2="56" y2="51" stroke="#d4af37" stroke-width="0.8"/>
+  <!-- Brennende Spitze -->
+  <ellipse cx="50" cy="38" rx="14" ry="20" fill="url(#ff)"/>
+  <ellipse cx="50" cy="34" rx="7" ry="11" fill="#fff7c0" opacity="0.9"/>
+  <!-- Flammen-Zungen -->
+  <path d="M 50 14 Q 56 26, 50 32 Q 44 26, 50 14 Z" fill="#fff7c0"/>
+  <path d="M 42 22 Q 38 30, 44 38" stroke="#ffb33d" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M 58 22 Q 62 30, 56 38" stroke="#ffb33d" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <!-- Glüh-Aura -->
+  <circle cx="50" cy="34" r="28" fill="#ff8c30" opacity="0.18"/>
+</svg>

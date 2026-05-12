@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <radialGradient id="fb" cx="0.4" cy="0.3" r="0.7">
+      <stop offset="0" stop-color="#b8aa9a"/>
+      <stop offset="0.55" stop-color="#7a7066"/>
+      <stop offset="1" stop-color="#3a342a"/>
+    </radialGradient>
+  </defs>
+  <ellipse cx="50" cy="86" rx="40" ry="6" fill="rgba(0,0,0,0.45)"/>
+  <!-- Hauptbrocken -->
+  <path d="M 18 76 Q 10 58, 18 38 Q 28 22, 48 18 Q 70 16, 84 32 Q 92 50, 86 70 Q 76 84, 56 86 Q 32 86, 18 76 Z" fill="url(#fb)" stroke="#1a1108" stroke-width="2.5"/>
+  <!-- Risse / Bruchkanten -->
+  <path d="M 32 32 Q 40 44, 36 56" stroke="#1a1108" stroke-width="1.2" fill="none" opacity="0.7"/>
+  <path d="M 54 22 Q 62 32, 60 50 Q 56 60, 64 70" stroke="#1a1108" stroke-width="1.2" fill="none" opacity="0.7"/>
+  <path d="M 72 38 Q 78 48, 76 60" stroke="#1a1108" stroke-width="1.2" fill="none" opacity="0.7"/>
+  <!-- Kleine Steine daneben -->
+  <ellipse cx="20" cy="82" rx="8" ry="5" fill="#7a7066" stroke="#1a1108" stroke-width="1.5"/>
+  <ellipse cx="82" cy="80" rx="6" ry="4" fill="#9a8e80" stroke="#1a1108" stroke-width="1.5"/>
+  <!-- Highlight -->
+  <ellipse cx="42" cy="32" rx="14" ry="6" fill="#e0d4c0" opacity="0.5"/>
+</svg>

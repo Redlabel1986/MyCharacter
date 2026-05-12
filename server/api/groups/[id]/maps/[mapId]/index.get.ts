@@ -12,6 +12,7 @@ import {
   battleTokens,
   characters,
   groups,
+  mapObjects,
 } from '~~/server/database/schema'
 import { gt } from 'drizzle-orm'
 import { readCharacterHp, type CharSystem } from '~~/shared/character-hp'
@@ -93,11 +94,20 @@ export default defineEventHandler(async (event) => {
     .where(and(eq(battlePings.mapId, mapId), gt(battlePings.expiresAt, new Date())))
     .orderBy(asc(battlePings.id))
 
+  // Map-Objekte (Props/Szenerie). Versteckte Objekte sieht nur DM.
+  const objectsRaw = await db
+    .select()
+    .from(mapObjects)
+    .where(eq(mapObjects.mapId, mapId))
+    .orderBy(asc(mapObjects.id))
+  const objects = isDm ? objectsRaw : objectsRaw.filter((o) => !o.hidden)
+
   return {
     map,
     tokens,
     drawings,
     pings,
+    objects,
     isDm,
     activeMapId: g?.activeMapId ?? null,
     initiativeState: g?.initiativeState ?? null,

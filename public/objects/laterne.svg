@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <radialGradient id="lg" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fff7c0"/>
+      <stop offset="0.55" stop-color="#ffb33d"/>
+      <stop offset="1" stop-color="#ff8c30" stop-opacity="0.7"/>
+    </radialGradient>
+  </defs>
+  <circle cx="50" cy="50" r="36" fill="#ffb33d" opacity="0.15"/>
+  <ellipse cx="50" cy="92" rx="14" ry="3" fill="rgba(0,0,0,0.4)"/>
+  <!-- Henkel oben -->
+  <path d="M 38 18 Q 50 6, 62 18" fill="none" stroke="#3a2a18" stroke-width="3"/>
+  <rect x="46" y="14" width="8" height="8" fill="#5a3a18" stroke="#2a160a" stroke-width="1.5"/>
+  <!-- Kuppel -->
+  <path d="M 30 30 Q 50 18, 70 30 L 66 38 L 34 38 Z" fill="#5a3a18" stroke="#2a160a" stroke-width="2"/>
+  <!-- Glas-Korpus -->
+  <rect x="32" y="38" width="36" height="42" rx="3" fill="url(#lg)" stroke="#2a160a" stroke-width="2"/>
+  <!-- Vertikale Streben -->
+  <line x1="42" y1="38" x2="42" y2="80" stroke="#2a160a" stroke-width="1.5"/>
+  <line x1="58" y1="38" x2="58" y2="80" stroke="#2a160a" stroke-width="1.5"/>
+  <!-- Boden -->
+  <rect x="28" y="80" width="44" height="8" rx="2" fill="#5a3a18" stroke="#2a160a" stroke-width="2"/>
+  <!-- Flamme innen -->
+  <ellipse cx="50" cy="58" rx="6" ry="10" fill="#fff7c0"/>
+</svg>

@@ -310,6 +310,48 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     ALTER TABLE battle_tokens ADD COLUMN IF NOT EXISTS images JSONB NOT NULL DEFAULT '[]'::jsonb
   `)
+  // Map-Objekte: Custom-Templates des DM (built-ins leben in shared/map-objects.ts).
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS map_object_templates (
+      id SERIAL PRIMARY KEY,
+      group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'misc',
+      image_url TEXT,
+      width INTEGER NOT NULL DEFAULT 1,
+      height INTEGER NOT NULL DEFAULT 1,
+      rotatable BOOLEAN NOT NULL DEFAULT FALSE,
+      light_radius INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_map_object_templates_group ON map_object_templates(group_id)
+  `)
+  // Map-Objekte: konkrete Instanzen auf einer Battle-Map.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS map_objects (
+      id SERIAL PRIMARY KEY,
+      map_id INTEGER NOT NULL REFERENCES battle_maps(id) ON DELETE CASCADE,
+      owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      template_key TEXT,
+      template_id INTEGER,
+      name TEXT NOT NULL,
+      image_url TEXT,
+      width INTEGER NOT NULL DEFAULT 1,
+      height INTEGER NOT NULL DEFAULT 1,
+      rotation INTEGER NOT NULL DEFAULT 0,
+      light_radius INTEGER NOT NULL DEFAULT 0,
+      x INTEGER NOT NULL DEFAULT 0,
+      y INTEGER NOT NULL DEFAULT 0,
+      hidden BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_map_objects_map ON map_objects(map_id)
+  `)
 
   await db.execute(sql`
     UPDATE users SET role = 'admin' WHERE email = ${ADMIN_EMAIL} AND role <> 'admin'

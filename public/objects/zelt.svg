@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <linearGradient id="zl" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c89868"/>
+      <stop offset="1" stop-color="#6a4218"/>
+    </linearGradient>
+    <linearGradient id="zr" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8a6238"/>
+      <stop offset="1" stop-color="#3a2510"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="100" cy="186" rx="92" ry="8" fill="rgba(0,0,0,0.4)"/>
+  <!-- Boden -->
+  <polygon points="14,176 186,176 168,184 32,184" fill="#3a2510" stroke="#0a0805" stroke-width="2"/>
+  <!-- Linke Zeltbahn -->
+  <polygon points="100,30 14,176 100,176" fill="url(#zl)" stroke="#0a0805" stroke-width="2.5"/>
+  <!-- Rechte Zeltbahn -->
+  <polygon points="100,30 186,176 100,176" fill="url(#zr)" stroke="#0a0805" stroke-width="2.5"/>
+  <!-- Naht-Linie Mitte -->
+  <line x1="100" y1="30" x2="100" y2="176" stroke="#0a0805" stroke-width="1.5" opacity="0.65"/>
+  <!-- Eingangs-Öffnung (V-Schnitt) -->
+  <polygon points="100,176 80,176 90,110 100,90" fill="#0a0805"/>
+  <polygon points="100,176 120,176 110,110 100,90" fill="#1a1108"/>
+  <line x1="100" y1="90" x2="100" y2="176" stroke="#5a3a18" stroke-width="1.5"/>
+  <!-- Halte-Seile -->
+  <line x1="14" y1="176" x2="2" y2="194" stroke="#3a2510" stroke-width="2"/>
+  <line x1="186" y1="176" x2="198" y2="194" stroke="#3a2510" stroke-width="2"/>
+  <!-- Heringe -->
+  <circle cx="2" cy="194" r="3" fill="#5a3a18"/>
+  <circle cx="198" cy="194" r="3" fill="#5a3a18"/>
+  <!-- Mast-Spitze -->
+  <path d="M 100 30 L 98 18 L 102 18 Z" fill="#5a3a18" stroke="#0a0805" stroke-width="1"/>
+</svg>

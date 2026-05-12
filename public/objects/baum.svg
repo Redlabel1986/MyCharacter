@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <radialGradient id="bk" cx="0.4" cy="0.35" r="0.7">
+      <stop offset="0" stop-color="#88c050"/>
+      <stop offset="0.6" stop-color="#3a8028"/>
+      <stop offset="1" stop-color="#1a4010"/>
+    </radialGradient>
+    <linearGradient id="bs" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7a4a20"/>
+      <stop offset="1" stop-color="#3a1a08"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="100" cy="190" rx="90" ry="8" fill="rgba(0,0,0,0.4)"/>
+  <!-- Stamm -->
+  <path d="M 80 132 Q 78 168, 70 190 L 130 190 Q 122 168, 120 132 Z" fill="url(#bs)" stroke="#0a0805" stroke-width="2.5"/>
+  <path d="M 90 150 Q 92 170, 90 190" stroke="#3a2510" stroke-width="1" fill="none" opacity="0.7"/>
+  <path d="M 110 150 Q 108 170, 110 190" stroke="#3a2510" stroke-width="1" fill="none" opacity="0.7"/>
+  <!-- Wurzeln -->
+  <path d="M 70 188 Q 50 192, 40 188" stroke="#3a2510" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <path d="M 130 188 Q 150 192, 160 188" stroke="#3a2510" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <!-- Krone (Cluster) -->
+  <circle cx="100" cy="76" r="68" fill="url(#bk)" stroke="#0a0805" stroke-width="2.5"/>
+  <circle cx="60" cy="64" r="34" fill="#5aa030" stroke="#0a0805" stroke-width="2"/>
+  <circle cx="140" cy="60" r="36" fill="#5aa030" stroke="#0a0805" stroke-width="2"/>
+  <circle cx="100" cy="48" r="32" fill="#6ab040" stroke="#0a0805" stroke-width="2"/>
+  <circle cx="120" cy="100" r="30" fill="#3a8028" stroke="#0a0805" stroke-width="2"/>
+  <circle cx="78" cy="106" r="28" fill="#3a8028" stroke="#0a0805" stroke-width="2"/>
+  <!-- Blatt-Highlights -->
+  <circle cx="84" cy="42" r="6" fill="#a0d870" opacity="0.7"/>
+  <circle cx="120" cy="32" r="5" fill="#a0d870" opacity="0.7"/>
+  <circle cx="146" cy="74" r="4" fill="#a0d870" opacity="0.6"/>
+  <circle cx="58" cy="80" r="4" fill="#a0d870" opacity="0.6"/>
+</svg>

@@ -383,6 +383,79 @@ export const battleAudioTracks = pgTable(
   }),
 )
 
+/**
+ * Gruppen-spezifische Custom-Templates fuer Map-Objekte (Inventar des DM).
+ * Built-in-Templates leben als Konstanten in shared/map-objects.ts und
+ * brauchen keine DB-Eintraege.
+ */
+export const mapObjectTemplates = pgTable(
+  'map_object_templates',
+  {
+    id: serial('id').primaryKey(),
+    groupId: integer('group_id')
+      .notNull()
+      .references(() => groups.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    category: text('category').notNull().default('misc'),
+    /** Blob-URL oder Pfad zum Bild des Templates. */
+    imageUrl: text('image_url'),
+    /** Breite/Hoehe in Grid-Zellen. */
+    width: integer('width').notNull().default(1),
+    height: integer('height').notNull().default(1),
+    rotatable: boolean('rotatable').notNull().default(false),
+    /** Lichtradius in Zellen (0 = kein Licht). */
+    lightRadius: integer('light_radius').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    groupIdx: index('idx_map_object_templates_group').on(table.groupId),
+  }),
+)
+
+/**
+ * Konkrete Instanzen von Map-Objekten auf einer Battle-Map. Felder werden bei
+ * der Platzierung aus dem Template (built-in oder custom) als Snapshot kopiert,
+ * damit das Loeschen eines Templates keine bestehenden Objekte zerstoert.
+ */
+export const mapObjects = pgTable(
+  'map_objects',
+  {
+    id: serial('id').primaryKey(),
+    mapId: integer('map_id')
+      .notNull()
+      .references(() => battleMaps.id, { onDelete: 'cascade' }),
+    /** Wer hat das Objekt platziert? Nur DM/Owner dürfen aendern/loeschen. */
+    ownerUserId: integer('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** Built-in key (z.B. "boot") oder NULL fuer Custom-Templates. */
+    templateKey: text('template_key'),
+    /** Custom-Template-ID, falls aus map_object_templates. */
+    templateId: integer('template_id'),
+    name: text('name').notNull(),
+    imageUrl: text('image_url'),
+    width: integer('width').notNull().default(1),
+    height: integer('height').notNull().default(1),
+    /** Rotation in Grad (0/90/180/270 fuer drehbare Objekte). */
+    rotation: integer('rotation').notNull().default(0),
+    lightRadius: integer('light_radius').notNull().default(0),
+    /** Position in Pixeln (top-left des Objekts auf Karten-Originalbild). */
+    x: integer('x').notNull().default(0),
+    y: integer('y').notNull().default(0),
+    /** Versteckt (nur DM sieht). */
+    hidden: boolean('hidden').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    mapIdx: index('idx_map_objects_map').on(table.mapId),
+  }),
+)
+
+export type MapObjectTemplate = typeof mapObjectTemplates.$inferSelect
+export type MapObject = typeof mapObjects.$inferSelect
+export type NewMapObject = typeof mapObjects.$inferInsert
+
 // App-weite Einstellungen als Key/Value (z. B. library_password_hash).
 export const appSettings = pgTable('app_settings', {
   key: text('key').primaryKey(),

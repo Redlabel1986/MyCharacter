@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <radialGradient id="fcg" cx="0.5" cy="0.55" r="0.55">
+      <stop offset="0" stop-color="#fff7c0"/>
+      <stop offset="0.4" stop-color="#ffb33d"/>
+      <stop offset="1" stop-color="#ff5510" stop-opacity="0.85"/>
+    </radialGradient>
+    <radialGradient id="fce" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#4a4035"/>
+      <stop offset="1" stop-color="#1a1108"/>
+    </radialGradient>
+  </defs>
+  <ellipse cx="100" cy="180" rx="80" ry="10" fill="rgba(0,0,0,0.35)"/>
+  <!-- Stein-Ring (Ellipse aus Steinen) -->
+  <ellipse cx="100" cy="130" rx="75" ry="32" fill="url(#fce)" stroke="#0a0805" stroke-width="2"/>
+  <ellipse cx="100" cy="125" rx="68" ry="26" fill="#2a1d10" stroke="#1a1108" stroke-width="2"/>
+  <!-- Steine -->
+  <g stroke="#0a0805" stroke-width="1.5">
+    <ellipse cx="40" cy="128" rx="14" ry="12" fill="#8a8278"/>
+    <ellipse cx="70" cy="148" rx="14" ry="11" fill="#a09588"/>
+    <ellipse cx="130" cy="150" rx="14" ry="11" fill="#8a8278"/>
+    <ellipse cx="158" cy="125" rx="14" ry="12" fill="#a09588"/>
+    <ellipse cx="100" cy="155" rx="14" ry="10" fill="#9a8e80"/>
+    <ellipse cx="40" cy="115" rx="13" ry="10" fill="#7a7066"/>
+    <ellipse cx="160" cy="115" rx="13" ry="10" fill="#7a7066"/>
+  </g>
+  <!-- Glut-Schicht -->
+  <ellipse cx="100" cy="122" rx="58" ry="20" fill="#8c1a08" opacity="0.7"/>
+  <!-- Holzscheite (Kreuz) -->
+  <rect x="46" y="110" width="100" height="9" rx="3" fill="#6a4218" stroke="#2a160a" stroke-width="1.5" transform="rotate(-18 100 114)"/>
+  <rect x="46" y="110" width="100" height="9" rx="3" fill="#7a4a20" stroke="#2a160a" stroke-width="1.5" transform="rotate(22 100 114)"/>
+  <!-- Flammen -->
+  <ellipse cx="100" cy="92" rx="40" ry="56" fill="url(#fcg)"/>
+  <ellipse cx="100" cy="86" rx="22" ry="36" fill="#fff7c0" opacity="0.85"/>
+  <path d="M 100 40 Q 112 60, 100 82 Q 88 60, 100 40 Z" fill="#fff7c0"/>
+  <path d="M 78 64 Q 70 82, 82 100" stroke="#ffb33d" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <path d="M 122 64 Q 130 82, 118 100" stroke="#ffb33d" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <!-- Aura -->
+  <circle cx="100" cy="100" r="86" fill="#ff8c30" opacity="0.12"/>
+</svg>

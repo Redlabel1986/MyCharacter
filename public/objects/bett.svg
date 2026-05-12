@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100">
+  <defs>
+    <linearGradient id="bd" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a06030"/>
+      <stop offset="1" stop-color="#3a1a08"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="100" cy="92" rx="84" ry="4" fill="rgba(0,0,0,0.4)"/>
+  <!-- Bettrahmen -->
+  <rect x="10" y="42" width="180" height="44" rx="4" fill="url(#bd)" stroke="#1a0a04" stroke-width="2.5"/>
+  <!-- Matratze / Decke -->
+  <rect x="20" y="46" width="160" height="28" rx="3" fill="#8a6238" stroke="#1a0a04" stroke-width="1.5"/>
+  <!-- Decke (Rolle) -->
+  <ellipse cx="100" cy="46" rx="78" ry="6" fill="#c89868" stroke="#1a0a04" stroke-width="1.5"/>
+  <!-- Decken-Streifen -->
+  <line x1="40" y1="46" x2="40" y2="74" stroke="#3a2510" stroke-width="1" opacity="0.6"/>
+  <line x1="80" y1="46" x2="80" y2="74" stroke="#3a2510" stroke-width="1" opacity="0.6"/>
+  <line x1="120" y1="46" x2="120" y2="74" stroke="#3a2510" stroke-width="1" opacity="0.6"/>
+  <line x1="160" y1="46" x2="160" y2="74" stroke="#3a2510" stroke-width="1" opacity="0.6"/>
+  <!-- Kissen -->
+  <rect x="14" y="34" width="32" height="14" rx="4" fill="#e0d4a8" stroke="#1a0a04" stroke-width="1.5"/>
+  <line x1="16" y1="42" x2="44" y2="42" stroke="#a09480" stroke-width="0.6"/>
+  <!-- Füsse -->
+  <rect x="10" y="84" width="8" height="10" fill="#3a1a08" stroke="#1a0a04" stroke-width="1.5"/>
+  <rect x="182" y="84" width="8" height="10" fill="#3a1a08" stroke="#1a0a04" stroke-width="1.5"/>
+</svg>
