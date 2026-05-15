@@ -52,14 +52,91 @@
       rgba(96,76,32,0.04) 0 2px,
       transparent 2px 6px
     );
+  /* Pro Theme ueberschrieben: Watermark im Body + Eck-Ornament in parchment-card. */
+  --theme-watermark: none;
+  --theme-card-bg: linear-gradient(180deg, #fbf6e8 0%, #ecdfae 100%);
+  --theme-card-ornament: none;
 }
 
 body {
   background: var(--bg-paper);
-  background-image: var(--paper-grain);
+  background-image: var(--theme-watermark), var(--paper-grain);
+  background-repeat: no-repeat, repeat;
+  background-position: bottom right, top left;
+  background-size: clamp(220px, 28vw, 420px), auto;
   background-attachment: fixed;
   color: var(--color-ink-500);
   font-family: var(--font-sans);
+}
+
+/* --- Themes (data-theme auf <html>) --------------------------------- */
+
+/* "default" = Pergament — :root-Werte. Block existiert fuer expliziten Switch. */
+[data-theme="default"] {
+  --bg-paper: #f4ebcc;
+  --bg-paper-deep: #e2cf88;
+  --color-accent: #9b1c1c;
+  --color-accent-soft: #f9d6c4;
+  --color-ink-300: #4d75a5;
+  --color-ink-400: #234976;
+  --color-ink-500: #0f2a52;
+  --color-ink-700: #04122a;
+  --theme-card-bg: linear-gradient(180deg, #fbf6e8 0%, #ecdfae 100%);
+  /* Kompass-Rose im Hintergrund */
+  --theme-watermark: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'><g opacity='0.10' fill='none' stroke='%230f2a52' stroke-width='2'><circle cx='100' cy='100' r='80'/><circle cx='100' cy='100' r='62'/><polygon points='100,25 110,100 100,175 90,100' fill='%230f2a52'/><polygon points='25,100 100,90 175,100 100,110' fill='%230f2a52'/><polygon points='45,45 95,95 45,155 95,105' fill='%230f2a52' opacity='0.6'/><polygon points='155,45 105,95 155,155 105,105' fill='%230f2a52' opacity='0.6'/></g></svg>");
+  --theme-card-ornament: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'><g fill='none' stroke='%239b1c1c' stroke-width='1.5' opacity='0.6'><circle cx='20' cy='20' r='10'/><line x1='20' y1='6' x2='20' y2='34'/><line x1='6' y1='20' x2='34' y2='20'/></g></svg>");
+}
+
+/* D&D — Drachenfeuer: warmes Pergament, drachenrote Akzente, D20-Watermark. */
+[data-theme="dnd"] {
+  --bg-paper: #efddb6;
+  --bg-paper-deep: #c8a268;
+  --color-accent: #b91c1c;
+  --color-accent-soft: #f4c8b8;
+  /* Tinten: dunkles Wein/Erde statt nautischer Blau */
+  --color-ink-300: #8b5a3c;
+  --color-ink-400: #5c3a1e;
+  --color-ink-500: #3a230d;
+  --color-ink-700: #1f0f04;
+  --theme-card-bg: linear-gradient(180deg, #f6e6c4 0%, #d8b074 100%);
+  /* D20 Wuerfel als Watermark */
+  --theme-watermark: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'><g opacity='0.13'><polygon points='100,20 172,62 172,138 100,180 28,138 28,62' fill='none' stroke='%23b91c1c' stroke-width='3'/><polyline points='100,20 100,180' fill='none' stroke='%23b91c1c' stroke-width='1.2'/><polyline points='28,62 172,138' fill='none' stroke='%23b91c1c' stroke-width='1.2'/><polyline points='172,62 28,138' fill='none' stroke='%23b91c1c' stroke-width='1.2'/><polyline points='100,20 28,138 172,138 100,20' fill='none' stroke='%23b91c1c' stroke-width='1.2'/><text x='100' y='122' text-anchor='middle' font-size='54' font-family='Georgia,serif' fill='%23b91c1c' font-weight='bold'>20</text></g></svg>");
+  /* Drachenflügel-Ornament fuer Karten-Ecke */
+  --theme-card-ornament: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'><g fill='%23b91c1c' opacity='0.55'><path d='M4,20 Q12,8 22,12 Q18,18 14,18 Q22,22 30,16 Q26,26 18,26 Q22,30 28,30 Q18,34 8,28 Q14,24 12,22 Q6,24 4,20 Z'/></g></svg>");
+}
+
+/* DSA — Aventurien: kuehles Pergament, koenigsblau, Raben-Watermark. */
+[data-theme="dsa"] {
+  --bg-paper: #e6e4cf;
+  --bg-paper-deep: #a8a585;
+  --color-accent: #1e3a8a;
+  --color-accent-soft: #cfd8f4;
+  --color-ink-300: #5c6b94;
+  --color-ink-400: #2a3a6c;
+  --color-ink-500: #14193f;
+  --color-ink-700: #050929;
+  --theme-card-bg: linear-gradient(180deg, #efeada 0%, #b7b08a 100%);
+  /* Raben-Silhouette + Sterne als Watermark */
+  --theme-watermark: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'><g opacity='0.14'><path d='M40,120 Q55,85 90,90 Q110,75 140,85 Q170,90 178,108 Q170,115 158,112 Q160,128 145,135 Q138,128 132,130 Q128,148 110,148 Q90,150 78,138 Q70,142 62,138 Q60,128 65,122 Q45,128 40,120 Z' fill='%231e3a8a'/><circle cx='150' cy='105' r='2.5' fill='%23efeada'/><path d='M155,108 L180,98' stroke='%231e3a8a' stroke-width='2' fill='none'/><g fill='%231e3a8a'><circle cx='30' cy='40' r='1.5'/><circle cx='55' cy='25' r='1'/><circle cx='80' cy='35' r='1.2'/><circle cx='170' cy='30' r='1.5'/><circle cx='185' cy='55' r='1'/></g></g></svg>");
+  /* Gekreuzte Schwerter als Karten-Ornament */
+  --theme-card-ornament: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'><g stroke='%231e3a8a' stroke-width='2' opacity='0.6' stroke-linecap='round' fill='none'><line x1='6' y1='6' x2='32' y2='32'/><line x1='32' y1='6' x2='6' y2='32'/><circle cx='6' cy='6' r='2' fill='%231e3a8a'/><circle cx='32' cy='6' r='2' fill='%231e3a8a'/></g></svg>");
+}
+
+/* HtbaH — Pulp Hero: Kraftpapier, Smaragd-Akzent, Comic-Burst + Axt. */
+[data-theme="htbah"] {
+  --bg-paper: #e6c896;
+  --bg-paper-deep: #b58a4a;
+  --color-accent: #047857;
+  --color-accent-soft: #c8e8d8;
+  --color-ink-300: #6b3d12;
+  --color-ink-400: #4a2906;
+  --color-ink-500: #2a1604;
+  --color-ink-700: #1a0d02;
+  --theme-card-bg: linear-gradient(180deg, #edd5a8 0%, #c89e5e 100%);
+  /* Comic-Burst + Axt */
+  --theme-watermark: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'><g opacity='0.16'><polygon points='100,15 117,68 170,55 138,100 175,140 122,135 115,180 100,140 85,180 78,135 25,140 62,100 30,55 83,68' fill='%23047857'/><g transform='translate(40,90)' fill='%23047857' opacity='0.85'><rect x='10' y='22' width='80' height='6' rx='2'/><path d='M85,8 L110,18 L108,32 L95,38 L92,30 L85,32 Z'/><path d='M85,30 L72,30 L75,36 Z'/></g></g></svg>");
+  /* Heroische Axt als Karten-Ornament */
+  --theme-card-ornament: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'><g fill='%23047857' opacity='0.65'><rect x='6' y='18' width='22' height='3' rx='1.5'/><path d='M26,10 L34,14 L33,22 L27,24 L25,20 L23,22 Z'/></g></svg>");
 }
 
 /* System-Theme-Hooks */
@@ -87,7 +164,7 @@ body {
 
 /* "Pergament-Karte" — Karten-Stil */
 .parchment-card {
-  background: linear-gradient(180deg, #fbf6e8 0%, #ecdfae 100%);
+  background: var(--theme-card-bg);
   border: 1px solid color-mix(in srgb, var(--color-parchment-700) 40%, transparent);
   border-radius: 0.75rem;
   box-shadow:
@@ -104,6 +181,21 @@ body {
   border-radius: 0.5rem;
   pointer-events: none;
 }
+/* Theme-Eck-Ornament rechts oben — D20/Schwerter/Axt/Kompass. */
+.parchment-card::after {
+  content: '';
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  background-image: var(--theme-card-ornament);
+  background-size: contain;
+  background-repeat: no-repeat;
+  pointer-events: none;
+  opacity: 0.85;
+}
+.parchment-card.no-ornament::after { display: none; }
 
 .accent-rule {
   height: 1px;

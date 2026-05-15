@@ -79,6 +79,7 @@ const returnToAdminView = async () => {
                 {{ roleBadge }}
               </span>
             </span>
+            <ThemeSwitcher />
             <UButton size="xs" color="neutral" variant="outline" @click="logout">
               Abmelden
             </UButton>
@@ -86,6 +87,7 @@ const returnToAdminView = async () => {
           <template v-else>
             <NuxtLink to="/login" class="hover:text-[var(--color-accent)]">Anmelden</NuxtLink>
             <NuxtLink to="/register" class="hover:text-[var(--color-accent)]">Registrieren</NuxtLink>
+            <ThemeSwitcher />
           </template>
         </nav>
       </div>

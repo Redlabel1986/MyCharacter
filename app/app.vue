@@ -1,6 +1,12 @@
 <script setup lang="ts">
+import { useTheme } from '~/composables/useTheme'
+
+const { theme } = useTheme()
 useHead({
-  htmlAttrs: { lang: 'de' },
+  htmlAttrs: {
+    lang: 'de',
+    'data-theme': theme,
+  },
   title: 'paperheros',
   titleTemplate: (chunk) => (chunk ? `${chunk} · paperheros` : 'paperheros'),
   meta: [

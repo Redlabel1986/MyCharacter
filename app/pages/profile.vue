@@ -155,6 +155,16 @@ const submitPasswordChange = async () => {
     </div>
 
     <div class="parchment-card p-6">
+      <h2 class="font-serif text-2xl">Theme</h2>
+      <p class="text-sm text-ink-400 mt-1">
+        Waehle einen Look fuer paperheros. Die Auswahl gilt fuer dein Konto und bleibt auf
+        diesem Geraet erhalten.
+      </p>
+      <div class="accent-rule my-3" />
+      <ThemePicker />
+    </div>
+
+    <div class="parchment-card p-6">
       <h2 class="font-serif text-2xl">Passwort ändern</h2>
       <div class="accent-rule my-3" />
       <form class="space-y-3 max-w-md" @submit.prevent="submitPasswordChange">
