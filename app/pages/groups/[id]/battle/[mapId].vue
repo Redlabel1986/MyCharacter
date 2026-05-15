@@ -1815,9 +1815,9 @@ const fogCurrentVisionSet = computed(() => {
     if (t.visionRadius <= 0) continue
     // Spieler beziehen Sicht nur aus eigenen Token; DM sieht aus allen.
     if (!isDm.value && uid !== undefined && t.ownerUserId !== uid) continue
-    const halfPx = (t.sizeMultiplier * g) / 2
+    // t.x/t.y sind der visuelle Token-Mittelpunkt (CSS translate(-50%, -50%)).
     const cells = computeCellsInVision(
-      { centerX: t.x + halfPx, centerY: t.y + halfPx, visionRadius: t.visionRadius },
+      { centerX: t.x, centerY: t.y, visionRadius: t.visionRadius },
       g,
     )
     for (const [c, r] of cells) set.add(`${c}|${r}`)
@@ -1878,18 +1878,26 @@ const fogVisibleSetEffective = computed(() => {
 })
 
 // Token-Sichtbarkeit fuer den Viewer: Spieler sehen Tokens nur, wenn deren
-// Zelle aktuell beleuchtet, manuell aufgedeckt oder erinnert wird (oder es
-// das eigene Token ist). DM sieht alles.
+// visuelle Box mindestens eine aktuell beleuchtete / aufgedeckte / erinnerte
+// Zelle ueberlappt (oder es das eigene Token ist). DM sieht alles.
 const isTokenVisibleToViewer = (t: Token): boolean => {
   if (isDm.value) return true
   if (!map.value?.fogEnabled) return true
   if (user.value && t.ownerUserId === user.value.id) return true
   const g = map.value.gridSize || 0
   if (g === 0) return true
+  // t.x/t.y = visueller Mittelpunkt. Bounding-Box = Token-Mittelpunkt +/- halfPx.
   const halfPx = (t.sizeMultiplier * g) / 2
-  const col = Math.floor((t.x + halfPx) / g)
-  const row = Math.floor((t.y + halfPx) / g)
-  return fogVisibleSetEffective.value.has(`${col}|${row}`)
+  const minCol = Math.floor((t.x - halfPx) / g)
+  const maxCol = Math.floor((t.x + halfPx - 0.001) / g)
+  const minRow = Math.floor((t.y - halfPx) / g)
+  const maxRow = Math.floor((t.y + halfPx - 0.001) / g)
+  for (let row = minRow; row <= maxRow; row++) {
+    for (let col = minCol; col <= maxCol; col++) {
+      if (fogVisibleSetEffective.value.has(`${col}|${row}`)) return true
+    }
+  }
+  return false
 }
 
 // Fuer das Rendering: alle sichtbaren Zellen im Karten-Bereich als Tupel-Liste.

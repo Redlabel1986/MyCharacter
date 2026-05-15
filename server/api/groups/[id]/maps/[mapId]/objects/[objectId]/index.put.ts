@@ -114,10 +114,10 @@ export default defineEventHandler(async (event) => {
     const newCells: CellTuple[] = []
     for (const t of allTokens) {
       if (t.visionRadius <= 0) continue
-      const halfPx = (t.sizeMultiplier * map.gridSize) / 2
+      // t.x/t.y sind der Token-Mittelpunkt (Client rendert mit translate(-50%, -50%)).
       newCells.push(
         ...cellsInTokenVision(
-          { centerX: t.x + halfPx, centerY: t.y + halfPx, visionRadius: t.visionRadius },
+          { centerX: t.x, centerY: t.y, visionRadius: t.visionRadius },
           map.gridSize,
         ),
       )

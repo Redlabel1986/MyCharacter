@@ -14,7 +14,7 @@
 export type CellTuple = [number, number]
 
 export interface FogToken {
-  /** Token-Mittelpunkt in Pixeln (links/oben des Token-Bilds + halbe Token-Groesse). */
+  /** Token-Mittelpunkt in Pixeln (echter visueller Mittelpunkt). */
   centerX: number
   centerY: number
   visionRadius: number
@@ -23,19 +23,34 @@ export interface FogToken {
 /**
  * Liefert alle Zellen, die ein einzelner Token mit gegebenem Sichtradius
  * (in Zellen) erhellt. gridSize ist die Pixelgroesse einer Zelle.
+ *
+ * Symmetrische Kreis-Sicht: jede Zelle, deren Mittelpunkt innerhalb von
+ * (r + 0.5) Zell-Einheiten vom Token-Mittelpunkt liegt, ist sichtbar. Dadurch
+ * sitzt der Token immer in der geometrischen Mitte des Sichtbereichs —
+ * auch wenn sein Mittelpunkt auf einer Zellgrenze liegt (z.B. 1×1-Token,
+ * die per Snap auf Gitterkreuzungen landen).
  */
 export function cellsInTokenVision(token: FogToken, gridSize: number): CellTuple[] {
   if (token.visionRadius <= 0 || gridSize <= 0) return []
-  const cellCol = Math.floor(token.centerX / gridSize)
-  const cellRow = Math.floor(token.centerY / gridSize)
   const r = token.visionRadius
+  // Token-Mittelpunkt in Zell-Koordinaten.
+  const cx = token.centerX / gridSize
+  const cy = token.centerY / gridSize
+  // Such-Bereich: (r + 1) Zellen rund um den Token, damit Diagonalen und
+  // Zellen, die nur knapp am Rand des Radius liegen, mitgepruft werden.
+  const minCol = Math.floor(cx) - r - 1
+  const maxCol = Math.floor(cx) + r + 1
+  const minRow = Math.floor(cy) - r - 1
+  const maxRow = Math.floor(cy) + r + 1
+  const thresholdSq = (r + 0.5) * (r + 0.5)
   const out: CellTuple[] = []
-  for (let dr = -r; dr <= r; dr++) {
-    for (let dc = -r; dc <= r; dc++) {
-      // Kreis-Approximation: euklidische Distanz <= r + 0.5 erlaubt etwas
-      // weichere Raender, sodass Diagonal-Zellen am Rand miterfasst werden.
-      if (dr * dr + dc * dc <= (r + 0.5) * (r + 0.5)) {
-        out.push([cellCol + dc, cellRow + dr])
+  for (let row = minRow; row <= maxRow; row++) {
+    for (let col = minCol; col <= maxCol; col++) {
+      // Distanz vom Zellmittelpunkt zum Token-Mittelpunkt (in Zellen).
+      const dx = col + 0.5 - cx
+      const dy = row + 0.5 - cy
+      if (dx * dx + dy * dy <= thresholdSq) {
+        out.push([col, row])
       }
     }
   }
