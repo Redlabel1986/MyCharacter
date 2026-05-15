@@ -133,10 +133,19 @@ body {
   --color-ink-500: #2a1604;
   --color-ink-700: #1a0d02;
   --theme-card-bg: linear-gradient(180deg, #edd5a8 0%, #c89e5e 100%);
-  /* W100 (Percentile Die): stilisierter d10 mit '100'-Beschriftung. */
-  --theme-watermark: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'><g opacity='0.18'><polygon points='100,28 172,100 100,172 28,100' fill='none' stroke='%23047857' stroke-width='3.5'/><line x1='100' y1='28' x2='100' y2='172' stroke='%23047857' stroke-width='1.2'/><line x1='28' y1='100' x2='172' y2='100' stroke='%23047857' stroke-width='1.2'/><line x1='100' y1='28' x2='65' y2='100' stroke='%23047857' stroke-width='0.8'/><line x1='100' y1='28' x2='135' y2='100' stroke='%23047857' stroke-width='0.8'/><line x1='65' y1='100' x2='100' y2='172' stroke='%23047857' stroke-width='0.8'/><line x1='135' y1='100' x2='100' y2='172' stroke='%23047857' stroke-width='0.8'/><text x='100' y='116' text-anchor='middle' font-size='38' font-family='Georgia,serif' fill='%23047857' font-weight='bold'>100</text></g></svg>");
+  /* Eigenes Hintergrund-PNG (Cover ueber den ganzen Viewport, siehe Override unten). */
+  --theme-watermark: url("/background/htbah-background.png");
   /* Heroische Axt als Karten-Ornament */
   --theme-card-ornament: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'><g fill='%23047857' opacity='0.65'><rect x='6' y='18' width='22' height='3' rx='1.5'/><path d='M26,10 L34,14 L33,22 L27,24 L25,20 L23,22 Z'/></g></svg>");
+}
+
+/* HtbaH: PNG fuellt den Viewport (Cover) statt nur als Eck-Watermark zu sitzen. */
+[data-theme="htbah"] body {
+  background-image: var(--theme-watermark);
+  background-repeat: no-repeat;
+  background-position: center center;
+  background-size: cover;
+  background-attachment: fixed;
 }
 
 /* System-Theme-Hooks */
