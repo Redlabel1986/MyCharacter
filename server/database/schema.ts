@@ -311,9 +311,10 @@ export const battleTokens = pgTable(
       .default([]),
     /**
      * Sichtweite in Rasterzellen, mit der dieser Token Fog of War aufdeckt.
-     * 0 = kein Beitrag zur Sicht (NPC-Standard).
+     * Default 1 = Spieler/NPC sieht eine Zelle um sich herum (Nacht / Fog of War).
+     * 0 = kein Beitrag zur Sicht (z.B. fuer komplett blinde Token).
      */
-    visionRadius: integer('vision_radius').notNull().default(0),
+    visionRadius: integer('vision_radius').notNull().default(1),
     /** Wenn false, sehen Spieler die HP dieses Tokens nicht (nur DM + Owner). */
     hpVisibleToPlayers: boolean('hp_visible_to_players').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

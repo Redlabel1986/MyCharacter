@@ -1804,12 +1804,17 @@ const fogGridRows = computed(() =>
 
 // Zellen, die durch aktuelle Token-Sicht + Objekt-Lichtquellen live
 // aufgedeckt sind (Fackel, Feuerstelle, Laterne …).
+// Per-Spieler-Sicht: Jeder Spieler sieht nur den Sichtbereich seiner eigenen
+// Token (plus Lichtquellen, die fuer alle gelten). Der DM sieht alles.
 const fogCurrentVisionSet = computed(() => {
   const set = new Set<string>()
   if (!map.value || !fogCellSize.value) return set
   const g = fogCellSize.value
+  const uid = user.value?.id
   for (const t of tokens.value) {
     if (t.visionRadius <= 0) continue
+    // Spieler beziehen Sicht nur aus eigenen Token; DM sieht aus allen.
+    if (!isDm.value && uid !== undefined && t.ownerUserId !== uid) continue
     const halfPx = (t.sizeMultiplier * g) / 2
     const cells = computeCellsInVision(
       { centerX: t.x + halfPx, centerY: t.y + halfPx, visionRadius: t.visionRadius },
@@ -1817,6 +1822,8 @@ const fogCurrentVisionSet = computed(() => {
     )
     for (const [c, r] of cells) set.add(`${c}|${r}`)
   }
+  // Lichtquellen erhellen Zellen fuer alle Betrachter gleichermassen
+  // (z.B. Lagerfeuer 2x2 um sich herum sichtbar fuer jeden).
   for (const o of objects.value) {
     if (o.lightRadius <= 0) continue
     const cells = computeCellsInVision(

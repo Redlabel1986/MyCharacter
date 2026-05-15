@@ -304,7 +304,24 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   `)
   // Battle-Token: Sichtweite + per-Token-HP-Sichtbarkeit fuer Spieler.
   await db.execute(sql`
-    ALTER TABLE battle_tokens ADD COLUMN IF NOT EXISTS vision_radius INTEGER NOT NULL DEFAULT 0
+    ALTER TABLE battle_tokens ADD COLUMN IF NOT EXISTS vision_radius INTEGER NOT NULL DEFAULT 1
+  `)
+  // Default-Sichtweite von 0 auf 1 anheben — Spieler/NPC sehen eine Zelle um
+  // sich herum bei Nacht / Fog of War. Existierende 0-Werte einmalig nachziehen
+  // (gated ueber app_settings, damit ein DM-gewolltes 0 nicht jedes Mal kaputt geht).
+  await db.execute(sql`
+    ALTER TABLE battle_tokens ALTER COLUMN vision_radius SET DEFAULT 1
+  `)
+  await db.execute(sql`
+    UPDATE battle_tokens
+    SET vision_radius = 1
+    WHERE vision_radius = 0
+      AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'vision_radius_default_1_backfill')
+  `)
+  await db.execute(sql`
+    INSERT INTO app_settings (key, value)
+    VALUES ('vision_radius_default_1_backfill', '1')
+    ON CONFLICT (key) DO NOTHING
   `)
   await db.execute(sql`
     ALTER TABLE battle_tokens ADD COLUMN IF NOT EXISTS hp_visible_to_players BOOLEAN NOT NULL DEFAULT TRUE
