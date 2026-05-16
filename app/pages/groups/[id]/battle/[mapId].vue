@@ -3283,6 +3283,60 @@ const endResize = () => {
               />
             </svg>
 
+            <!-- Mauer-Schatten (100% Fog of War): blockt Sicht hinter Mauern
+                 komplett. Ein Pixel ist im Mauer-Schatten, wenn er
+                 (a) innerhalb der Reichweite einer Sichtquelle liegt UND
+                 (b) von keiner Sichtquelle aus tatsaechlich sichtbar ist.
+                 Memory- / DM-aufgedeckte Zellen werden ausgenommen, damit
+                 erkundete Bereiche dimm sichtbar bleiben.
+                 Nur fuer Spieler — der DM braucht es nicht. -->
+            <svg
+              v-if="!isDm && imgW && imgH && walls.length && visionPolygons.length && (map.fogEnabled || currentTodOverlay.requiresVisionMask)"
+              class="absolute inset-0 pointer-events-none"
+              :width="imgW"
+              :height="imgH"
+              :viewBox="`0 0 ${imgW} ${imgH}`"
+            >
+              <defs>
+                <mask :id="`wall-shadow-${mapId}`">
+                  <!-- Standard: kein Schatten (schwarz = Layer unsichtbar). -->
+                  <rect width="100%" height="100%" fill="black" />
+                  <!-- In-Reichweite der Sichtquellen: weiss = Schatten-Kandidat. -->
+                  <circle
+                    v-for="vp in visionPolygons"
+                    :key="`shadow-range-${vp.src.id}`"
+                    :cx="vp.src.cx"
+                    :cy="vp.src.cy"
+                    :r="vp.src.radiusPx"
+                    fill="white"
+                  />
+                  <!-- Tatsaechlich sichtbar (Sicht-Polygon) -> kein Schatten. -->
+                  <polygon
+                    v-for="vp in visionPolygons"
+                    :key="`shadow-vis-${vp.src.id}`"
+                    :points="polygonPointsAttr(vp.points)"
+                    fill="black"
+                  />
+                  <!-- Memory-Zellen schlucken den 100%-Schatten ebenfalls. -->
+                  <rect
+                    v-for="cell in fogMemoryCellsList"
+                    :key="`shadow-mem-${cell[0]}|${cell[1]}`"
+                    :x="cell[0] * map.gridSize"
+                    :y="cell[1] * map.gridSize"
+                    :width="map.gridSize"
+                    :height="map.gridSize"
+                    fill="black"
+                  />
+                </mask>
+              </defs>
+              <rect
+                width="100%"
+                height="100%"
+                fill="#000"
+                :mask="`url(#wall-shadow-${mapId})`"
+              />
+            </svg>
+
             <!-- Sichtblocker-Mauern: nur dem DM sichtbar (rote duenne Linien).
                  Spieler-View blendet sie aus — die Wirkung (kein Durchschauen)
                  sehen sie indirekt durch die Beleuchtung. -->
