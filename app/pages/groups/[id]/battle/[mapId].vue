@@ -3415,9 +3415,11 @@ const endResize = () => {
             </svg>
 
             <!-- Pitch-Black: vom DM mit dem Schwaerzen-Pinsel gemalte Zellen.
-                 Wird komplett opak schwarz ueber alles gelegt — auch ueber
-                 Sicht, Memory und das normale Fog-Overlay. Spieler sehen
-                 hier absolut nichts. DM sieht's leicht transparent. -->
+                 100% opak schwarz fuer Spieler, aber: Sicht-Polygone und
+                 Lichtquellen schneiden mit ihrem weichen Radial-Gradient
+                 Loecher heraus — eine Fackel im "verbotenen" Bereich macht
+                 also doch eine Sicht-Insel frei. DM sieht den Blackout
+                 immer als 50% transparent, damit klar ist was gemalt wurde. -->
             <svg
               v-if="imgW && imgH && fogBlackoutCellsList.length"
               class="absolute inset-0 pointer-events-none"
@@ -3425,15 +3427,65 @@ const endResize = () => {
               :height="imgH"
               :viewBox="`0 0 ${imgW} ${imgH}`"
             >
-              <rect
-                v-for="cell in fogBlackoutCellsList"
-                :key="`blackout-${cell[0]}|${cell[1]}`"
-                :x="cell[0] * map.gridSize"
-                :y="cell[1] * map.gridSize"
-                :width="map.gridSize"
-                :height="map.gridSize"
-                :fill="isDm ? 'rgba(0,0,0,0.5)' : '#000'"
-              />
+              <template v-if="isDm">
+                <!-- DM: einfach 50% transparent — keine Sicht-Loecher noetig,
+                     der DM sieht eh alles. -->
+                <rect
+                  v-for="cell in fogBlackoutCellsList"
+                  :key="`blackout-dm-${cell[0]}|${cell[1]}`"
+                  :x="cell[0] * map.gridSize"
+                  :y="cell[1] * map.gridSize"
+                  :width="map.gridSize"
+                  :height="map.gridSize"
+                  fill="rgba(0,0,0,0.5)"
+                />
+              </template>
+              <template v-else>
+                <defs>
+                  <radialGradient
+                    v-for="vp in visionPolygons"
+                    :key="`blackout-grad-${vp.src.id}`"
+                    :id="`blackout-vision-${mapId}-${vp.src.id}`"
+                    gradientUnits="userSpaceOnUse"
+                    :cx="vp.src.cx"
+                    :cy="vp.src.cy"
+                    :r="vp.src.radiusPx"
+                  >
+                    <stop offset="0" stop-color="black" stop-opacity="1" />
+                    <stop offset="0.55" stop-color="black" stop-opacity="0.95" />
+                    <stop offset="0.85" stop-color="black" stop-opacity="0.45" />
+                    <stop offset="1" stop-color="black" stop-opacity="0" />
+                  </radialGradient>
+                  <mask :id="`blackout-mask-${mapId}`">
+                    <!-- Schwarz = Layer unsichtbar. -->
+                    <rect width="100%" height="100%" fill="black" />
+                    <!-- Blackout-Zellen: weiss = 100% schwarzer Layer. -->
+                    <rect
+                      v-for="cell in fogBlackoutCellsList"
+                      :key="`blackout-mask-${cell[0]}|${cell[1]}`"
+                      :x="cell[0] * map.gridSize"
+                      :y="cell[1] * map.gridSize"
+                      :width="map.gridSize"
+                      :height="map.gridSize"
+                      fill="white"
+                    />
+                    <!-- Sichtquellen schneiden mit weichem Radial-Gradient
+                         Loecher in den Blackout-Layer. -->
+                    <polygon
+                      v-for="vp in visionPolygons"
+                      :key="`blackout-cut-${vp.src.id}`"
+                      :points="polygonPointsAttr(vp.points)"
+                      :fill="`url(#blackout-vision-${mapId}-${vp.src.id})`"
+                    />
+                  </mask>
+                </defs>
+                <rect
+                  width="100%"
+                  height="100%"
+                  fill="#000"
+                  :mask="`url(#blackout-mask-${mapId})`"
+                />
+              </template>
             </svg>
 
             <!-- Sichtblocker-Mauern: nur dem DM sichtbar (rote duenne Linien).
