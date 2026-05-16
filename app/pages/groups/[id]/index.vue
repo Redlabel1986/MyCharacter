@@ -99,16 +99,18 @@ const roleBadge = (r: 'player' | 'dm' | 'admin') =>
           </NuxtLink>
           <h1 class="font-serif text-2xl">{{ groupData.group.name }}</h1>
         </div>
-        <NuxtLink
+        <UButton
           :to="`/groups/${id}/battle`"
-          class="text-sm text-[var(--color-accent)] hover:underline flex items-center gap-1"
+          color="primary"
+          size="lg"
+          icon="i-lucide-swords"
+          class="font-semibold shadow-md ring-2 ring-[var(--color-accent)]/40 hover:ring-[var(--color-accent)]/70 transition"
           :title="groupData.isOwner
             ? 'Karten verwalten und Sitzung steuern'
             : 'Zur aktuell aktiven Karte springen'"
         >
-          <UIcon name="i-lucide-swords" />
           Spielen
-        </NuxtLink>
+        </UButton>
       </div>
       <div class="accent-rule my-3" />
       <GroupChat :group-id="id" class="flex-1 min-h-0" />

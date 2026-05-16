@@ -2499,21 +2499,30 @@ const endResize = () => {
           <UButton size="xs" variant="ghost" @click="zoomReset">100%</UButton>
           <UButton
             v-if="isDm"
-            size="sm"
-            variant="outline"
+            size="md"
+            color="primary"
+            variant="soft"
             icon="i-lucide-settings"
+            class="font-semibold"
             @click="settingsOpen = !settingsOpen"
           >
             Karte
           </UButton>
-          <UButton color="primary" icon="i-lucide-plus" size="sm" @click="openAdd">
+          <UButton
+            color="primary"
+            icon="i-lucide-user-plus"
+            size="md"
+            class="font-semibold shadow-md"
+            @click="openAdd"
+          >
             Token
           </UButton>
           <UButton
             color="primary"
-            variant="outline"
+            variant="soft"
             icon="i-lucide-shapes"
-            size="sm"
+            size="md"
+            class="font-semibold"
             @click="openObjectPicker"
           >
             Objekt
