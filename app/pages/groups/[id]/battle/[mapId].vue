@@ -2484,7 +2484,7 @@ const endResize = () => {
   <div v-if="map" class="flex flex-col lg:flex-row gap-3">
     <!-- Hauptbereich: Karte -->
     <div class="space-y-3 min-w-0 flex-1">
-      <div class="flex items-center gap-3 flex-wrap">
+      <div class="parchment-card no-ornament p-2 px-3 flex items-center gap-3 flex-wrap">
         <NuxtLink
           :to="`/groups/${groupId}/battle`"
           class="text-sm text-[var(--color-accent)] hover:underline"
