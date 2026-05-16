@@ -59,6 +59,7 @@ interface BattleMap {
   fogMemory: boolean
   fogRevealed: Array<[number, number]>
   fogExplored: Array<[number, number]>
+  fogBlackout: Array<[number, number]>
   walls: Wall[]
   timeOfDay: TimeOfDay
 }
@@ -1793,13 +1794,15 @@ const initEnd = async () => {
   await saveInitiative(null)
 }
 
-// --- Tool-Mode (Select / Draw / Erase / Fog-Reveal / Fog-Conceal / Wall-Draw / Wall-Erase) ---
+// --- Tool-Mode ---
 type ToolMode =
   | 'select'
   | 'draw'
   | 'erase'
   | 'fog-reveal'
   | 'fog-conceal'
+  | 'fog-blackout'
+  | 'fog-unblackout'
   | 'wall-draw'
   | 'wall-erase'
 const toolMode = ref<ToolMode>('select')
@@ -2104,6 +2107,77 @@ const paintFogCell = (cell: [number, number], reveal: boolean) => {
 const fogBrushActive = ref(false)
 const fogPaintMode = ref<'reveal' | 'conceal'>('reveal')
 
+// --- Blackout-Pinsel (vom DM gemalte 100%-Pitch-Black-Zellen) ---
+const fogBlackoutDirty = ref(false)
+const fogLocalBlackout = ref<Array<[number, number]>>([])
+watch(
+  () => map.value?.fogBlackout,
+  (v: Array<[number, number]> | undefined) => {
+    if (!fogBlackoutDirty.value) {
+      fogLocalBlackout.value = (v ?? []).map((p: [number, number]) => [...p] as [number, number])
+    }
+  },
+  { immediate: true },
+)
+const effectiveFogBlackout = computed<Array<[number, number]>>(() =>
+  fogBlackoutDirty.value ? fogLocalBlackout.value : map.value?.fogBlackout ?? [],
+)
+const fogBlackoutSet = computed<Set<string>>(() => {
+  const s = new Set<string>()
+  for (const [c, r] of effectiveFogBlackout.value) s.add(`${c}|${r}`)
+  return s
+})
+const paintBlackoutCell = (cell: [number, number], blackout: boolean) => {
+  if (!map.value || !isDm.value) return
+  const key = `${cell[0]}|${cell[1]}`
+  const idx = fogLocalBlackout.value.findIndex(([c, r]) => `${c}|${r}` === key)
+  if (blackout && idx === -1) {
+    fogLocalBlackout.value = [...fogLocalBlackout.value, cell]
+    fogBlackoutDirty.value = true
+  } else if (!blackout && idx !== -1) {
+    const next = fogLocalBlackout.value.slice()
+    next.splice(idx, 1)
+    fogLocalBlackout.value = next
+    fogBlackoutDirty.value = true
+  }
+}
+const blackoutBrushActive = ref(false)
+const blackoutPaintMode = ref<'blackout' | 'unblackout'>('blackout')
+const flushBlackoutBrush = async () => {
+  if (!fogBlackoutDirty.value || !map.value) return
+  const payload = fogLocalBlackout.value
+  fogBlackoutDirty.value = false
+  try {
+    await $fetch(`/api/groups/${groupId}/maps/${mapId}`, {
+      method: 'PUT',
+      body: { fogBlackout: payload },
+    })
+    await fetchMap()
+  } catch (e) {
+    fogBlackoutDirty.value = true
+    console.error('Blackout speichern fehlgeschlagen', e)
+  }
+}
+const fogBlackoutCellsList = computed<Array<[number, number]>>(() => {
+  if (!map.value) return []
+  const cols = fogGridCols.value
+  const rows = fogGridRows.value
+  const out: Array<[number, number]> = []
+  for (const [c, r] of effectiveFogBlackout.value) {
+    if (!Number.isFinite(c) || !Number.isFinite(r)) continue
+    if (c < 0 || r < 0 || c >= cols || r >= rows) continue
+    out.push([c, r])
+  }
+  return out
+})
+const clearAllBlackout = async () => {
+  if (!map.value || !isDm.value) return
+  if (!confirm('Alle pitch-black Bereiche entfernen?')) return
+  fogLocalBlackout.value = []
+  fogBlackoutDirty.value = true
+  await flushBlackoutBrush()
+}
+
 const flushFogBrush = async () => {
   if (!fogBrushDirty.value || !map.value) return
   const payload = fogLocalRevealed.value
@@ -2379,6 +2453,17 @@ const onStagePointerDown = (e: PointerEvent) => {
     if (cell) paintFogCell(cell, fogPaintMode.value === 'reveal')
     ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
     e.preventDefault()
+  } else if (toolMode.value === 'fog-blackout' || toolMode.value === 'fog-unblackout') {
+    if (!stageEl.value || !isDm.value) return
+    blackoutBrushActive.value = true
+    blackoutPaintMode.value = toolMode.value === 'fog-blackout' ? 'blackout' : 'unblackout'
+    const rect = stageEl.value.getBoundingClientRect()
+    const localX = (e.clientX - rect.left) / zoom.value
+    const localY = (e.clientY - rect.top) / zoom.value
+    const cell = cellAtPixel(localX, localY)
+    if (cell) paintBlackoutCell(cell, blackoutPaintMode.value === 'blackout')
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    e.preventDefault()
   } else if (toolMode.value === 'wall-draw') {
     if (!stageEl.value || !isDm.value) return
     const rect = stageEl.value.getBoundingClientRect()
@@ -2414,6 +2499,15 @@ const onStagePointerMove = (e: PointerEvent) => {
     if (cell) paintFogCell(cell, fogPaintMode.value === 'reveal')
     return
   }
+  if (blackoutBrushActive.value) {
+    if (!stageEl.value) return
+    const rect = stageEl.value.getBoundingClientRect()
+    const localX = (e.clientX - rect.left) / zoom.value
+    const localY = (e.clientY - rect.top) / zoom.value
+    const cell = cellAtPixel(localX, localY)
+    if (cell) paintBlackoutCell(cell, blackoutPaintMode.value === 'blackout')
+    return
+  }
   if (wallDrawing.value && wallDraft.value) {
     if (!stageEl.value) return
     const rect = stageEl.value.getBoundingClientRect()
@@ -2438,6 +2532,11 @@ const onStagePointerUp = (e: PointerEvent) => {
     flushFogBrush()
     return
   }
+  if (blackoutBrushActive.value) {
+    blackoutBrushActive.value = false
+    flushBlackoutBrush()
+    return
+  }
   if (wallDrawing.value && wallDraft.value) {
     wallDrawing.value = false
     const draft = wallDraft.value
@@ -2456,6 +2555,7 @@ const stageCursor = computed(() => {
   if (toolMode.value === 'draw') return 'crosshair'
   if (toolMode.value === 'erase') return 'cell'
   if (toolMode.value === 'fog-reveal' || toolMode.value === 'fog-conceal') return 'crosshair'
+  if (toolMode.value === 'fog-blackout' || toolMode.value === 'fog-unblackout') return 'crosshair'
   if (toolMode.value === 'wall-draw') return 'crosshair'
   if (toolMode.value === 'wall-erase') return 'cell'
   return pan.active ? 'grabbing' : 'grab'
@@ -2750,6 +2850,37 @@ const endResize = () => {
               @click="fogClearAll"
             >
               Alles zu
+            </UButton>
+            <UButton
+              size="xs"
+              :variant="toolMode === 'fog-blackout' ? 'solid' : 'outline'"
+              :color="toolMode === 'fog-blackout' ? 'primary' : 'neutral'"
+              icon="i-lucide-square"
+              title="100% pitch-black malen (Spieler sehen hier absolut nichts)"
+              @click="toolMode = 'fog-blackout'"
+            >
+              Schwarz
+            </UButton>
+            <UButton
+              size="xs"
+              :variant="toolMode === 'fog-unblackout' ? 'solid' : 'outline'"
+              :color="toolMode === 'fog-unblackout' ? 'primary' : 'neutral'"
+              icon="i-lucide-square-dashed"
+              title="Pitch-Black wegradieren"
+              @click="toolMode = 'fog-unblackout'"
+            >
+              Schwarz weg
+            </UButton>
+            <UButton
+              v-if="fogBlackoutCellsList.length"
+              size="xs"
+              variant="ghost"
+              color="error"
+              icon="i-lucide-trash-2"
+              title="Alle pitch-black Bereiche loeschen"
+              @click="clearAllBlackout"
+            >
+              Schwarz leeren
             </UButton>
             <UButton
               size="xs"
@@ -3283,57 +3414,25 @@ const endResize = () => {
               />
             </svg>
 
-            <!-- Mauer-Schatten (100% Fog of War): blockt Sicht hinter Mauern
-                 komplett. Ein Pixel ist im Mauer-Schatten, wenn er
-                 (a) innerhalb der Reichweite einer Sichtquelle liegt UND
-                 (b) von keiner Sichtquelle aus tatsaechlich sichtbar ist.
-                 Memory- / DM-aufgedeckte Zellen werden ausgenommen, damit
-                 erkundete Bereiche dimm sichtbar bleiben.
-                 Nur fuer Spieler — der DM braucht es nicht. -->
+            <!-- Pitch-Black: vom DM mit dem Schwaerzen-Pinsel gemalte Zellen.
+                 Wird komplett opak schwarz ueber alles gelegt — auch ueber
+                 Sicht, Memory und das normale Fog-Overlay. Spieler sehen
+                 hier absolut nichts. DM sieht's leicht transparent. -->
             <svg
-              v-if="!isDm && imgW && imgH && walls.length && visionPolygons.length && (map.fogEnabled || currentTodOverlay.requiresVisionMask)"
+              v-if="imgW && imgH && fogBlackoutCellsList.length"
               class="absolute inset-0 pointer-events-none"
               :width="imgW"
               :height="imgH"
               :viewBox="`0 0 ${imgW} ${imgH}`"
             >
-              <defs>
-                <mask :id="`wall-shadow-${mapId}`">
-                  <!-- Standard: kein Schatten (schwarz = Layer unsichtbar). -->
-                  <rect width="100%" height="100%" fill="black" />
-                  <!-- In-Reichweite der Sichtquellen: weiss = Schatten-Kandidat. -->
-                  <circle
-                    v-for="vp in visionPolygons"
-                    :key="`shadow-range-${vp.src.id}`"
-                    :cx="vp.src.cx"
-                    :cy="vp.src.cy"
-                    :r="vp.src.radiusPx"
-                    fill="white"
-                  />
-                  <!-- Tatsaechlich sichtbar (Sicht-Polygon) -> kein Schatten. -->
-                  <polygon
-                    v-for="vp in visionPolygons"
-                    :key="`shadow-vis-${vp.src.id}`"
-                    :points="polygonPointsAttr(vp.points)"
-                    fill="black"
-                  />
-                  <!-- Memory-Zellen schlucken den 100%-Schatten ebenfalls. -->
-                  <rect
-                    v-for="cell in fogMemoryCellsList"
-                    :key="`shadow-mem-${cell[0]}|${cell[1]}`"
-                    :x="cell[0] * map.gridSize"
-                    :y="cell[1] * map.gridSize"
-                    :width="map.gridSize"
-                    :height="map.gridSize"
-                    fill="black"
-                  />
-                </mask>
-              </defs>
               <rect
-                width="100%"
-                height="100%"
-                fill="#000"
-                :mask="`url(#wall-shadow-${mapId})`"
+                v-for="cell in fogBlackoutCellsList"
+                :key="`blackout-${cell[0]}|${cell[1]}`"
+                :x="cell[0] * map.gridSize"
+                :y="cell[1] * map.gridSize"
+                :width="map.gridSize"
+                :height="map.gridSize"
+                :fill="isDm ? 'rgba(0,0,0,0.5)' : '#000'"
               />
             </svg>
 

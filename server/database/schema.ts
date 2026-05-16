@@ -253,6 +253,16 @@ export const battleMaps = pgTable(
       .$type<Array<[number, number]>>()
       .default([]),
     /**
+     * Vom DM mit dem Schwaerzen-Pinsel markierte Zellen. Diese werden fuer
+     * Spieler 100% pitch-black gerendert — egal ob sie in Sicht-Reichweite
+     * liegen oder in der Memory sind. Aufdecken (fogRevealed) schlaegt
+     * Schwaerzen NICHT — Blackout hat Vorrang.
+     */
+    fogBlackout: jsonb('fog_blackout')
+      .notNull()
+      .$type<Array<[number, number]>>()
+      .default([]),
+    /**
      * Vom DM gezeichnete Sichtblocker-Mauern. Jede Mauer ist ein Linien-
      * segment in Pixel-Koordinaten am Originalbild. Tokens koennen durch
      * sie hindurch nicht sehen — fuer dynamische Beleuchtung mit
