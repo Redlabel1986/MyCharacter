@@ -8,6 +8,12 @@ import { requireGroupOwner } from '~~/server/utils/group-access'
 import { battleMaps, GRID_TYPES, TIMES_OF_DAY } from '~~/server/database/schema'
 
 const cellTupleSchema = z.tuple([z.number().int(), z.number().int()])
+const wallSchema = z.object({
+  x1: z.number().finite(),
+  y1: z.number().finite(),
+  x2: z.number().finite(),
+  y2: z.number().finite(),
+})
 
 const bodySchema = z.object({
   name: z.string().min(1).max(80).optional(),
@@ -22,6 +28,8 @@ const bodySchema = z.object({
   // Cap auf 50k Zellen, damit niemand einen Riesen-Payload schiebt.
   fogRevealed: z.array(cellTupleSchema).max(50000).optional(),
   fogExplored: z.array(cellTupleSchema).max(50000).optional(),
+  // Cap auf 5000 Mauer-Segmente — mehr braucht keine sinnvolle Karte.
+  walls: z.array(wallSchema).max(5000).optional(),
   timeOfDay: z.enum(TIMES_OF_DAY).optional(),
 })
 

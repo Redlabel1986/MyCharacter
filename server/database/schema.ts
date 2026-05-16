@@ -253,6 +253,16 @@ export const battleMaps = pgTable(
       .$type<Array<[number, number]>>()
       .default([]),
     /**
+     * Vom DM gezeichnete Sichtblocker-Mauern. Jede Mauer ist ein Linien-
+     * segment in Pixel-Koordinaten am Originalbild. Tokens koennen durch
+     * sie hindurch nicht sehen — fuer dynamische Beleuchtung mit
+     * Schattenwurf.
+     */
+    walls: jsonb('walls')
+      .notNull()
+      .$type<Array<{ x1: number; y1: number; x2: number; y2: number }>>()
+      .default([]),
+    /**
      * Tageszeit auf der Karte. Steuert das Beleuchtungs-Overlay
      * (Sonnenaufgang/Tageslicht/Daemmerung/Nacht) und kann ueber
      * NPC-Faehigkeiten Boni oder Malus ergeben.

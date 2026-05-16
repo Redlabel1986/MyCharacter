@@ -112,6 +112,8 @@ export default defineEventHandler(async (event) => {
       .where(eq(mapObjects.mapId, mapId))
 
     const newCells: CellTuple[] = []
+    // Sichtblocker-Mauern auch beim Auto-Explore beachten.
+    const walls = map.walls ?? []
     for (const t of allTokens) {
       if (t.visionRadius <= 0) continue
       // t.x/t.y sind der Token-Mittelpunkt (Client rendert mit translate(-50%, -50%)).
@@ -119,6 +121,7 @@ export default defineEventHandler(async (event) => {
         ...cellsInTokenVision(
           { centerX: t.x, centerY: t.y, visionRadius: t.visionRadius },
           map.gridSize,
+          walls,
         ),
       )
     }
@@ -132,6 +135,7 @@ export default defineEventHandler(async (event) => {
             visionRadius: o.lightRadius,
           },
           map.gridSize,
+          walls,
         ),
       )
     }

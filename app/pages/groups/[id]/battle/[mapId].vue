@@ -20,7 +20,11 @@ import {
 import { audioEmbedUrl, parseAudioUrl, YOUTUBE_NOCOOKIE_HOST } from '~~/shared/audio'
 import { loadYouTubeApi, type YouTubePlayer } from '~/composables/useYouTubeApi'
 import type { NpcAbility } from '~~/shared/npc'
-import { cellsInTokenVision as computeCellsInVision } from '~~/shared/fog'
+import {
+  cellsInTokenVision as computeCellsInVision,
+  computeVisibilityPolygon,
+  type Wall,
+} from '~~/shared/fog'
 import {
   BUILT_IN_MAP_OBJECTS,
   CATEGORY_LABELS,
@@ -55,6 +59,7 @@ interface BattleMap {
   fogMemory: boolean
   fogRevealed: Array<[number, number]>
   fogExplored: Array<[number, number]>
+  walls: Wall[]
   timeOfDay: TimeOfDay
 }
 interface Token {
@@ -1788,9 +1793,101 @@ const initEnd = async () => {
   await saveInitiative(null)
 }
 
-// --- Tool-Mode (Select / Draw / Erase / Fog-Reveal / Fog-Conceal) ---
-type ToolMode = 'select' | 'draw' | 'erase' | 'fog-reveal' | 'fog-conceal'
+// --- Tool-Mode (Select / Draw / Erase / Fog-Reveal / Fog-Conceal / Wall-Draw / Wall-Erase) ---
+type ToolMode =
+  | 'select'
+  | 'draw'
+  | 'erase'
+  | 'fog-reveal'
+  | 'fog-conceal'
+  | 'wall-draw'
+  | 'wall-erase'
 const toolMode = ref<ToolMode>('select')
+
+// --- Sichtblocker-Mauern (DM zeichnet, blocken die dynamische Beleuchtung) ---
+const walls = computed<Wall[]>(() => map.value?.walls ?? [])
+// In-progress wall while dragging.
+const wallDraft = ref<Wall | null>(null)
+const wallDrawing = ref(false)
+const wallSaving = ref(false)
+
+const persistWalls = async (next: Wall[]) => {
+  if (!map.value) return
+  // Optimistisch — UI sofort aktualisieren, Server folgt nach.
+  map.value = { ...map.value, walls: next }
+  wallSaving.value = true
+  try {
+    await $fetch(`/api/groups/${groupId}/maps/${mapId}`, {
+      method: 'PUT',
+      body: { walls: next },
+    })
+    await fetchMap()
+  } catch (e) {
+    console.error('Mauern speichern fehlgeschlagen', e)
+  } finally {
+    wallSaving.value = false
+  }
+}
+
+const addWall = (w: Wall) => {
+  // Mini-Mauern (kuerzer als 5px) verwerfen — vermutlich Fehlklicks.
+  if (Math.hypot(w.x2 - w.x1, w.y2 - w.y1) < 5) return
+  const next = [...walls.value, w]
+  persistWalls(next)
+}
+
+const eraseWallAt = (px: number, py: number) => {
+  if (!walls.value.length) return
+  const HIT_PX = 8 // Pixel-Toleranz fuer Klick auf Mauer.
+  let bestIdx = -1
+  let bestDist = HIT_PX
+  for (let i = 0; i < walls.value.length; i++) {
+    const w = walls.value[i]!
+    const d = distancePointToSegment(px, py, w.x1, w.y1, w.x2, w.y2)
+    if (d < bestDist) {
+      bestDist = d
+      bestIdx = i
+    }
+  }
+  if (bestIdx >= 0) {
+    const next = walls.value.slice()
+    next.splice(bestIdx, 1)
+    persistWalls(next)
+  }
+}
+
+const polygonPointsAttr = (pts: Array<{ x: number; y: number }>): string => {
+  let s = ''
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i]!
+    s += (i > 0 ? ' ' : '') + p.x.toFixed(2) + ',' + p.y.toFixed(2)
+  }
+  return s
+}
+
+const clearAllWalls = async () => {
+  if (!map.value || !isDm.value) return
+  if (!confirm('Alle Sichtblocker-Mauern auf dieser Karte loeschen?')) return
+  await persistWalls([])
+}
+
+// Punkt-zu-Segment-Distanz (fuer Klick-Hit-Test auf Mauern).
+const distancePointToSegment = (
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): number => {
+  const dx = bx - ax
+  const dy = by - ay
+  const lenSq = dx * dx + dy * dy
+  if (lenSq < 1e-6) return Math.hypot(px - ax, py - ay)
+  let t = ((px - ax) * dx + (py - ay) * dy) / lenSq
+  t = Math.max(0, Math.min(1, t))
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+}
 
 // --- Fog of War ---
 const fogCellSize = computed(() => map.value?.gridSize ?? 50)
@@ -1802,37 +1899,76 @@ const fogGridRows = computed(() =>
   imgH.value && fogCellSize.value ? Math.ceil(imgH.value / fogCellSize.value) : 0,
 )
 
+// Aktuelle Sichtquellen (Token + Objekt-Lichter), die zum Spieler-Sichtfeld
+// beitragen. Wird sowohl fuer die Zell-basierte Memory-Logik als auch fuer
+// das weiche Radial-Gradient-Overlay verwendet.
+interface VisionSource {
+  id: string
+  cx: number
+  cy: number
+  /** Radius in Pixeln (visionRadius * gridSize + halfCell, wie Zell-Sicht). */
+  radiusPx: number
+  /** Radius in Zellen (fuer Memory-Cells). */
+  radiusCells: number
+}
+const visionSources = computed<VisionSource[]>(() => {
+  if (!map.value || !fogCellSize.value) return []
+  const g = fogCellSize.value
+  const uid = user.value?.id
+  const out: VisionSource[] = []
+  for (const t of tokens.value) {
+    if (t.visionRadius <= 0) continue
+    if (!isDm.value && uid !== undefined && t.ownerUserId !== uid) continue
+    out.push({
+      id: `tok-${t.id}`,
+      cx: t.x,
+      cy: t.y,
+      // +0.5 Zelle Radius, damit die Sicht symmetrisch um den Token-Mittelpunkt
+      // liegt (passt zur Zell-Sicht-Schwelle r + 0.5 in fog.ts).
+      radiusPx: (t.visionRadius + 0.5) * g,
+      radiusCells: t.visionRadius,
+    })
+  }
+  for (const o of objects.value) {
+    if (o.lightRadius <= 0) continue
+    out.push({
+      id: `obj-${o.id}`,
+      cx: o.x + (displayW(o) * g) / 2,
+      cy: o.y + (displayH(o) * g) / 2,
+      radiusPx: (o.lightRadius + 0.5) * g,
+      radiusCells: o.lightRadius,
+    })
+  }
+  return out
+})
+
+// Sicht-Polygone fuer das weiche Radial-Gradient-Overlay: pro Quelle ein
+// Polygon, das die Mauern (Wand-Schatten) beruecksichtigt.
+interface VisionPolygon {
+  src: VisionSource
+  points: Array<{ x: number; y: number }>
+}
+const visionPolygons = computed<VisionPolygon[]>(() => {
+  if (!map.value?.fogEnabled) return []
+  const ws = walls.value
+  return visionSources.value.map((src: VisionSource) => ({
+    src,
+    points: computeVisibilityPolygon({ x: src.cx, y: src.cy }, src.radiusPx, ws),
+  }))
+})
+
 // Zellen, die durch aktuelle Token-Sicht + Objekt-Lichtquellen live
-// aufgedeckt sind (Fackel, Feuerstelle, Laterne …).
-// Per-Spieler-Sicht: Jeder Spieler sieht nur den Sichtbereich seiner eigenen
-// Token (plus Lichtquellen, die fuer alle gelten). Der DM sieht alles.
+// aufgedeckt sind (mit Mauern als Sichtblocker).
 const fogCurrentVisionSet = computed(() => {
   const set = new Set<string>()
   if (!map.value || !fogCellSize.value) return set
   const g = fogCellSize.value
-  const uid = user.value?.id
-  for (const t of tokens.value) {
-    if (t.visionRadius <= 0) continue
-    // Spieler beziehen Sicht nur aus eigenen Token; DM sieht aus allen.
-    if (!isDm.value && uid !== undefined && t.ownerUserId !== uid) continue
-    // t.x/t.y sind der visuelle Token-Mittelpunkt (CSS translate(-50%, -50%)).
+  const ws = walls.value
+  for (const src of visionSources.value) {
     const cells = computeCellsInVision(
-      { centerX: t.x, centerY: t.y, visionRadius: t.visionRadius },
+      { centerX: src.cx, centerY: src.cy, visionRadius: src.radiusCells },
       g,
-    )
-    for (const [c, r] of cells) set.add(`${c}|${r}`)
-  }
-  // Lichtquellen erhellen Zellen fuer alle Betrachter gleichermassen
-  // (z.B. Lagerfeuer 2x2 um sich herum sichtbar fuer jeden).
-  for (const o of objects.value) {
-    if (o.lightRadius <= 0) continue
-    const cells = computeCellsInVision(
-      {
-        centerX: o.x + (displayW(o) * g) / 2,
-        centerY: o.y + (displayH(o) * g) / 2,
-        visionRadius: o.lightRadius,
-      },
-      g,
+      ws,
     )
     for (const [c, r] of cells) set.add(`${c}|${r}`)
   }
@@ -1913,6 +2049,31 @@ const fogVisibleCellsList = computed<Array<[number, number]>>(() => {
     if (!Number.isFinite(c) || !Number.isFinite(r)) continue
     if (c < 0 || r < 0) continue
     if (c >= cols || r >= rows) continue
+    out.push([c, r])
+  }
+  return out
+})
+
+// Memory-Zellen: DM-Pinsel + (optional) bereits gesehene Zellen. NICHT die
+// aktuelle dynamische Sicht — die malt das weiche Polygon. Memory wird als
+// gedimmtes Grau gerendert: der Spieler weiss "war hier mal sichtbar",
+// sieht aber kein lebendiges Detail mehr.
+const fogMemoryCellsList = computed<Array<[number, number]>>(() => {
+  if (!map.value) return []
+  const cols = fogGridCols.value
+  const rows = fogGridRows.value
+  const set = new Set<string>()
+  for (const [c, r] of effectiveFogRevealed.value) set.add(`${c}|${r}`)
+  if (map.value.fogMemory) {
+    for (const [c, r] of map.value.fogExplored ?? []) set.add(`${c}|${r}`)
+  }
+  const out: Array<[number, number]> = []
+  for (const key of set) {
+    const parts = key.split('|')
+    const c = Number(parts[0])
+    const r = Number(parts[1])
+    if (!Number.isFinite(c) || !Number.isFinite(r)) continue
+    if (c < 0 || r < 0 || c >= cols || r >= rows) continue
     out.push([c, r])
   }
   return out
@@ -2007,6 +2168,22 @@ const nightVisibleCellsList = computed<Array<[number, number]>>(() => {
     const parts = key.split('|')
     const c = Number(parts[0])
     const r = Number(parts[1])
+    if (!Number.isFinite(c) || !Number.isFinite(r)) continue
+    if (c < 0 || r < 0 || c >= cols || r >= rows) continue
+    out.push([c, r])
+  }
+  return out
+})
+
+// Nacht-Memory: nur die DM-Pinsel-Reveals (keine fogExplored, da Nacht
+// quasi "frische" Beleuchtung ist). Werden gedimmt unter der Nacht-Schicht
+// dargestellt — Schatten bleiben staerker als bei Fog-of-War-Memory.
+const nightMemoryCellsList = computed<Array<[number, number]>>(() => {
+  if (currentTimeOfDay.value !== 'night' || !map.value) return []
+  const cols = fogGridCols.value
+  const rows = fogGridRows.value
+  const out: Array<[number, number]> = []
+  for (const [c, r] of effectiveFogRevealed.value) {
     if (!Number.isFinite(c) || !Number.isFinite(r)) continue
     if (c < 0 || r < 0 || c >= cols || r >= rows) continue
     out.push([c, r])
@@ -2202,6 +2379,22 @@ const onStagePointerDown = (e: PointerEvent) => {
     if (cell) paintFogCell(cell, fogPaintMode.value === 'reveal')
     ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
     e.preventDefault()
+  } else if (toolMode.value === 'wall-draw') {
+    if (!stageEl.value || !isDm.value) return
+    const rect = stageEl.value.getBoundingClientRect()
+    const localX = (e.clientX - rect.left) / zoom.value
+    const localY = (e.clientY - rect.top) / zoom.value
+    wallDrawing.value = true
+    wallDraft.value = { x1: Math.round(localX), y1: Math.round(localY), x2: Math.round(localX), y2: Math.round(localY) }
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    e.preventDefault()
+  } else if (toolMode.value === 'wall-erase') {
+    if (!stageEl.value || !isDm.value) return
+    const rect = stageEl.value.getBoundingClientRect()
+    const localX = (e.clientX - rect.left) / zoom.value
+    const localY = (e.clientY - rect.top) / zoom.value
+    eraseWallAt(localX, localY)
+    e.preventDefault()
   } else if (toolMode.value === 'select') {
     startPan(e)
   }
@@ -2221,6 +2414,14 @@ const onStagePointerMove = (e: PointerEvent) => {
     if (cell) paintFogCell(cell, fogPaintMode.value === 'reveal')
     return
   }
+  if (wallDrawing.value && wallDraft.value) {
+    if (!stageEl.value) return
+    const rect = stageEl.value.getBoundingClientRect()
+    const localX = (e.clientX - rect.left) / zoom.value
+    const localY = (e.clientY - rect.top) / zoom.value
+    wallDraft.value = { ...wallDraft.value, x2: Math.round(localX), y2: Math.round(localY) }
+    return
+  }
   if (pan.active) {
     updatePan(e)
     return
@@ -2237,6 +2438,13 @@ const onStagePointerUp = (e: PointerEvent) => {
     flushFogBrush()
     return
   }
+  if (wallDrawing.value && wallDraft.value) {
+    wallDrawing.value = false
+    const draft = wallDraft.value
+    wallDraft.value = null
+    addWall(draft)
+    return
+  }
   if (pan.active) {
     endPan()
     return
@@ -2248,6 +2456,8 @@ const stageCursor = computed(() => {
   if (toolMode.value === 'draw') return 'crosshair'
   if (toolMode.value === 'erase') return 'cell'
   if (toolMode.value === 'fog-reveal' || toolMode.value === 'fog-conceal') return 'crosshair'
+  if (toolMode.value === 'wall-draw') return 'crosshair'
+  if (toolMode.value === 'wall-erase') return 'cell'
   return pan.active ? 'grabbing' : 'grab'
 })
 
@@ -2531,6 +2741,37 @@ const endResize = () => {
               @click="fogClearAll"
             >
               Alles zu
+            </UButton>
+            <UButton
+              size="xs"
+              :variant="toolMode === 'wall-draw' ? 'solid' : 'outline'"
+              :color="toolMode === 'wall-draw' ? 'primary' : 'neutral'"
+              icon="i-lucide-brick-wall"
+              title="Sichtblocker-Mauer ziehen (Spieler koennen nicht durchsehen)"
+              @click="toolMode = 'wall-draw'"
+            >
+              Mauer
+            </UButton>
+            <UButton
+              size="xs"
+              :variant="toolMode === 'wall-erase' ? 'solid' : 'outline'"
+              :color="toolMode === 'wall-erase' ? 'primary' : 'neutral'"
+              icon="i-lucide-square-x"
+              title="Mauer anklicken zum Loeschen"
+              @click="toolMode = 'wall-erase'"
+            >
+              Mauer weg
+            </UButton>
+            <UButton
+              v-if="walls.length"
+              size="xs"
+              variant="ghost"
+              color="error"
+              icon="i-lucide-trash-2"
+              title="Alle Mauern loeschen"
+              @click="clearAllWalls"
+            >
+              Mauern leeren ({{ walls.length }})
             </UButton>
           </template>
         </div>
@@ -2911,9 +3152,13 @@ const endResize = () => {
               </div>
             </div>
 
-            <!-- Fog of War: SVG-Mask schneidet sichtbare Zellen aus dem Schleier
-                 heraus. DM sieht nur eine schwache Toenung; Spieler sehen einen
-                 echten Schleier ueber verdeckten Bereichen. -->
+            <!-- Fog of War: dynamische Beleuchtung. Pro Sichtquelle wird ein
+                 Sicht-Polygon (von Mauern geclippt) mit einem radialen Verlauf
+                 gefuellt — dadurch ist die Sicht RUND und faedet von innen
+                 (klar) nach aussen (Schleier) weich aus, ohne harte Kante.
+                 Memory- und DM-manuell-aufgedeckte Zellen werden als dimmes
+                 Grau dargestellt — der DM weiss, was bekannt war, sieht es
+                 aber nicht in voller Helligkeit. -->
             <svg
               v-if="map.fogEnabled && imgW && imgH"
               class="absolute inset-0 pointer-events-none"
@@ -2922,30 +3167,53 @@ const endResize = () => {
               :viewBox="`0 0 ${imgW} ${imgH}`"
             >
               <defs>
+                <radialGradient
+                  v-for="vp in visionPolygons"
+                  :key="`grad-${vp.src.id}`"
+                  :id="`fog-vision-${mapId}-${vp.src.id}`"
+                  gradientUnits="userSpaceOnUse"
+                  :cx="vp.src.cx"
+                  :cy="vp.src.cy"
+                  :r="vp.src.radiusPx"
+                >
+                  <stop offset="0" stop-color="black" stop-opacity="1" />
+                  <stop offset="0.55" stop-color="black" stop-opacity="0.95" />
+                  <stop offset="0.85" stop-color="black" stop-opacity="0.45" />
+                  <stop offset="1" stop-color="black" stop-opacity="0" />
+                </radialGradient>
                 <mask :id="fogOverlayId">
+                  <!-- Standard: alles voll vernebelt (weiss). -->
                   <rect width="100%" height="100%" fill="white" />
+                  <!-- Memory + DM-Pinsel: dimme Grauzellen (Schleier teilweise weg). -->
                   <rect
-                    v-for="cell in fogVisibleCellsList"
-                    :key="`${cell[0]}|${cell[1]}`"
+                    v-for="cell in fogMemoryCellsList"
+                    :key="`mem-${cell[0]}|${cell[1]}`"
                     :x="cell[0] * map.gridSize"
                     :y="cell[1] * map.gridSize"
                     :width="map.gridSize"
                     :height="map.gridSize"
-                    fill="black"
+                    fill="#666"
+                  />
+                  <!-- Aktive Sicht: weiches rundes Sicht-Polygon. -->
+                  <polygon
+                    v-for="vp in visionPolygons"
+                    :key="`poly-${vp.src.id}`"
+                    :points="polygonPointsAttr(vp.points)"
+                    :fill="`url(#fog-vision-${mapId}-${vp.src.id})`"
                   />
                 </mask>
               </defs>
               <rect
                 width="100%"
                 height="100%"
-                :fill="isDm ? 'rgba(20, 20, 60, 0.22)' : 'rgba(8, 10, 22, 0.7)'"
+                :fill="isDm ? 'rgba(20, 20, 60, 0.22)' : 'rgba(8, 10, 22, 0.78)'"
                 :mask="`url(#${fogOverlayId})`"
               />
             </svg>
 
             <!-- Tageszeit-Beleuchtung: legt einen Farbton ueber die Karte.
-                 Tags warm/hell, abends roetlich, nachts dunkel mit Mask-Cut-out
-                 fuer Token-Sicht + Lichtquellen (wie Fog of War). -->
+                 Tags warm/hell, abends roetlich, nachts dunkel mit weichem
+                 runden Cut-out fuer Token-Sicht + Lichtquellen. -->
             <div
               v-if="currentTodOverlay.tintGradient && imgW && imgH"
               class="absolute inset-0 pointer-events-none"
@@ -2964,16 +3232,37 @@ const endResize = () => {
               :viewBox="`0 0 ${imgW} ${imgH}`"
             >
               <defs>
+                <radialGradient
+                  v-for="vp in visionPolygons"
+                  :key="`night-grad-${vp.src.id}`"
+                  :id="`night-vision-${mapId}-${vp.src.id}`"
+                  gradientUnits="userSpaceOnUse"
+                  :cx="vp.src.cx"
+                  :cy="vp.src.cy"
+                  :r="vp.src.radiusPx"
+                >
+                  <stop offset="0" stop-color="black" stop-opacity="1" />
+                  <stop offset="0.55" stop-color="black" stop-opacity="0.95" />
+                  <stop offset="0.85" stop-color="black" stop-opacity="0.45" />
+                  <stop offset="1" stop-color="black" stop-opacity="0" />
+                </radialGradient>
                 <mask :id="nightMaskId">
                   <rect width="100%" height="100%" fill="white" />
+                  <!-- DM-Pinsel-Aufdeckung erinnert sich auch im Dunkeln (dim grau). -->
                   <rect
-                    v-for="cell in nightVisibleCellsList"
-                    :key="`night-${cell[0]}|${cell[1]}`"
+                    v-for="cell in nightMemoryCellsList"
+                    :key="`night-mem-${cell[0]}|${cell[1]}`"
                     :x="cell[0] * map.gridSize"
                     :y="cell[1] * map.gridSize"
                     :width="map.gridSize"
                     :height="map.gridSize"
-                    fill="black"
+                    fill="#555"
+                  />
+                  <polygon
+                    v-for="vp in visionPolygons"
+                    :key="`night-poly-${vp.src.id}`"
+                    :points="polygonPointsAttr(vp.points)"
+                    :fill="`url(#night-vision-${mapId}-${vp.src.id})`"
                   />
                 </mask>
               </defs>
@@ -2982,6 +3271,42 @@ const endResize = () => {
                 height="100%"
                 :fill="nightDarkColor"
                 :mask="`url(#${nightMaskId})`"
+              />
+            </svg>
+
+            <!-- Sichtblocker-Mauern: nur dem DM sichtbar (rote duenne Linien).
+                 Spieler-View blendet sie aus — die Wirkung (kein Durchschauen)
+                 sehen sie indirekt durch die Beleuchtung. -->
+            <svg
+              v-if="isDm && imgW && imgH && (walls.length || wallDraft)"
+              class="absolute inset-0 pointer-events-none"
+              :width="imgW"
+              :height="imgH"
+              :viewBox="`0 0 ${imgW} ${imgH}`"
+            >
+              <g
+                v-for="(w, i) in walls"
+                :key="`wall-${i}`"
+              >
+                <!-- Aussen-Glow, damit Mauern auf dunklem + hellem Untergrund sichtbar bleiben. -->
+                <line
+                  :x1="w.x1" :y1="w.y1" :x2="w.x2" :y2="w.y2"
+                  stroke="rgba(0,0,0,0.65)" stroke-width="5" stroke-linecap="round"
+                />
+                <line
+                  :x1="w.x1" :y1="w.y1" :x2="w.x2" :y2="w.y2"
+                  :stroke="toolMode === 'wall-erase' ? '#ef4444' : '#f97316'"
+                  stroke-width="2.5" stroke-linecap="round"
+                  :class="toolMode === 'wall-erase' ? 'cursor-pointer' : ''"
+                />
+              </g>
+              <!-- In-Progress-Mauer (waehrend Drag). -->
+              <line
+                v-if="wallDraft"
+                :x1="wallDraft.x1" :y1="wallDraft.y1"
+                :x2="wallDraft.x2" :y2="wallDraft.y2"
+                stroke="#fbbf24" stroke-width="2.5" stroke-linecap="round"
+                stroke-dasharray="6 4"
               />
             </svg>
           </div>

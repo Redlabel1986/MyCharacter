@@ -298,6 +298,10 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     ALTER TABLE battle_maps ADD COLUMN IF NOT EXISTS fog_explored JSONB NOT NULL DEFAULT '[]'::jsonb
   `)
+  // Sichtblocker-Mauern: vom DM gezeichnete Linien, die Token-Sicht blocken.
+  await db.execute(sql`
+    ALTER TABLE battle_maps ADD COLUMN IF NOT EXISTS walls JSONB NOT NULL DEFAULT '[]'::jsonb
+  `)
   // Battle-Map: Tageszeit (Beleuchtungs-Overlay + Faehigkeits-Boni).
   await db.execute(sql`
     ALTER TABLE battle_maps ADD COLUMN IF NOT EXISTS time_of_day TEXT NOT NULL DEFAULT 'noon'

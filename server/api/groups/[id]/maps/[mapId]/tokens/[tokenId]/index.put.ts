@@ -194,6 +194,9 @@ export default defineEventHandler(async (event) => {
       .where(eq(battleTokens.mapId, mapId))
 
     const newCells: CellTuple[] = []
+    // Mauern blockieren auch das Auto-Explore — Memory speichert nur Zellen,
+    // die der Token tatsaechlich sehen konnte (nicht hinter Sichtblockern).
+    const walls = map.walls ?? []
     for (const t of allTokens) {
       if (t.visionRadius <= 0) continue
       // t.x/t.y sind der Token-Mittelpunkt (Client rendert mit translate(-50%, -50%)).
@@ -201,6 +204,7 @@ export default defineEventHandler(async (event) => {
         ...cellsInTokenVision(
           { centerX: t.x, centerY: t.y, visionRadius: t.visionRadius },
           map.gridSize,
+          walls,
         ),
       )
     }
