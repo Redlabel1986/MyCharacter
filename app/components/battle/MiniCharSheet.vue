@@ -64,6 +64,13 @@ const props = defineProps<{
   groupId: number
   mapId: number
   tokens: Token[]
+  /**
+   * Alle (sichtbaren) Tokens auf der Karte — fuer das Ziel-Dropdown beim
+   * Schadens-/Heilungswurf. Wird vom Battle-Map-Page mit `tokens` der Karte
+   * versorgt. Wenn nicht gesetzt, faellt das Dropdown auf die eigenen Tokens
+   * zurueck.
+   */
+  allTokens?: Token[]
   timeOfDay?: TimeOfDay
 }>()
 
@@ -394,6 +401,31 @@ const damageLabel = ref<string>('Schaden')
 const damageSending = ref(false)
 const damageError = ref<string | null>(null)
 const damageSuccess = ref(false)
+// Modus: Schaden zieht HP ab, Heilung addiert. Ziel-Token wird unten gewaehlt.
+const damageMode = ref<'damage' | 'heal'>('damage')
+// Ziel-Token (vom User explizit gewaehlt). 0 = kein Ziel (nur Wurf, keine
+// automatische HP-Verrechnung).
+const damageTargetId = ref<number>(0)
+const damageApplyResult = ref<string | null>(null)
+
+// Vollstaendige Token-Liste: bevorzugt die vom Parent gelieferte allTokens-
+// Prop (alle Spieler + NPCs auf der Karte), fallback auf die eigenen Tokens.
+const damageTargetTokens = computed<Token[]>(() => props.allTokens ?? props.tokens)
+const damageTargetOptions = computed(() => [
+  { label: '— kein Ziel (nur würfeln) —', value: 0 },
+  ...damageTargetTokens.value.map((t: Token) => {
+    const hpStr = t.hp !== null && t.hpMax ? ` · ${t.hp}/${t.hpMax}` : ''
+    return { label: `${t.name}${hpStr}`, value: t.id }
+  }),
+])
+
+// Bei Tab-Wechsel auch das Damage-Ziel zuruecksetzen, damit nicht aus Versehen
+// ein altes Ziel uebernommen wird.
+watch(selectedTokenId, () => {
+  damageMode.value = 'damage'
+  damageTargetId.value = 0
+  damageApplyResult.value = null
+})
 
 const damageParsed = computed<{ count: number; sides: number; mod: number } | null>(() => {
   const m = damageFormula.value.trim().match(/^(\d+)\s*[dwDW]\s*(\d+)\s*([+-]\s*\d+)?$/)
@@ -413,22 +445,42 @@ const damagePreview = computed(() => {
   return `${p.count}d${p.sides}${sign}`
 })
 
+interface RollMessagePayload {
+  dice: number[]
+  modifier?: number
+  /** Bei freien Wuerfen liefert der Server hier die Endsumme. */
+  target?: number
+}
+interface RollMessage {
+  message: { payload: RollMessagePayload | null }
+}
+
 const rollDamage = async () => {
   const parsed = damageParsed.value
   if (!parsed || !activeToken.value) return
   damageSending.value = true
   damageError.value = null
   damageSuccess.value = false
+  damageApplyResult.value = null
+  const targetId = damageTargetId.value
+  const target = targetId
+    ? damageTargetTokens.value.find((t: Token) => t.id === targetId) ?? null
+    : null
   try {
     const npcSys = activeToken.value.system
     const sys: 'dnd5e' | 'dnd2024' | 'dsa5' | 'dsa41' | 'htbah' =
       character.value?.system as 'dnd5e' | 'dnd2024' | 'dsa5' | 'dsa41' | 'htbah'
       ?? (npcSys === 'dnd' ? 'dnd5e' : npcSys === 'dsa5' ? 'dsa5' : 'htbah')
-    const labelBase = damageLabel.value.trim() || 'Schaden'
+    const isHeal = damageMode.value === 'heal'
+    const baseLabel = damageLabel.value.trim() || (isHeal ? 'Heilung' : 'Schaden')
+    // Ziel-Suffix ins Label, damit im Chat sofort sichtbar ist, gegen wen der
+    // Wurf gefuehrt wurde: "Schaden → Goblin #2" / "Heilung → Tarya".
+    const targetSuffix = target ? ` ${isHeal ? '→' : '→'} ${target.name}` : ''
+    const labelBase = `${baseLabel}${targetSuffix}`
     // Bei NPC-Token (kein Charakter) den Token-Namen mit ins Label, damit er
     // im Chat erkennbar bleibt — sonst nimmt rollFree nur die character-Daten.
     const label = character.value ? labelBase : `${activeToken.value.name}: ${labelBase}`
-    await $fetch(`/api/groups/${props.groupId}/rolls`, {
+    const res = (await $fetch(`/api/groups/${props.groupId}/rolls`, {
       method: 'POST',
       body: {
         kind: 'free',
@@ -439,7 +491,50 @@ const rollDamage = async () => {
         system: sys,
         characterId: character.value?.id,
       },
-    })
+    })) as RollMessage
+
+    // Schaden / Heilung direkt am Ziel-Token verrechnen.
+    if (target) {
+      const payload = res.message?.payload
+      let total: number | null = null
+      if (payload) {
+        if (typeof payload.target === 'number') {
+          total = payload.target
+        } else if (Array.isArray(payload.dice)) {
+          total =
+            payload.dice.reduce((a: number, b: number) => a + b, 0) +
+            (payload.modifier ?? 0)
+        }
+      }
+      if (total === null) {
+        damageApplyResult.value = `Wurf gepostet, aber Summe nicht ermittelbar — HP nicht angepasst.`
+      } else if (target.hp === null || target.hpMax === null || target.hpMax === undefined) {
+        damageApplyResult.value =
+          `Wurf: ${total} — Ziel hat keine HP gepflegt, daher nicht automatisch angerechnet.`
+      } else {
+        const oldHp = target.hp ?? 0
+        const max = target.hpMax ?? oldHp
+        const newHp = isHeal
+          ? Math.min(max, oldHp + total)
+          : Math.max(0, oldHp - total)
+        try {
+          await $fetch(
+            `/api/groups/${props.groupId}/maps/${props.mapId}/tokens/${target.id}`,
+            { method: 'PUT', body: { hp: newHp } },
+          )
+          target.hp = newHp
+          damageApplyResult.value = isHeal
+            ? `+${total} HP an ${target.name} (${oldHp} → ${newHp}/${max}).`
+            : `−${total} HP an ${target.name} (${oldHp} → ${newHp}/${max}).`
+          emit('token-updated')
+        } catch (err: unknown) {
+          damageApplyResult.value =
+            (err as { statusMessage?: string }).statusMessage
+            ?? 'HP konnten nicht aktualisiert werden.'
+        }
+      }
+    }
+
     damageSuccess.value = true
     damageFormula.value = ''
     setTimeout(() => (damageSuccess.value = false), 2200)
@@ -1004,9 +1099,42 @@ const onImageError = (tokenId: number) => {
         Für dieses Regelwerk ist (noch) kein Würfler eingebaut — der volle Bogen unten zeigt alle Werte.
       </div>
 
-      <!-- Schaden-Wuerfler: freier NdM+X-Wurf, fuer Charakter- und NPC-Tokens. -->
+      <!-- Schaden-/Heilungs-Wuerfler: freier NdM+X-Wurf, optional gegen ein
+           Ziel-Token. Wenn ein Ziel gewaehlt ist, wird das Ergebnis direkt von
+           seinen HP abgezogen (Schaden) oder addiert (Heilung). -->
       <div class="space-y-2 border-t border-parchment-700/30 pt-3">
-        <div class="text-[10px] uppercase tracking-widest text-ink-300">Schaden würfeln</div>
+        <div class="text-[10px] uppercase tracking-widest text-ink-300">
+          {{ damageMode === 'heal' ? 'Heilung' : 'Schaden' }} würfeln
+        </div>
+        <!-- Modus + Ziel -->
+        <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+          <UFormField label="Modus" class="sm:col-span-4">
+            <USelect
+              v-model="damageMode"
+              :items="[
+                { label: '⚔ Schaden', value: 'damage' },
+                { label: '✚ Heilung', value: 'heal' },
+              ]"
+              value-key="value"
+              size="sm"
+              class="w-full"
+            />
+          </UFormField>
+          <UFormField
+            label="Ziel"
+            class="sm:col-span-8"
+            help="Wähle den Charakter/NPC, dem der Wurf angerechnet wird."
+          >
+            <USelect
+              v-model="damageTargetId"
+              :items="damageTargetOptions"
+              value-key="value"
+              size="sm"
+              class="w-full"
+            />
+          </UFormField>
+        </div>
+        <!-- Formel + Bezeichnung + Wuerfel-Button -->
         <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
           <UFormField label="Würfel" class="sm:col-span-4" help="z.B. 2d6, 4w8+3, 1d20−1">
             <UInput
@@ -1017,11 +1145,16 @@ const onImageError = (tokenId: number) => {
             />
           </UFormField>
           <UFormField label="Bezeichnung" class="sm:col-span-4">
-            <UInput v-model="damageLabel" placeholder="Schaden" size="sm" :maxlength="60" />
+            <UInput
+              v-model="damageLabel"
+              :placeholder="damageMode === 'heal' ? 'Heilung' : 'Schaden'"
+              size="sm"
+              :maxlength="60"
+            />
           </UFormField>
           <UButton
-            color="primary"
-            icon="i-lucide-swords"
+            :color="damageMode === 'heal' ? 'success' : 'primary'"
+            :icon="damageMode === 'heal' ? 'i-lucide-heart-pulse' : 'i-lucide-swords'"
             :disabled="!damageParsed || damageSending"
             :loading="damageSending"
             class="sm:col-span-4 roll-cta"
@@ -1045,7 +1178,16 @@ const onImageError = (tokenId: number) => {
           Wirft <code class="font-semibold">{{ damagePreview }}</code> in den Gruppen-Chat.
         </p>
         <p v-if="damageError" class="text-xs text-red-700">{{ damageError }}</p>
-        <p v-if="damageSuccess" class="text-xs text-emerald-700">✓ Schaden in Gruppen-Chat gepostet</p>
+        <p v-if="damageSuccess" class="text-xs text-emerald-700">
+          ✓ {{ damageMode === 'heal' ? 'Heilung' : 'Schaden' }} in Gruppen-Chat gepostet
+        </p>
+        <p
+          v-if="damageApplyResult"
+          class="text-xs"
+          :class="damageMode === 'heal' ? 'text-emerald-700' : 'text-red-700'"
+        >
+          {{ damageApplyResult }}
+        </p>
       </div>
 
       <!-- Klappbares Inventar / Beschreibung -->

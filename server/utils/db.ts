@@ -334,6 +334,11 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     ALTER TABLE battle_tokens ADD COLUMN IF NOT EXISTS hp_visible_to_players BOOLEAN NOT NULL DEFAULT TRUE
   `)
+  // Token-Bewegungsfeld in Rasterzellen (Chebyshev). Default 8 — wird vom DM
+  // pro Token im Edit-Modal anpassbar gesetzt.
+  await db.execute(sql`
+    ALTER TABLE battle_tokens ADD COLUMN IF NOT EXISTS move_range INTEGER NOT NULL DEFAULT 8
+  `)
   // Token-Bilder-Galerie: weitere Bilder (z.B. Verwandlungen, Zustaende),
   // die in der Info-Karte als Thumbnail-Galerie gezeigt werden.
   await db.execute(sql`

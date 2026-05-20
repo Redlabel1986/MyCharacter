@@ -84,6 +84,8 @@ interface Token {
   npcAbilities: NpcAbility[]
   visionRadius: number
   hpVisibleToPlayers: boolean
+  /** Bewegungsfeld in Rasterzellen (Chebyshev). Default 8. */
+  moveRange: number
 }
 interface Drawing {
   id: number
@@ -389,11 +391,18 @@ const gridShouldRender = computed(() => {
 })
 
 // --- Snap ---
+// Quadratisches Raster: snappt auf den Zell-MITTELPUNKT, damit das Token-Bild
+// (das per translate(-50%, -50%) zentriert wird) sauber im Quadrat sitzt und
+// nicht auf der Gitterlinie zwischen zwei Zellen liegt. Hex-Raster snappt
+// schon immer auf das Zentrum.
 const snap = (x: number, y: number) => {
   if (!map.value) return { x, y }
   const g = map.value.gridSize
   if (map.value.gridType === 'square') {
-    return { x: Math.round(x / g) * g, y: Math.round(y / g) * g }
+    return {
+      x: Math.floor(x / g) * g + g / 2,
+      y: Math.floor(y / g) * g + g / 2,
+    }
   }
   const s = g / 2
   const colStep = 1.5 * s
@@ -410,6 +419,49 @@ const stageEl = ref<HTMLElement | null>(null)
 const dragStarted = ref(false)
 const dragOffset = ref({ x: 0, y: 0 })
 const dragStartPx = ref({ x: 0, y: 0 })
+// Start-Position des Tokens beim Drag-Anfang (in Karten-Pixeln). Wird
+// gespeichert, damit wir die Bewegung auf moveRange-Zellen Chebyshev-Distanz
+// vom Start-Tile begrenzen koennen.
+const dragStartTokenPos = ref<{ x: number; y: number; moveRange: number } | null>(null)
+
+// Bewegungsfeld-Overlay: zeigt waehrend des Drag-Vorgangs einen
+// transparenten Kasten um den Start-Punkt, der die maximal erreichbaren Zellen
+// markiert. Wird nur angezeigt, wenn der aktuelle User den Token bewegt und
+// moveRange > 0 ist (DM darf frei verschieben, kriegt aber trotzdem die
+// Visualisierung — fuer Klarheit beim Tabletop-Spiel).
+const moveRangeOverlay = computed<{ x: number; y: number; size: number } | null>(() => {
+  const start = dragStartTokenPos.value
+  if (!start || !map.value || start.moveRange <= 0) return null
+  const g = map.value.gridSize
+  if (g <= 0) return null
+  const halfSize = start.moveRange * g + g / 2
+  return {
+    x: start.x - halfSize,
+    y: start.y - halfSize,
+    size: 2 * halfSize,
+  }
+})
+
+// Hilfsfunktion: Token-Position auf das Bewegungsfeld (Chebyshev) um den
+// Start-Punkt herum klemmen. Misst in Zellen, ausgehend vom Start-Tile.
+// Bei Square-Grid passt das exakt zur snap()-Mittelpunkt-Logik; im Hex-Grid
+// nutzen wir die gleiche Logik in Naeherung (gridSize-basierte Distanz).
+const clampToMoveRange = (
+  x: number,
+  y: number,
+  start: { x: number; y: number; moveRange: number },
+): { x: number; y: number } => {
+  if (!map.value || start.moveRange <= 0) return { x, y }
+  const g = map.value.gridSize
+  if (g <= 0) return { x, y }
+  const maxPx = start.moveRange * g
+  const dx = x - start.x
+  const dy = y - start.y
+  // Chebyshev-Box (max-Norm): erlaubt diagonale Bewegung gleich teuer wie gerade.
+  const clampedDx = Math.max(-maxPx, Math.min(maxPx, dx))
+  const clampedDy = Math.max(-maxPx, Math.min(maxPx, dy))
+  return { x: start.x + clampedDx, y: start.y + clampedDy }
+}
 
 const canMoveToken = (t: Token) => isDm.value || t.ownerUserId === user.value?.id
 
@@ -462,6 +514,10 @@ const startDrag = (e: PointerEvent, t: Token) => {
   e.preventDefault()
   dragOffset.value = { x: localX - target.x, y: localY - target.y }
   dragStartPx.value = { x: e.clientX, y: e.clientY }
+  // Bewegungsfeld speichern: Token darf maximal moveRange Felder vom Start-Tile
+  // weg gezogen werden. moveRange === 0 deaktiviert das Limit (frei bewegen).
+  const mr = target.moveRange ?? 8
+  dragStartTokenPos.value = { x: target.x, y: target.y, moveRange: mr }
   draggingTokenId.value = target.id
   dragStarted.value = false
   ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
@@ -478,8 +534,17 @@ const onPointerMove = (e: PointerEvent) => {
   const localY = (e.clientY - rect.top) / zoom.value
   const tk = tokens.value.find((x) => x.id === draggingTokenId.value)
   if (!tk) return
-  tk.x = Math.round(localX - dragOffset.value.x)
-  tk.y = Math.round(localY - dragOffset.value.y)
+  let nextX = localX - dragOffset.value.x
+  let nextY = localY - dragOffset.value.y
+  // Bewegungsfeld: DM darf frei verschieben (Storytelling, Setup, korrigieren),
+  // der Spieler ist auf moveRange Zellen vom Start-Tile begrenzt.
+  if (!isDm.value && dragStartTokenPos.value) {
+    const clamped = clampToMoveRange(nextX, nextY, dragStartTokenPos.value)
+    nextX = clamped.x
+    nextY = clamped.y
+  }
+  tk.x = Math.round(nextX)
+  tk.y = Math.round(nextY)
 }
 
 const onPointerUp = async (e: PointerEvent) => {
@@ -487,8 +552,10 @@ const onPointerUp = async (e: PointerEvent) => {
   const id = draggingTokenId.value
   const tk = tokens.value.find((x) => x.id === id)
   const wasDragged = dragStarted.value
+  const startPos = dragStartTokenPos.value
   draggingTokenId.value = null
   dragStarted.value = false
+  dragStartTokenPos.value = null
   if (!tk) return
   if (!wasDragged) {
     // Klick ohne Drag → Info-Karte oeffnen
@@ -499,6 +566,13 @@ const onPointerUp = async (e: PointerEvent) => {
     const s = snap(tk.x, tk.y)
     tk.x = s.x
     tk.y = s.y
+  }
+  // Nach dem Snap auch nochmal an das Bewegungsfeld klemmen, damit ein
+  // Spieler nicht per Shift-Drag das Limit umgehen kann.
+  if (!isDm.value && startPos) {
+    const clamped = clampToMoveRange(tk.x, tk.y, startPos)
+    tk.x = Math.round(clamped.x)
+    tk.y = Math.round(clamped.y)
   }
   try {
     await $fetch(`/api/groups/${groupId}/maps/${mapId}/tokens/${id}`, {
@@ -937,9 +1011,12 @@ const addToken = async () => {
   addingToken.value = true
   addTokenError.value = null
   try {
+    // Initiale Token-Position auf den Mittelpunkt der naechstgelegenen Zelle
+    // snappen, damit auch neu erzeugte Tokens schon zentriert sitzen.
+    const initial = snap(imgW.value / 2, imgH.value / 2)
     const body: Record<string, unknown> = {
-      x: Math.round(imgW.value / 2),
-      y: Math.round(imgH.value / 2),
+      x: Math.round(initial.x),
+      y: Math.round(initial.y),
       sizeMultiplier: newToken.value.size,
       hidden: newToken.value.hidden && isDm.value,
       description: newToken.value.description.trim() || undefined,
@@ -1018,6 +1095,7 @@ const saveEdit = async () => {
       description: t.description ?? '',
       sizeMultiplier: t.sizeMultiplier,
       hidden: isDm.value ? t.hidden : undefined,
+      moveRange: typeof t.moveRange === 'number' ? t.moveRange : undefined,
       ...npcPatch,
       ...dmPatch,
     },
@@ -3131,6 +3209,30 @@ const endResize = () => {
               </g>
             </svg>
 
+            <!-- Bewegungsfeld-Overlay: blinkender, transparenter Kasten um den
+                 Start-Punkt eines gerade gezogenen Tokens. Zeigt dem User, wie
+                 weit er sich maximal bewegen darf (Chebyshev-Distanz =
+                 moveRange Felder vom Start-Tile, inkl. Token-Mitte). -->
+            <svg
+              v-if="moveRangeOverlay && imgW && imgH"
+              class="absolute inset-0 pointer-events-none"
+              :width="imgW"
+              :height="imgH"
+              :viewBox="`0 0 ${imgW} ${imgH}`"
+            >
+              <rect
+                :x="moveRangeOverlay.x"
+                :y="moveRangeOverlay.y"
+                :width="moveRangeOverlay.size"
+                :height="moveRangeOverlay.size"
+                fill="rgba(34, 197, 94, 0.12)"
+                stroke="#16a34a"
+                stroke-width="2"
+                stroke-dasharray="8 6"
+                rx="4"
+              />
+            </svg>
+
             <!-- Map-Objekte (Props/Szenerie) — unter den Tokens, ueber dem Karten-Bild -->
             <div
               v-for="o in objects"
@@ -3669,6 +3771,7 @@ const endResize = () => {
         :group-id="groupId"
         :map-id="mapId"
         :tokens="myTokensOnMap"
+        :all-tokens="tokens"
         :time-of-day="currentTimeOfDay"
         @token-updated="fetchMap"
       />
@@ -4148,6 +4251,12 @@ const endResize = () => {
           </UFormField>
           <UFormField v-if="isDm" label="Versteckt (nur DM sieht)">
             <UCheckbox v-model="editing.hidden" />
+          </UFormField>
+          <UFormField
+            label="Bewegungsfeld (Felder pro Zug)"
+            help="Wie viele Felder darf der Token pro Bewegung weit ziehen? Default 8. 0 = frei (kein Limit)."
+          >
+            <UInput v-model.number="editing.moveRange" type="number" min="0" max="200" />
           </UFormField>
           <div v-if="isDm" class="grid grid-cols-2 gap-3">
             <UFormField label="Sichtweite (Felder)" help="0 = deckt nichts auf">

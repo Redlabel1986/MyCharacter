@@ -335,6 +335,12 @@ export const battleTokens = pgTable(
      * 0 = kein Beitrag zur Sicht (z.B. fuer komplett blinde Token).
      */
     visionRadius: integer('vision_radius').notNull().default(1),
+    /**
+     * Bewegungsfeld in Rasterzellen (Chebyshev-Distanz vom Start-Tile). Ein
+     * Token darf pro Zug maximal so viele Felder weit gezogen werden. Default
+     * 8 = jeder Charakter / NPC kann initial 8 Felder weit ziehen.
+     */
+    moveRange: integer('move_range').notNull().default(8),
     /** Wenn false, sehen Spieler die HP dieses Tokens nicht (nur DM + Owner). */
     hpVisibleToPlayers: boolean('hp_visible_to_players').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

@@ -70,6 +70,7 @@ const bodySchema = z.object({
   system: z.enum(['htbah', 'dnd', 'dsa5']).nullable().optional(),
   npcAbilities: z.array(npcAbilitySchema).max(40).optional(),
   visionRadius: z.number().int().min(0).max(60).optional(),
+  moveRange: z.number().int().min(0).max(200).optional(),
   hpVisibleToPlayers: z.boolean().optional(),
 })
 

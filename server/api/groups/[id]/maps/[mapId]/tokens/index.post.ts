@@ -74,6 +74,8 @@ const bodySchema = z.object({
   system: z.enum(['htbah', 'dnd', 'dsa5']).nullable().optional(),
   /** Stat-Block-Eintraege fuer den Token-eigenen Wuerfler. */
   npcAbilities: z.array(npcAbilitySchema).max(40).optional(),
+  /** Bewegungsfeld in Rasterzellen. Default 8 wird vom DB-Schema vorgegeben. */
+  moveRange: z.number().int().min(0).max(200).optional(),
 })
 
 export default defineEventHandler(async (event) => {
@@ -158,6 +160,7 @@ export default defineEventHandler(async (event) => {
       description: body.description ?? '',
       system: npcSystem,
       npcAbilities,
+      ...(body.moveRange !== undefined ? { moveRange: body.moveRange } : {}),
     })
     .returning()
 
