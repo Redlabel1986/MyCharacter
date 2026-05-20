@@ -38,6 +38,7 @@ import {
 import type { GameSystem } from '~~/shared/systems'
 import type { NpcAbility } from '~~/shared/npc'
 import { timeBonusFor, isDayTime, type TimeOfDay } from '~~/shared/time-of-day'
+import { computeDamageLevel, damageLevelColor } from '~~/shared/damage-level'
 
 interface Token {
   id: number
@@ -448,8 +449,10 @@ const damagePreview = computed(() => {
 interface RollMessagePayload {
   dice: number[]
   modifier?: number
-  /** Bei freien Wuerfen liefert der Server hier die Endsumme. */
+  /** Bei freien Wuerfen liefert der Server hier die Endsumme (inkl. Wunden). */
   target?: number
+  /** Wunden-Malus, der vom Server eingerechnet wurde (negativ). */
+  damageMalus?: number
 }
 interface RollMessage {
   message: { payload: RollMessagePayload | null }
@@ -480,6 +483,10 @@ const rollDamage = async () => {
     // Bei NPC-Token (kein Charakter) den Token-Namen mit ins Label, damit er
     // im Chat erkennbar bleibt — sonst nimmt rollFree nur die character-Daten.
     const label = character.value ? labelBase : `${activeToken.value.name}: ${labelBase}`
+    // tokenId mitschicken, wenn der Wurf vom NPC-Token kommt — damit der
+    // Server den Wunden-Malus aus den Token-HPs berechnen kann.
+    const rollerTokenId =
+      !character.value && activeToken.value ? activeToken.value.id : undefined
     const res = (await $fetch(`/api/groups/${props.groupId}/rolls`, {
       method: 'POST',
       body: {
@@ -490,6 +497,7 @@ const rollDamage = async () => {
         label,
         system: sys,
         characterId: character.value?.id,
+        tokenId: rollerTokenId,
       },
     })) as RollMessage
 
@@ -501,9 +509,13 @@ const rollDamage = async () => {
         if (typeof payload.target === 'number') {
           total = payload.target
         } else if (Array.isArray(payload.dice)) {
+          // Fallback: Summe + Modifier + Wunden-Malus, damit der angewandte
+          // HP-Delta auch dann den Malus enthaelt, wenn das Payload kein
+          // target-Feld liefert.
           total =
             payload.dice.reduce((a: number, b: number) => a + b, 0) +
-            (payload.modifier ?? 0)
+            (payload.modifier ?? 0) +
+            (payload.damageMalus ?? 0)
         }
       }
       if (total === null) {
@@ -512,11 +524,14 @@ const rollDamage = async () => {
         damageApplyResult.value =
           `Wurf: ${total} — Ziel hat keine HP gepflegt, daher nicht automatisch angerechnet.`
       } else {
+        // Negativ-Ergebnis (z.B. wegen schwerer Wunde) wirkt sich nicht
+        // umgekehrt aus — Wurfwert wird auf 0 geclampt.
+        const effective = Math.max(0, total)
         const oldHp = target.hp ?? 0
         const max = target.hpMax ?? oldHp
         const newHp = isHeal
-          ? Math.min(max, oldHp + total)
-          : Math.max(0, oldHp - total)
+          ? Math.min(max, oldHp + effective)
+          : Math.max(0, oldHp - effective)
         try {
           await $fetch(
             `/api/groups/${props.groupId}/maps/${props.mapId}/tokens/${target.id}`,
@@ -524,8 +539,8 @@ const rollDamage = async () => {
           )
           target.hp = newHp
           damageApplyResult.value = isHeal
-            ? `+${total} HP an ${target.name} (${oldHp} → ${newHp}/${max}).`
-            : `−${total} HP an ${target.name} (${oldHp} → ${newHp}/${max}).`
+            ? `+${effective} HP an ${target.name} (${oldHp} → ${newHp}/${max}).`
+            : `−${effective} HP an ${target.name} (${oldHp} → ${newHp}/${max}).`
           emit('token-updated')
         } catch (err: unknown) {
           damageApplyResult.value =
@@ -835,6 +850,13 @@ const hpPercent = computed(() => {
   if (!t || !t.hpMax) return 0
   return Math.max(0, Math.min(100, Math.round(((t.hp ?? 0) / t.hpMax) * 100)))
 })
+// Aktive Schadensstufe des Tokens (live aus Token-HP). Liefert auch den
+// Malus-Wert, der bei jedem Wurf serverseitig appliziert wird.
+const activeDamageLevel = computed(() => {
+  const t = activeToken.value
+  if (!t) return computeDamageLevel(null, null)
+  return computeDamageLevel(t.hp, t.hpMax)
+})
 const hpColor = computed(() => {
   const p = hpPercent.value
   if (p > 75) return '#10b981'
@@ -944,6 +966,25 @@ const onImageError = (tokenId: number) => {
             />
           </div>
         </div>
+      </div>
+
+      <!-- Schadensstufen-Badge: zeigt, welcher Wunden-Malus aktuell auf jeden
+           Wurf wirkt. Wird nur eingeblendet, wenn der Wuerfler tatsaechlich
+           verwundet ist (Stufe >= 1). -->
+      <div
+        v-if="activeDamageLevel.level > 0"
+        class="text-xs px-2 py-1 rounded font-semibold flex items-center gap-2"
+        :style="{
+          background: damageLevelColor(activeDamageLevel.level) + '22',
+          border: '1px solid ' + damageLevelColor(activeDamageLevel.level),
+          color: damageLevelColor(activeDamageLevel.level),
+        }"
+      >
+        <UIcon name="i-lucide-heart-crack" class="size-4" />
+        <span>Schadensstufe {{ activeDamageLevel.level }}</span>
+        <span class="ml-auto tabular-nums">
+          {{ activeDamageLevel.malus }} auf jeden Wurf
+        </span>
       </div>
 
       <!-- HP-Editor -->

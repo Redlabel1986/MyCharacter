@@ -26,6 +26,8 @@ import {
 import { HTBAH_TALENTS } from '~~/shared/engines/htbah'
 import { DND_ABILITIES } from '~~/shared/engines/dnd'
 import { DSA_ABILITIES } from '~~/shared/engines/dsa5'
+import { readCharacterHp, type CharSystem } from '~~/shared/character-hp'
+import { computeDamageLevel, type DamageLevelInfo } from '~~/shared/damage-level'
 import type {
   NpcAbility,
   NpcAbilityDnd,
@@ -96,6 +98,12 @@ const freeSchema = baseSchema.extend({
   diceSides: z.number().int().min(2).max(1000),
   label: z.string().min(1).max(80),
   system: z.enum(['dnd5e', 'dnd2024', 'dsa5', 'dsa41', 'htbah']),
+  /**
+   * Wenn der freie Wurf von einem NPC-Token kommt (kein Charakter), kann der
+   * Client hier die Token-ID mitschicken — der Schadensstufen-Malus wird dann
+   * aus den Token-HPs berechnet.
+   */
+  tokenId: z.number().int().positive().optional(),
 })
 
 const npcHtbahSchema = baseSchema.extend({
@@ -171,6 +179,45 @@ function findNpcAbility(
   return a
 }
 
+/**
+ * Wuerfler-Helfer: addiert den Wunden-Malus auf den vom User uebermittelten
+ * Modifier — wird in die rollX-Funktionen reingereicht, damit Ziel/Dice
+ * korrekt sind. Original-Modifier und Malus werden nach dem Wurf wieder
+ * sauber in die Payload geschrieben (siehe applyWoundsToPayload).
+ */
+function combineModifier(
+  userModifier: number | undefined,
+  wounds: DamageLevelInfo,
+): number | undefined {
+  const combined = (userModifier ?? 0) + wounds.malus
+  return combined !== 0 ? combined : undefined
+}
+
+/**
+ * Nach dem Wurf: stellt die UI-Trennung zwischen Spieler-Modifier und
+ * Schadensstufen-Malus wieder her. Setzt zusaetzlich damageLevel/damageMalus
+ * im Payload, damit die RollCard die Wunde gesondert ausweisen kann.
+ */
+function applyWoundsToPayload(
+  payload: RollPayload,
+  userModifier: number | undefined,
+  wounds: DamageLevelInfo,
+): RollPayload {
+  payload.modifier = userModifier || undefined
+  if (wounds.malus !== 0) {
+    payload.damageMalus = wounds.malus
+    payload.damageLevel = wounds.level
+  }
+  return payload
+}
+
+const NO_WOUNDS: DamageLevelInfo = {
+  level: 0,
+  malus: 0,
+  label: 'unverletzt',
+  short: '–',
+}
+
 export default defineEventHandler(async (event) => {
   const { user } = await requireUserSession(event)
   const groupId = Number(getRouterParam(event, 'id'))
@@ -182,68 +229,91 @@ export default defineEventHandler(async (event) => {
   await requireGroupMember(db, groupId, user.id)
 
   let payload: RollPayload
+  // Wunden des Wuerflers (Character oder NPC-Token) — wird im jeweiligen
+  // Branch befuellt und am Ende mit applyWoundsToPayload in die Payload
+  // geschrieben. Default: kein Malus.
+  let wounds: DamageLevelInfo = NO_WOUNDS
+
+  // Wundinfo aus einem Character laden.
+  const woundsFromChar = (char: {
+    system: string
+    data: Record<string, unknown> | unknown
+  }): DamageLevelInfo => {
+    const hp = readCharacterHp(char.system as CharSystem, char.data)
+    return computeDamageLevel(hp.current, hp.max)
+  }
+  // Wundinfo aus einem NPC-Token laden.
+  const woundsFromToken = (tok: { hp: number | null; hpMax: number | null }) =>
+    computeDamageLevel(tok.hp, tok.hpMax)
 
   if (body.kind === 'htbahSkill') {
     const char = await loadCharacterOrThrow(db, body.characterId, user.id)
+    wounds = woundsFromChar(char)
     payload = rollHtbahSkill({
       character: char,
       skillId: body.skillId,
-      modifier: body.modifier,
+      modifier: combineModifier(body.modifier, wounds),
       note: body.note,
     })
   } else if (body.kind === 'htbahTalent') {
     const char = await loadCharacterOrThrow(db, body.characterId, user.id)
+    wounds = woundsFromChar(char)
     payload = rollHtbahTalent({
       character: char,
       talent: body.talent,
-      modifier: body.modifier,
+      modifier: combineModifier(body.modifier, wounds),
       note: body.note,
     })
   } else if (body.kind === 'dndSkill') {
     const char = await loadCharacterOrThrow(db, body.characterId, user.id)
+    wounds = woundsFromChar(char)
     payload = rollDndSkill({
       character: char,
       skillKey: body.skillKey,
-      modifier: body.modifier,
+      modifier: combineModifier(body.modifier, wounds),
       dc: body.dc,
       rollMode: body.rollMode,
       note: body.note,
     })
   } else if (body.kind === 'dndSave') {
     const char = await loadCharacterOrThrow(db, body.characterId, user.id)
+    wounds = woundsFromChar(char)
     payload = rollDndSave({
       character: char,
       ability: body.ability,
-      modifier: body.modifier,
+      modifier: combineModifier(body.modifier, wounds),
       dc: body.dc,
       rollMode: body.rollMode,
       note: body.note,
     })
   } else if (body.kind === 'dndAbility') {
     const char = await loadCharacterOrThrow(db, body.characterId, user.id)
+    wounds = woundsFromChar(char)
     payload = rollDndAbility({
       character: char,
       ability: body.ability,
-      modifier: body.modifier,
+      modifier: combineModifier(body.modifier, wounds),
       dc: body.dc,
       rollMode: body.rollMode,
       note: body.note,
     })
   } else if (body.kind === 'dsa5Skill') {
     const char = await loadCharacterOrThrow(db, body.characterId, user.id)
+    wounds = woundsFromChar(char)
     payload = rollDsa5Skill({
       character: char,
       skillId: body.skillId,
       source: body.source,
-      modifier: body.modifier,
+      modifier: combineModifier(body.modifier, wounds),
       note: body.note,
     })
   } else if (body.kind === 'dsa5Ability') {
     const char = await loadCharacterOrThrow(db, body.characterId, user.id)
+    wounds = woundsFromChar(char)
     payload = rollDsa5Ability({
       character: char,
       ability: body.ability,
-      modifier: body.modifier,
+      modifier: combineModifier(body.modifier, wounds),
       note: body.note,
     })
   } else if (body.kind === 'npcHtbah') {
@@ -252,10 +322,11 @@ export default defineEventHandler(async (event) => {
     if (a.system !== 'htbah') {
       throw createError({ statusCode: 400, statusMessage: 'Faehigkeit ist nicht im HtbaH-Format.' })
     }
+    wounds = woundsFromToken(tok)
     payload = rollNpcHtbah({
       ability: a as NpcAbilityHtbah,
       tokenName: tok.name,
-      modifier: body.modifier,
+      modifier: combineModifier(body.modifier, wounds),
       note: body.note,
     })
   } else if (body.kind === 'npcDnd') {
@@ -264,10 +335,11 @@ export default defineEventHandler(async (event) => {
     if (a.system !== 'dnd') {
       throw createError({ statusCode: 400, statusMessage: 'Faehigkeit ist nicht im D&D-Format.' })
     }
+    wounds = woundsFromToken(tok)
     payload = rollNpcDnd({
       ability: a as NpcAbilityDnd,
       tokenName: tok.name,
-      modifier: body.modifier,
+      modifier: combineModifier(body.modifier, wounds),
       dc: body.dc,
       rollMode: body.rollMode,
       note: body.note,
@@ -278,10 +350,11 @@ export default defineEventHandler(async (event) => {
     if (a.system !== 'dsa5') {
       throw createError({ statusCode: 400, statusMessage: 'Faehigkeit ist nicht im DSA-5-Format.' })
     }
+    wounds = woundsFromToken(tok)
     payload = rollNpcDsa5({
       ability: a as NpcAbilityDsa5,
       tokenName: tok.name,
-      modifier: body.modifier,
+      modifier: combineModifier(body.modifier, wounds),
       note: body.note,
     })
   } else {
@@ -289,11 +362,15 @@ export default defineEventHandler(async (event) => {
     if (body.characterId) {
       const char = await loadCharacterOrThrow(db, body.characterId, user.id)
       charName = char.name
+      wounds = woundsFromChar(char)
+    } else if (body.tokenId) {
+      const tok = await loadOwnedTokenOrThrow(db, body.tokenId, user.id)
+      wounds = woundsFromToken(tok)
     }
     payload = rollFree({
       diceCount: body.diceCount,
       diceSides: body.diceSides,
-      modifier: body.modifier,
+      modifier: combineModifier(body.modifier, wounds),
       label: body.label,
       system: body.system,
       note: body.note,
@@ -301,6 +378,9 @@ export default defineEventHandler(async (event) => {
       characterName: charName,
     })
   }
+
+  // Original-Modifier + Wunden-Malus sauber in die Payload schreiben.
+  applyWoundsToPayload(payload, body.modifier, wounds)
 
   // content-Feld ist NOT NULL — wir legen einen kompakten Klartext-Fallback ab,
   // damit alte Clients ohne payload-Verstaendnis trotzdem etwas zeigen.

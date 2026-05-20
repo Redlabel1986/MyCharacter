@@ -146,6 +146,15 @@ export interface RollPayload {
   qualityStep?: number
   /** Frei-Notiz, optional. */
   note?: string
+  /**
+   * Wunden-Malus, der aus der aktuellen Schadensstufe des Charakters/Tokens
+   * auf den Wurf angewendet wurde (negative Zahl, z.B. −20 fuer Stufe 2).
+   * Bereits in target/dice eingerechnet — wird in der Anzeige separat
+   * ausgewiesen, damit klar wird WARUM ein Malus aktiv war.
+   */
+  damageMalus?: number
+  /** Schadensstufe (0..3) zur Zeit des Wurfs (Snapshot). */
+  damageLevel?: number
 }
 
 export type MessagePayload = CharacterSharePayload | RollPayload | null

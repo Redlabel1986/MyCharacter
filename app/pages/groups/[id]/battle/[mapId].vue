@@ -25,6 +25,7 @@ import {
   computeVisibilityPolygon,
   type Wall,
 } from '~~/shared/fog'
+import { computeDamageLevel, damageLevelColor } from '~~/shared/damage-level'
 import {
   BUILT_IN_MAP_OBJECTS,
   CATEGORY_LABELS,
@@ -944,6 +945,25 @@ const deleteCustomTemplate = async (id: number | undefined) => {
 // --- Conditions ---
 const tokenConditions = (t: Token) => parseStatusText(t.statusText ?? '').conditions
 const tokenCustomLabels = (t: Token) => parseStatusText(t.statusText ?? '').customLabels
+
+/**
+ * Wunden-Info pro Token (Schadensstufe + Malus). Wird sowohl fuer die
+ * Token-Badge als auch fuer den Verwundungs-Schleier genutzt — beide bleiben
+ * unabhaengig, weil die Badge nur erscheint, wenn Stufe >= 1 ist.
+ */
+const tokenDamageLevel = (t: Token) => computeDamageLevel(t.hp, t.hpMax)
+const tokenDamageColor = (t: Token) => damageLevelColor(tokenDamageLevel(t).level)
+
+/**
+ * Soll die Wunden-Badge fuer diesen Token angezeigt werden? Nur wenn HP/Max
+ * gepflegt sind UND Schadensstufe >= 1.
+ */
+const showDamageBadge = (t: Token): boolean => {
+  if (t.hp === null || t.hpMax === null || t.hpMax === undefined || t.hpMax <= 0) {
+    return false
+  }
+  return tokenDamageLevel(t).level > 0
+}
 
 /**
  * Verwundungs-Schleier auf dem Token.
@@ -3423,6 +3443,19 @@ const endResize = () => {
                 class="absolute -bottom-3 left-1/2 -translate-x-1/2 text-[10px] bg-black/70 text-white px-1 rounded whitespace-nowrap pointer-events-none"
               >
                 {{ t.hp }}/{{ t.hpMax }}
+              </div>
+              <!-- Schadensstufen-Badge: zeigt aktuelle Wundstufe an. Wirkt
+                   serverseitig als −10 pro Stufe auf jeden Wurf. -->
+              <div
+                v-if="showDamageBadge(t)"
+                class="absolute -top-1 -right-1 text-[9px] font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-white shadow pointer-events-auto cursor-default tabular-nums"
+                :style="{
+                  background: tokenDamageColor(t),
+                  color: '#fff',
+                }"
+                :title="`Schadensstufe ${tokenDamageLevel(t).level} · ${tokenDamageLevel(t).malus} auf jeden Wurf`"
+              >
+                {{ tokenDamageLevel(t).level }}
               </div>
               <!-- Condition-Badges (max 6 sichtbar, gestapelt oben) -->
               <div class="absolute -top-2 left-1/2 -translate-x-1/2 flex gap-0.5 pointer-events-none">

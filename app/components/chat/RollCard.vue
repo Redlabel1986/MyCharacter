@@ -16,6 +16,10 @@ interface RollPayload {
   fumble?: boolean
   qualityStep?: number
   note?: string
+  /** Wunden-Malus, der serverseitig auf den Wurf angewandt wurde (negativ). */
+  damageMalus?: number
+  /** Schadensstufe (0..3) zur Zeit des Wurfs. */
+  damageLevel?: number
 }
 
 const props = defineProps<{ payload: RollPayload; mine: boolean }>()
@@ -99,12 +103,19 @@ const formattedDice = computed(() => props.payload.dice.join(', '))
         Wurf:
         <span class="font-mono font-semibold">{{ formattedDice }}</span>
         <template v-if="payload.modifier"> + Mod {{ payload.modifier > 0 ? '+' : '' }}{{ payload.modifier }}</template>
+        <template v-if="payload.damageMalus"> · Wunden {{ payload.damageMalus }}</template>
         gegen
         <span class="font-mono font-semibold">{{ payload.target }}</span>
         <template v-if="payload.characterName"> · {{ payload.characterName }}</template>
       </div>
       <div v-if="qualityLabel">
         {{ qualityLabel }}<template v-if="margin !== null"> · um {{ margin }} unterboten</template>
+      </div>
+      <div
+        v-if="payload.damageMalus"
+        class="text-[10px] font-semibold uppercase tracking-widest opacity-80"
+      >
+        🩸 Schadensstufe {{ payload.damageLevel }} · {{ payload.damageMalus }} auf den Wurf
       </div>
       <div v-if="payload.note" class="italic opacity-90">„{{ payload.note }}"</div>
     </div>
