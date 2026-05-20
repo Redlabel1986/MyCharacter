@@ -66,6 +66,9 @@ const returnToAdminView = async () => {
             <NuxtLink v-if="isDm" to="/dm/characters" class="hover:text-[var(--color-accent)]">
               DM-Übersicht
             </NuxtLink>
+            <NuxtLink v-if="isDm" to="/dm/npcs" class="hover:text-[var(--color-accent)]">
+              NPC-Bibliothek
+            </NuxtLink>
             <NuxtLink v-if="isAdmin" to="/admin/users" class="hover:text-[var(--color-accent)]">
               Admin
             </NuxtLink>

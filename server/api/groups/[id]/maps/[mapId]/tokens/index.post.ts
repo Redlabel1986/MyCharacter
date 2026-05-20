@@ -14,6 +14,7 @@ import {
   characters,
   groups,
 } from '~~/server/database/schema'
+import { loadNpcAccessibleOrThrow } from '~~/server/utils/npc-access'
 import { DSA_ABILITIES } from '~~/shared/engines/dsa5'
 
 const timeBonusesSchema = z
@@ -59,12 +60,20 @@ const npcAbilitySchema = z.discriminatedUnion('system', [
 
 const bodySchema = z.object({
   characterId: z.number().int().positive().optional(),
+  /**
+   * Wenn gesetzt: Token wird aus dem NPC-Bibliothekseintrag erzeugt. Name,
+   * System, npcAbilities, HP, Default-Sichtweite/Bewegung und Bild werden vom
+   * Eintrag uebernommen (koennen aber durch explizite Body-Felder ueberschrieben
+   * werden).
+   */
+  npcLibraryId: z.number().int().positive().optional(),
   /** Wenn kein Charakter: freier Name + optional Bild-URL (DM-NPCs). */
   name: z.string().min(1).max(80).optional(),
   imageUrl: z.string().url().optional(),
   x: z.number().min(-50000).max(50000).default(0),
   y: z.number().min(-50000).max(50000).default(0),
-  sizeMultiplier: z.number().int().min(1).max(8).default(1),
+  // Optional, damit ein Library-Default greifen kann; ohne Library = 1.
+  sizeMultiplier: z.number().int().min(1).max(8).optional(),
   hidden: z.boolean().default(false),
   hp: z.number().int().min(0).max(100000).optional(),
   hpMax: z.number().int().min(0).max(100000).optional(),
@@ -104,6 +113,40 @@ export default defineEventHandler(async (event) => {
 
   let resolvedName = body.name?.trim()
   let resolvedImage = body.imageUrl
+  // Library-NPC: Felder als Defaults uebernehmen, von Body-Feldern ueberschreibbar.
+  let libraryHp: number | null | undefined
+  let libraryHpMax: number | null | undefined
+  let libraryDescription: string | undefined
+  let libraryNpcSystem: 'htbah' | 'dnd' | 'dsa5' | null | undefined
+  let libraryNpcAbilities: import('~~/shared/npc').NpcAbility[] | undefined
+  let librarySize: number | undefined
+  let libraryVision: number | undefined
+  let libraryMoveRange: number | undefined
+  if (body.npcLibraryId) {
+    if (!isDm) {
+      throw createError({
+        statusCode: 403,
+        statusMessage: 'Nur DM darf NPCs aus der Bibliothek platzieren.',
+      })
+    }
+    if (body.characterId) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: 'NPC-Bibliothek und Charakter koennen nicht kombiniert werden.',
+      })
+    }
+    const npc = await loadNpcAccessibleOrThrow(db, body.npcLibraryId, user.id)
+    resolvedName = resolvedName || npc.name
+    resolvedImage = resolvedImage || npc.imageUrl || undefined
+    libraryHp = npc.defaultHp
+    libraryHpMax = npc.defaultHpMax
+    libraryDescription = npc.description
+    libraryNpcSystem = npc.system
+    libraryNpcAbilities = npc.npcAbilities ?? []
+    librarySize = npc.defaultSizeMultiplier
+    libraryVision = npc.defaultVisionRadius
+    libraryMoveRange = npc.defaultMoveRange
+  }
 
   if (body.characterId) {
     const [char] = await db
@@ -133,14 +176,25 @@ export default defineEventHandler(async (event) => {
 
   // NPC-Wuerfler-Felder nur fuer DM und nur fuer Tokens ohne Charakter sinnvoll.
   const allowNpcStat = isDm && !body.characterId
-  const npcSystem = allowNpcStat ? body.system ?? null : null
-  const npcAbilities = allowNpcStat ? body.npcAbilities ?? [] : []
+  const npcSystem = allowNpcStat
+    ? body.system ?? libraryNpcSystem ?? null
+    : null
+  const npcAbilities = allowNpcStat
+    ? body.npcAbilities ?? libraryNpcAbilities ?? []
+    : []
 
   // Fuer Charakter-Tokens speichern wir keine HP an der Token-Spalte —
   // HP wohnt am Charakter (data-JSONB), damit ein Karten-Wechsel keinen
   // HP-Reset bedeutet. NPC-Tokens behalten ihre eigenen HP-Spalten.
-  const tokenHp = body.characterId ? null : body.hp ?? null
-  const tokenHpMax = body.characterId ? null : body.hpMax ?? null
+  const tokenHp = body.characterId ? null : body.hp ?? libraryHp ?? null
+  const tokenHpMax = body.characterId ? null : body.hpMax ?? libraryHpMax ?? null
+
+  const effectiveSize = body.sizeMultiplier ?? librarySize ?? 1
+  const effectiveDescription = body.description ?? libraryDescription ?? ''
+  // moveRange / visionRadius nur explizit setzen, wenn Body oder Library einen
+  // Wert vorgeben — sonst gilt der DB-Default (8 bzw. 1).
+  const effectiveMoveRange = body.moveRange ?? libraryMoveRange
+  const effectiveVisionRadius = libraryVision
 
   const [inserted] = await db
     .insert(battleTokens)
@@ -152,15 +206,18 @@ export default defineEventHandler(async (event) => {
       imageUrl: resolvedImage,
       x: Math.round(body.x),
       y: Math.round(body.y),
-      sizeMultiplier: body.sizeMultiplier,
+      sizeMultiplier: effectiveSize,
       hidden: body.hidden,
       hp: tokenHp,
       hpMax: tokenHpMax,
       statusText: body.statusText ?? '',
-      description: body.description ?? '',
+      description: effectiveDescription,
       system: npcSystem,
       npcAbilities,
-      ...(body.moveRange !== undefined ? { moveRange: body.moveRange } : {}),
+      ...(effectiveMoveRange !== undefined ? { moveRange: effectiveMoveRange } : {}),
+      ...(effectiveVisionRadius !== undefined
+        ? { visionRadius: effectiveVisionRadius }
+        : {}),
     })
     .returning()
 

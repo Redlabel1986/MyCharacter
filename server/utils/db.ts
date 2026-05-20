@@ -396,6 +396,33 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
     CREATE INDEX IF NOT EXISTS idx_map_objects_map ON map_objects(map_id)
   `)
 
+  // NPC-Bibliothek des DM. Per-Owner + optional Per-Group.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS npc_library (
+      id SERIAL PRIMARY KEY,
+      owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      system TEXT,
+      description TEXT NOT NULL DEFAULT '',
+      default_hp INTEGER,
+      default_hp_max INTEGER,
+      default_size_multiplier INTEGER NOT NULL DEFAULT 1,
+      default_vision_radius INTEGER NOT NULL DEFAULT 1,
+      default_move_range INTEGER NOT NULL DEFAULT 8,
+      image_url TEXT,
+      npc_abilities JSONB NOT NULL DEFAULT '[]'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_npc_library_owner ON npc_library(owner_user_id)
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_npc_library_group ON npc_library(group_id)
+  `)
+
   await db.execute(sql`
     UPDATE users SET role = 'admin' WHERE email = ${ADMIN_EMAIL} AND role <> 'admin'
   `)

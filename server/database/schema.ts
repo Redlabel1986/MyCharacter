@@ -498,6 +498,57 @@ export type MapObjectTemplate = typeof mapObjectTemplates.$inferSelect
 export type MapObject = typeof mapObjects.$inferSelect
 export type NewMapObject = typeof mapObjects.$inferInsert
 
+/**
+ * NPC-Bibliothek des DM. Vorlagen, aus denen schnell ein Battle-Token
+ * platziert werden kann.
+ *
+ * Scope:
+ *   - groupId = NULL  → DM-privat (gilt ueber alle eigenen Gruppen hinweg).
+ *   - groupId = X     → Gruppen-NPC, gehoert zu dieser Kampagne und wird beim
+ *                       Battle-Map-Token-Picker nur dort gezeigt.
+ *
+ * Sichtbarkeit/Recht: Eigentuemer (`ownerUserId`) darf bearbeiten. Gruppen-
+ * Owner (DM) darf alle NPCs seiner Gruppe sehen + bearbeiten — auch wenn er
+ * sie nicht selbst angelegt hat.
+ */
+export const npcLibrary = pgTable(
+  'npc_library',
+  {
+    id: serial('id').primaryKey(),
+    ownerUserId: integer('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    groupId: integer('group_id').references(() => groups.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    /** Wuerfler-Regelwerk (htbah/dnd/dsa5) oder NULL fuer einen reinen Marker. */
+    system: text('system').$type<'htbah' | 'dnd' | 'dsa5' | null>(),
+    description: text('description').notNull().default(''),
+    /** Default-HP, die beim Platzieren ans Token kopiert werden. */
+    defaultHp: integer('default_hp'),
+    defaultHpMax: integer('default_hp_max'),
+    /** Default Sichtweite / Bewegungsfeld / Groesse. */
+    defaultSizeMultiplier: integer('default_size_multiplier').notNull().default(1),
+    defaultVisionRadius: integer('default_vision_radius').notNull().default(1),
+    defaultMoveRange: integer('default_move_range').notNull().default(8),
+    /** Blob-URL des hochgeladenen Bilds (oder NULL = ohne Bild). */
+    imageUrl: text('image_url'),
+    /** NPC-Faehigkeiten-Block (siehe shared/npc.ts). */
+    npcAbilities: jsonb('npc_abilities')
+      .notNull()
+      .$type<import('~~/shared/npc').NpcAbility[]>()
+      .default([]),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    ownerIdx: index('idx_npc_library_owner').on(table.ownerUserId),
+    groupIdx: index('idx_npc_library_group').on(table.groupId),
+  }),
+)
+
+export type NpcLibraryEntry = typeof npcLibrary.$inferSelect
+export type NewNpcLibraryEntry = typeof npcLibrary.$inferInsert
+
 // App-weite Einstellungen als Key/Value (z. B. library_password_hash).
 export const appSettings = pgTable('app_settings', {
   key: text('key').primaryKey(),

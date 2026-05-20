@@ -966,7 +966,33 @@ const tokenDamageOverlay = (t: Token): { opacity: number; intense: boolean } | n
 
 // --- Token hinzufuegen ---
 const showAddModal = ref(false)
+const addTokenSource = ref<'character' | 'library' | 'manual'>('character')
 const myChars = ref<CharacterSummary[]>([])
+
+interface NpcLibraryEntrySummary {
+  id: number
+  groupId: number | null
+  name: string
+  system: 'htbah' | 'dnd' | 'dsa5' | null
+  description: string
+  defaultHp: number | null
+  defaultHpMax: number | null
+  defaultSizeMultiplier: number
+  defaultMoveRange: number
+  imageUrl: string | null
+  updatedAt: string
+}
+const npcLibrary = ref<NpcLibraryEntrySummary[]>([])
+const npcLibraryLoaded = ref(false)
+const npcLibrarySearch = ref('')
+const selectedLibraryNpcId = ref<number>(0)
+
+const filteredLibraryNpcs = computed(() => {
+  const q = npcLibrarySearch.value.trim().toLowerCase()
+  if (!q) return npcLibrary.value
+  return npcLibrary.value.filter((n) => n.name.toLowerCase().includes(q))
+})
+
 const newToken = ref({
   characterId: 0,
   name: '',
@@ -980,6 +1006,11 @@ const newToken = ref({
 
 const openAdd = async () => {
   showAddModal.value = true
+  // DM sieht die Charakter-Quelle nicht als Default — der platziert ueblicherweise
+  // NPCs aus der Bibliothek oder freie Marker.
+  addTokenSource.value = isDm.value ? 'library' : 'character'
+  selectedLibraryNpcId.value = 0
+  npcLibrarySearch.value = ''
   newToken.value = {
     characterId: 0,
     name: '',
@@ -993,6 +1024,18 @@ const openAdd = async () => {
   if (!myChars.value.length) {
     const res = await $fetch<{ characters: CharacterSummary[] }>('/api/characters')
     myChars.value = res.characters
+  }
+  // NPC-Bibliothek lazy laden, sobald der Modal geoeffnet wird (nur DM nutzt es).
+  if (isDm.value && !npcLibraryLoaded.value) {
+    try {
+      const res = await $fetch<{ npcs: NpcLibraryEntrySummary[] }>(
+        `/api/npcs?groupId=${groupId}`,
+      )
+      npcLibrary.value = res.npcs ?? []
+      npcLibraryLoaded.value = true
+    } catch (e) {
+      console.error('NPC-Bibliothek konnte nicht geladen werden', e)
+    }
   }
 }
 const onNewTokenFile = (e: Event) => {
@@ -1017,12 +1060,27 @@ const addToken = async () => {
     const body: Record<string, unknown> = {
       x: Math.round(initial.x),
       y: Math.round(initial.y),
-      sizeMultiplier: newToken.value.size,
       hidden: newToken.value.hidden && isDm.value,
-      description: newToken.value.description.trim() || undefined,
     }
-    if (newToken.value.characterId) {
+    if (addTokenSource.value === 'library') {
+      if (!selectedLibraryNpcId.value) {
+        addTokenError.value = 'Bitte einen NPC aus der Bibliothek waehlen.'
+        addingToken.value = false
+        return
+      }
+      body.npcLibraryId = selectedLibraryNpcId.value
+      // Optional: Spieler kann Groesse vor dem Platzieren ueberschreiben.
+      if (newToken.value.size && newToken.value.size !== 1) {
+        body.sizeMultiplier = newToken.value.size
+      }
+      // Optional: Beschreibung explizit ueberschreiben.
+      if (newToken.value.description.trim()) {
+        body.description = newToken.value.description.trim()
+      }
+    } else if (addTokenSource.value === 'character' && newToken.value.characterId) {
       body.characterId = newToken.value.characterId
+      body.sizeMultiplier = newToken.value.size
+      body.description = newToken.value.description.trim() || undefined
     } else {
       if (!newToken.value.name.trim()) {
         addTokenError.value = 'Name fuer NPC erforderlich.'
@@ -1030,6 +1088,8 @@ const addToken = async () => {
         return
       }
       body.name = newToken.value.name.trim()
+      body.sizeMultiplier = newToken.value.size
+      body.description = newToken.value.description.trim() || undefined
       // NPC-Wuerfler-Felder nur fuer DM-NPCs ohne Charakter mitschicken.
       if (isDm.value && newToken.value.npcSystem) {
         body.system = newToken.value.npcSystem
@@ -1040,7 +1100,14 @@ const addToken = async () => {
       `/api/groups/${groupId}/maps/${mapId}/tokens`,
       { method: 'POST', body },
     )
-    if (newToken.value.imageFile && created.token) {
+    // Nur fuer "manual" laden wir ein lokal ausgewaehltes Bild hoch — bei
+    // "character" liefert das Portrait-Endpoint das Bild, bei "library" wurde
+    // die imageUrl bereits serverseitig vom Library-Eintrag uebernommen.
+    if (
+      addTokenSource.value === 'manual' &&
+      newToken.value.imageFile &&
+      created.token
+    ) {
       const fd = new FormData()
       fd.append('file', newToken.value.imageFile)
       await $fetch(
@@ -4118,41 +4185,166 @@ const endResize = () => {
     <UModal v-model:open="showAddModal" title="Token hinzufügen">
       <template #body>
         <div class="space-y-3">
-          <UFormField label="Charakter">
-            <USelect
-              v-model="newToken.characterId"
-              :items="charOptions"
-              value-key="value"
-              class="w-full"
-            />
-          </UFormField>
-          <UFormField v-if="!newToken.characterId" label="Name (NPC oder Karten-Marker)">
-            <UInput v-model="newToken.name" placeholder="z.B. Goblin #1" />
-          </UFormField>
-          <UFormField v-if="!newToken.characterId" label="Bild (optional)" help="JPEG/PNG/WEBP, max 4 MB">
-            <input type="file" accept="image/jpeg,image/png,image/webp" class="block w-full text-sm" @change="onNewTokenFile">
-          </UFormField>
-          <UFormField label="Beschreibung (NPC-Karte, optional)">
-            <UTextarea
-              v-model="newToken.description"
-              :rows="3"
-              placeholder="Was sehen die Spieler, wenn sie auf den Token klicken?"
-              :maxlength="4000"
-            />
-          </UFormField>
-          <UFormField label="Größe (Rasterzellen)">
-            <UInput v-model.number="newToken.size" type="number" min="1" max="8" />
-          </UFormField>
+          <!-- Quelle waehlen: NPC-Bibliothek (DM), eigener Charakter, freier Marker. -->
+          <div class="flex gap-1 p-1 bg-white/40 rounded border border-parchment-700/30">
+            <button
+              v-if="isDm"
+              type="button"
+              class="flex-1 text-xs px-2 py-1.5 rounded transition font-semibold"
+              :class="addTokenSource === 'library'
+                ? 'bg-[var(--color-accent)] text-white'
+                : 'text-ink-400 hover:bg-white/70'"
+              @click="addTokenSource = 'library'"
+            >
+              📚 NPC-Bibliothek
+            </button>
+            <button
+              type="button"
+              class="flex-1 text-xs px-2 py-1.5 rounded transition font-semibold"
+              :class="addTokenSource === 'character'
+                ? 'bg-[var(--color-accent)] text-white'
+                : 'text-ink-400 hover:bg-white/70'"
+              @click="addTokenSource = 'character'"
+            >
+              🧙 Charakter
+            </button>
+            <button
+              type="button"
+              class="flex-1 text-xs px-2 py-1.5 rounded transition font-semibold"
+              :class="addTokenSource === 'manual'
+                ? 'bg-[var(--color-accent)] text-white'
+                : 'text-ink-400 hover:bg-white/70'"
+              @click="addTokenSource = 'manual'"
+            >
+              ✏ Frei eingeben
+            </button>
+          </div>
+
+          <!-- LIBRARY-Quelle: Picker aus npcLibrary -->
+          <template v-if="addTokenSource === 'library'">
+            <UFormField label="Suchen">
+              <UInput v-model="npcLibrarySearch" placeholder="Name filtern …" size="sm" />
+            </UFormField>
+            <div
+              v-if="!npcLibraryLoaded"
+              class="text-xs text-ink-300 italic"
+            >
+              Lade Bibliothek …
+            </div>
+            <div
+              v-else-if="!filteredLibraryNpcs.length"
+              class="text-xs text-ink-300 italic parchment-card p-3"
+            >
+              <template v-if="!npcLibrary.length">
+                Du hast noch keine NPCs angelegt. Geh auf
+                <NuxtLink to="/dm/npcs" class="text-[var(--color-accent)] hover:underline">
+                  NPC-Bibliothek
+                </NuxtLink>, um Vorlagen zu erstellen.
+              </template>
+              <template v-else>
+                Kein NPC passt zum Filter.
+              </template>
+            </div>
+            <div
+              v-else
+              class="max-h-72 overflow-y-auto space-y-1 border border-parchment-700/30 rounded p-1"
+            >
+              <button
+                v-for="n in filteredLibraryNpcs"
+                :key="n.id"
+                type="button"
+                class="w-full flex items-center gap-3 px-2 py-1.5 rounded text-left transition border-2"
+                :class="selectedLibraryNpcId === n.id
+                  ? 'bg-[var(--color-accent-soft)] border-[var(--color-accent)]'
+                  : 'border-transparent hover:bg-white/60'"
+                @click="selectedLibraryNpcId = n.id"
+              >
+                <div class="w-10 h-10 rounded-full overflow-hidden bg-white/60 border border-[var(--color-accent)]/30 shrink-0 flex items-center justify-center">
+                  <img
+                    v-if="n.imageUrl"
+                    :src="`/api/npcs/${n.id}/image?v=${encodeURIComponent(n.updatedAt)}`"
+                    :alt="n.name"
+                    class="w-full h-full object-cover"
+                  >
+                  <UIcon v-else name="i-lucide-user" class="size-5 text-ink-300" />
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="font-semibold truncate text-sm">{{ n.name }}</div>
+                  <div class="text-[10px] uppercase tracking-widest text-ink-300">
+                    {{ n.system === 'htbah' ? 'HtbaH' : n.system === 'dnd' ? 'D&D' : n.system === 'dsa5' ? 'DSA 5' : '— ohne Würfler —' }}
+                    <template v-if="n.defaultHp !== null && n.defaultHpMax !== null">
+                      · {{ n.defaultHp }}/{{ n.defaultHpMax }} HP
+                    </template>
+                    <span
+                      v-if="n.groupId === null"
+                      class="ml-1 inline-block px-1 rounded bg-emerald-100 text-emerald-800 text-[9px]"
+                    >Privat</span>
+                    <span
+                      v-else
+                      class="ml-1 inline-block px-1 rounded bg-amber-100 text-amber-800 text-[9px]"
+                    >Gruppe</span>
+                  </div>
+                </div>
+              </button>
+            </div>
+            <UFormField label="Größe ueberschreiben (optional)" help="Library-Default wird sonst genutzt.">
+              <UInput v-model.number="newToken.size" type="number" min="1" max="8" />
+            </UFormField>
+          </template>
+
+          <!-- CHARACTER-Quelle: eigener Charakter -->
+          <template v-else-if="addTokenSource === 'character'">
+            <UFormField label="Charakter">
+              <USelect
+                v-model="newToken.characterId"
+                :items="charOptions"
+                value-key="value"
+                class="w-full"
+              />
+            </UFormField>
+            <UFormField label="Beschreibung (NPC-Karte, optional)">
+              <UTextarea
+                v-model="newToken.description"
+                :rows="3"
+                placeholder="Was sehen die Spieler, wenn sie auf den Token klicken?"
+                :maxlength="4000"
+              />
+            </UFormField>
+            <UFormField label="Größe (Rasterzellen)">
+              <UInput v-model.number="newToken.size" type="number" min="1" max="8" />
+            </UFormField>
+          </template>
+
+          <!-- MANUAL-Quelle: freier NPC/Marker -->
+          <template v-else>
+            <UFormField label="Name (NPC oder Karten-Marker)">
+              <UInput v-model="newToken.name" placeholder="z.B. Goblin #1" />
+            </UFormField>
+            <UFormField label="Bild (optional)" help="JPEG/PNG/WEBP, max 4 MB">
+              <input type="file" accept="image/jpeg,image/png,image/webp" class="block w-full text-sm" @change="onNewTokenFile">
+            </UFormField>
+            <UFormField label="Beschreibung (NPC-Karte, optional)">
+              <UTextarea
+                v-model="newToken.description"
+                :rows="3"
+                :maxlength="4000"
+              />
+            </UFormField>
+            <UFormField label="Größe (Rasterzellen)">
+              <UInput v-model.number="newToken.size" type="number" min="1" max="8" />
+            </UFormField>
+            <!-- NPC-Wuerfler: nur DM -->
+            <div v-if="isDm" class="border-t border-parchment-700/30 pt-3">
+              <NpcAbilitiesEditor
+                v-model:system="newToken.npcSystem"
+                v-model:abilities="newToken.npcAbilities"
+              />
+            </div>
+          </template>
+
           <UFormField v-if="isDm" label="Versteckt (nur DM sieht)">
             <UCheckbox v-model="newToken.hidden" />
           </UFormField>
-          <!-- NPC-Wuerfler: nur DM, nur fuer Tokens ohne Charakter -->
-          <div v-if="isDm && !newToken.characterId" class="border-t border-parchment-700/30 pt-3">
-            <NpcAbilitiesEditor
-              v-model:system="newToken.npcSystem"
-              v-model:abilities="newToken.npcAbilities"
-            />
-          </div>
           <p v-if="addTokenError" class="text-sm text-red-700">{{ addTokenError }}</p>
         </div>
       </template>
