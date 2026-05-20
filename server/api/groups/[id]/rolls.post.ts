@@ -362,15 +362,15 @@ export default defineEventHandler(async (event) => {
     if (body.characterId) {
       const char = await loadCharacterOrThrow(db, body.characterId, user.id)
       charName = char.name
-      wounds = woundsFromChar(char)
-    } else if (body.tokenId) {
-      const tok = await loadOwnedTokenOrThrow(db, body.tokenId, user.id)
-      wounds = woundsFromToken(tok)
     }
+    // Freie Wuerfe (= Schaden / Heilung aus MiniCharSheet + /roll-Chat-Kommando)
+    // bekommen bewusst KEINEN Wunden-Malus — eine verwundete Figur richtet
+    // trotzdem den vollen Wuerfelschaden an bzw. heilt voll. Daher bleibt
+    // `wounds` hier bei NO_WOUNDS.
     payload = rollFree({
       diceCount: body.diceCount,
       diceSides: body.diceSides,
-      modifier: combineModifier(body.modifier, wounds),
+      modifier: body.modifier,
       label: body.label,
       system: body.system,
       note: body.note,
