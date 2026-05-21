@@ -155,6 +155,7 @@ export function rollFree(input: FreeRollInput): RollPayload {
     dice,
     success: true, // freier Wurf: keine Auswertung
     note: input.note?.trim() || undefined,
+    freeRoll: true,
   }
 }
 

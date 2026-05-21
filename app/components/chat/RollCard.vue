@@ -20,11 +20,20 @@ interface RollPayload {
   damageMalus?: number
   /** Schadensstufe (0..3) zur Zeit des Wurfs. */
   damageLevel?: number
+  /** Bei Schadens-Wurf gegen Ziel: Snapshot des Ziel-Namens. */
+  targetName?: string
+  /** Bei Schadens-Wurf: Rüstungsschutz des Ziels (HtbaH). 0 bei keiner Rüstung. */
+  targetArmor?: number
+  /** Bei Schadens-Wurf: tatsächlicher Schaden nach Rüstung. */
+  finalDamage?: number
+  /** Marker fuer freie NdM±X-Wuerfe (Schaden/Heilung/Misc). */
+  freeRoll?: boolean
 }
 
 const props = defineProps<{ payload: RollPayload; mine: boolean }>()
 
 const tone = computed(() => {
+  if (props.payload.freeRoll) return 'free'
   if (props.payload.fumble) return 'fumble'
   if (props.payload.critical) return 'critical'
   if (props.payload.success) return 'success'
@@ -41,6 +50,8 @@ const toneClass = computed(() => {
       return 'bg-emerald-100 text-emerald-900 border-emerald-300'
     case 'failure':
       return 'bg-amber-100 text-amber-900 border-amber-300'
+    case 'free':
+      return 'bg-sky-100 text-sky-900 border-sky-300'
     default:
       return ''
   }
@@ -56,12 +67,15 @@ const iconName = computed(() => {
       return 'i-lucide-check'
     case 'failure':
       return 'i-lucide-x'
+    case 'free':
+      return 'i-lucide-dices'
     default:
       return ''
   }
 })
 
 const headlineText = computed(() => {
+  if (props.payload.freeRoll) return 'Wurf'
   if (props.payload.fumble) return 'Kritischer Patzer'
   if (props.payload.critical) return 'Kritischer Erfolg'
   if (props.payload.success) return 'Erfolg'
@@ -85,6 +99,22 @@ const qualityLabel = computed(() => {
 })
 
 const formattedDice = computed(() => props.payload.dice.join(', '))
+
+// Freie Wuerfe (Schaden/Heilung) zeigen die Wuerfel mit " + " verkettet,
+// damit der Spieler die Summe direkt nachvollziehen kann.
+const freeDiceSum = computed(() =>
+  props.payload.dice.reduce((a: number, b: number) => a + b, 0),
+)
+const freeDiceFormula = computed(() => props.payload.dice.join(' + '))
+
+// Ist das ein Schaden-Wurf gegen ein Ziel mit ausgewerteter Rüstung?
+// Wird auch dann als true angesehen, wenn die Rüstung 0 ist — wir wollen
+// "− Rüstung 0" trotzdem zeigen, damit klar ist: hier wurde berücksichtigt.
+const hasArmorBreakdown = computed(
+  () => props.payload.freeRoll
+    && typeof props.payload.targetArmor === 'number'
+    && typeof props.payload.finalDamage === 'number',
+)
 </script>
 
 <template>
@@ -99,7 +129,25 @@ const formattedDice = computed(() => props.payload.dice.join(', '))
       <span class="text-xs opacity-90">{{ payload.label }}</span>
     </div>
     <div class="text-xs opacity-90 space-y-0.5">
-      <div>
+      <!-- Freier Wurf (Schaden/Heilung/Misc): Wuerfel mit „+" verkettet, Summe
+           explizit, danach ggf. Ruestungs-Breakdown bei Schaden gegen Ziel. -->
+      <div v-if="payload.freeRoll">
+        Wurf:
+        <span class="font-mono font-semibold">{{ freeDiceFormula }}</span>
+        <template v-if="payload.dice.length > 1">
+          = <span class="font-mono font-semibold">{{ freeDiceSum }}</span>
+        </template>
+        <template v-if="payload.modifier">
+          + Mod {{ payload.modifier > 0 ? '+' : '' }}{{ payload.modifier }}
+          = <span class="font-mono font-semibold">{{ payload.target }}</span>
+        </template>
+        <template v-else-if="payload.dice.length === 1">
+          = <span class="font-mono font-semibold">{{ payload.target }}</span>
+        </template>
+        <template v-if="payload.characterName"> · {{ payload.characterName }}</template>
+      </div>
+      <!-- Klassischer Probenwurf (Skill/Save/Ability/etc.) -->
+      <div v-else>
         Wurf:
         <span class="font-mono font-semibold">{{ formattedDice }}</span>
         <template v-if="payload.modifier"> + Mod {{ payload.modifier > 0 ? '+' : '' }}{{ payload.modifier }}</template>
@@ -107,6 +155,18 @@ const formattedDice = computed(() => props.payload.dice.join(', '))
         gegen
         <span class="font-mono font-semibold">{{ payload.target }}</span>
         <template v-if="payload.characterName"> · {{ payload.characterName }}</template>
+      </div>
+      <!-- Schadens-Anrechnung gegen Ziel mit Ruestung -->
+      <div v-if="hasArmorBreakdown" class="font-semibold">
+        <span class="font-mono">{{ payload.target }}</span>
+        <template v-if="(payload.targetArmor ?? 0) > 0">
+          − Rüstung <span class="font-mono">{{ payload.targetArmor }}</span>
+          = <span class="font-mono">{{ payload.finalDamage }}</span> Schaden
+        </template>
+        <template v-else>
+          Schaden (Ziel ohne Rüstung)
+        </template>
+        <template v-if="payload.targetName"> an {{ payload.targetName }}</template>
       </div>
       <div v-if="qualityLabel">
         {{ qualityLabel }}<template v-if="margin !== null"> · um {{ margin }} unterboten</template>

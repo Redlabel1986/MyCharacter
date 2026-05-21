@@ -6,10 +6,11 @@
  * nicht manipulieren.
  */
 import { z } from 'zod'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
-import { battleTokens, characters, messages, type RollPayload } from '~~/server/database/schema'
+import { battleMaps, battleTokens, characters, messages, type RollPayload } from '~~/server/database/schema'
+import { htbahTotalArmor, type HtbahCharacterData } from '~~/shared/engines/htbah'
 import {
   rollDndAbility,
   rollDndSave,
@@ -105,6 +106,15 @@ const freeSchema = baseSchema.extend({
    * aus den Token-HPs berechnet.
    */
   tokenId: z.number().int().positive().optional(),
+  /**
+   * Bei einem Schadens-Wurf gegen ein Ziel-Token: Server zieht dessen Ruestung
+   * von der Wurfsumme ab und schreibt targetName/targetArmor/finalDamage ins
+   * Payload, damit die RollCard im Chat den Rest-Schaden sauber ausweist.
+   * `damageKind` schaltet zwischen Schaden (Ruestung wirkt) und Heilung
+   * (keine Ruestung, kein finalDamage).
+   */
+  targetTokenId: z.number().int().positive().optional(),
+  damageKind: z.enum(['damage', 'heal']).optional(),
 })
 
 const npcHtbahSchema = baseSchema.extend({
@@ -378,6 +388,49 @@ export default defineEventHandler(async (event) => {
       characterId: body.characterId,
       characterName: charName,
     })
+
+    // Ziel-Token aufloesen — fuer die Anzeige im Chat ("− Ruestung X → Y Schaden
+    // an <name>"). Wir berechnen NUR die Anzeigewerte; die tatsaechliche HP-
+    // Verrechnung passiert weiter im apply-damage-Endpoint und ist die einzig
+    // verbindliche Quelle. Hier nur Snapshot fuers Chat-Payload.
+    if (body.targetTokenId) {
+      // Nur Tokens der EIGENEN Gruppe nachschlagen — sonst koennte ein Client
+      // mit einer fremden tokenId Namen/Ruestung aus anderen Gruppen abgreifen.
+      const [targetTok] = await db
+        .select({
+          id: battleTokens.id,
+          name: battleTokens.name,
+          characterId: battleTokens.characterId,
+        })
+        .from(battleTokens)
+        .innerJoin(battleMaps, eq(battleMaps.id, battleTokens.mapId))
+        .where(
+          and(
+            eq(battleTokens.id, body.targetTokenId),
+            eq(battleMaps.groupId, groupId),
+          ),
+        )
+        .limit(1)
+      if (targetTok) {
+        payload.targetName = targetTok.name
+        let armor = 0
+        if (targetTok.characterId) {
+          const [c] = await db
+            .select({ system: characters.system, data: characters.data })
+            .from(characters)
+            .where(eq(characters.id, targetTok.characterId))
+            .limit(1)
+          if (c && c.system === 'htbah') {
+            armor = htbahTotalArmor(c.data as HtbahCharacterData)
+          }
+        }
+        const isDamage = body.damageKind !== 'heal'
+        if (isDamage) {
+          payload.targetArmor = armor
+          payload.finalDamage = Math.max(0, payload.target - armor)
+        }
+      }
+    }
   }
 
   // Original-Modifier + Wunden-Malus sauber in die Payload schreiben.

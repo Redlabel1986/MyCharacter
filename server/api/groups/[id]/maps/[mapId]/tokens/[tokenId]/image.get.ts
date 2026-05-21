@@ -1,12 +1,13 @@
 /**
  * GET /api/groups/:id/maps/:mapId/tokens/:tokenId/image — Bild des Tokens.
  *
- * - Wenn der Token an einen Charakter gebunden ist UND der Token kein eigenes
- *   Bild hat, faellt der Endpoint auf das Charakter-Portrait zurueck.
- * - Wenn der Token ein eigenes Bild hat (Blob-URL), liefern wir das.
- * - Spieler bekommen versteckte Token nicht (mit hidden=true).
+ * - Charakter-gebundene Tokens nutzen IMMER das LIVE-Charakter-Portrait, nicht
+ *   die zur Tokenerstellung kopierte URL. So sieht der Token sofort die richtige
+ *   Bilddatei, wenn der Spieler nachtraeglich ein Portrait hochlaedt oder
+ *   austauscht.
+ * - NPC-/Manuelle Tokens nutzen tok.imageUrl (Blob oder lokales /uploads/).
+ * - Spieler bekommen versteckte Token nicht (hidden=true → 403).
  */
-import { get } from '@vercel/blob'
 import { and, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
@@ -51,37 +52,10 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 403, statusMessage: 'Token ist versteckt.' })
   }
 
-  // Eigenes Token-Bild hat Vorrang
-  if (tok.imageUrl) {
-    const isOurBlob = tok.imageUrl.includes('.blob.vercel-storage.com')
-    if (!isOurBlob) {
-      // legacy oder externes Bild — direkt durchreichen
-      throw createError({ statusCode: 302, statusMessage: 'Found' })
-    }
-    const token = process.env.BLOB_READ_WRITE_TOKEN
-    if (!token) {
-      throw createError({ statusCode: 503, statusMessage: 'BLOB_READ_WRITE_TOKEN fehlt.' })
-    }
-    try {
-      const got = await get(tok.imageUrl, { access: 'private', token })
-      if (!got?.stream) {
-        throw createError({ statusCode: 404, statusMessage: 'Bild nicht im Blob.' })
-      }
-      const buf = Buffer.from(await new Response(got.stream).arrayBuffer())
-      setHeader(event, 'content-type', got.blob.contentType || 'image/png')
-      setHeader(event, 'content-length', buf.byteLength)
-      setHeader(event, 'cache-control', 'private, max-age=300')
-      return buf
-    } catch (err) {
-      if ((err as { statusCode?: number }).statusCode) throw err
-      throw createError({
-        statusCode: 502,
-        statusMessage: `Token-Bild fehlgeschlagen: ${(err as Error).message ?? 'unbekannt'}`,
-      })
-    }
-  }
-
-  // Fallback: Charakter-Portrait
+  // 1) Charakter-Token: immer live aus dem Charakter-Portrait streamen.
+  //    Wenn der Charakter (noch) kein Portrait hat, sehen wir auf den
+  //    Token-Snapshot zurueck (z.B. wenn der DM explizit ein Bild fuer den
+  //    Token hochgeladen hat).
   if (tok.characterId) {
     const [char] = await db
       .select()
@@ -91,6 +65,12 @@ export default defineEventHandler(async (event) => {
     if (char?.portraitUrl) {
       return await streamPortrait(event, char.portraitUrl)
     }
+  }
+
+  // 2) NPC- / manuelles Token mit eigenem Bild — streamPortrait kann sowohl
+  //    Vercel-Blob als auch /uploads/-Pfade.
+  if (tok.imageUrl) {
+    return await streamPortrait(event, tok.imageUrl)
   }
 
   throw createError({ statusCode: 404, statusMessage: 'Kein Bild gesetzt.' })

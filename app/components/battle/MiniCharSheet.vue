@@ -530,6 +530,11 @@ const rollDamage = async () => {
         system: sys,
         characterId: character.value?.id,
         tokenId: rollerTokenId,
+        // Bei Ziel-Wahl: Server schlaegt Ruestung des Ziels nach und schreibt
+        // targetArmor/finalDamage ins Payload, damit die RollCard im Chat den
+        // tatsaechlichen Trefferschaden anzeigt.
+        targetTokenId: target?.id,
+        damageKind: isHeal ? 'heal' : 'damage',
       },
     })) as RollMessage
 

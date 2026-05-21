@@ -155,6 +155,27 @@ export interface RollPayload {
   damageMalus?: number
   /** Schadensstufe (0..3) zur Zeit des Wurfs (Snapshot). */
   damageLevel?: number
+  /**
+   * Bei Schadenswuerfen mit Ziel-Token: Name des Ziels (Snapshot). Wird in
+   * RollCard als „… Schaden an <name>" angezeigt.
+   */
+  targetName?: string
+  /**
+   * Rüstungsschutz des Ziels zur Zeit des Wurfs (HtbaH: htbahTotalArmor). 0
+   * wenn das Ziel keine Rüstung trägt oder ein nicht-HtbaH-System nutzt.
+   */
+  targetArmor?: number
+  /**
+   * Effektiv durchgehender Schaden nach Rüstungsabzug. `Math.max(0, sum -
+   * targetArmor)`. Nur bei Schadenswuerfen gesetzt (nicht bei Heilung).
+   */
+  finalDamage?: number
+  /**
+   * Markiert einen freien NdM±X-Wurf (Schaden/Heilung/Misc). RollCard nutzt
+   * das Flag, um die Wuerfel-Liste mit „+" statt Kommas zu rendern und die
+   * Trefferanzeige (Ruestung/finalDamage) einzublenden.
+   */
+  freeRoll?: boolean
 }
 
 export type MessagePayload = CharacterSharePayload | RollPayload | null
