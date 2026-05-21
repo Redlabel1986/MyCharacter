@@ -140,19 +140,26 @@ const hasHealBreakdown = computed(
     </div>
     <div class="text-xs opacity-90 space-y-0.5">
       <!-- Freier Wurf (Schaden/Heilung/Misc): Wuerfel mit „+" verkettet, Summe
-           explizit, danach ggf. Ruestungs-Breakdown bei Schaden gegen Ziel. -->
+           explizit, danach ggf. Ruestungs-Breakdown bei Schaden gegen Ziel.
+           Sonderfall ohne Wuerfel (fixe Effekte wie Heiltrank): zeigt nur
+           „Effekt: N", ohne den Wurf-Prefix. -->
       <div v-if="payload.freeRoll">
-        Wurf:
-        <span class="font-mono font-semibold">{{ freeDiceFormula }}</span>
-        <template v-if="payload.dice.length > 1">
-          = <span class="font-mono font-semibold">{{ freeDiceSum }}</span>
+        <template v-if="payload.dice.length === 0">
+          Effekt: <span class="font-mono font-semibold">{{ payload.target }}</span>
         </template>
-        <template v-if="payload.modifier">
-          + Mod {{ payload.modifier > 0 ? '+' : '' }}{{ payload.modifier }}
-          = <span class="font-mono font-semibold">{{ payload.target }}</span>
-        </template>
-        <template v-else-if="payload.dice.length === 1">
-          = <span class="font-mono font-semibold">{{ payload.target }}</span>
+        <template v-else>
+          Wurf:
+          <span class="font-mono font-semibold">{{ freeDiceFormula }}</span>
+          <template v-if="payload.dice.length > 1">
+            = <span class="font-mono font-semibold">{{ freeDiceSum }}</span>
+          </template>
+          <template v-if="payload.modifier">
+            + Mod {{ payload.modifier > 0 ? '+' : '' }}{{ payload.modifier }}
+            = <span class="font-mono font-semibold">{{ payload.target }}</span>
+          </template>
+          <template v-else-if="payload.dice.length === 1">
+            = <span class="font-mono font-semibold">{{ payload.target }}</span>
+          </template>
         </template>
         <template v-if="payload.characterName"> · {{ payload.characterName }}</template>
       </div>

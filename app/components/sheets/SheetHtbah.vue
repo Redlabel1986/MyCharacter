@@ -27,6 +27,7 @@ import {
   type HtbahWeaponEntry,
   type HtbahSpellEntry,
   type HtbahSpellLevel,
+  type HtbahUsableItem,
 } from '~~/shared/engines/htbah'
 import type { GameSystem } from '~~/shared/systems'
 import SheetSection from '~/components/ui/SheetSection.vue'
@@ -88,6 +89,15 @@ const sheet = computed<HtbahCharacterData>(() => {
     beute: incoming.beute ?? '',
     armor: Array.isArray(incoming.armor) ? incoming.armor : [],
     weapons: Array.isArray(incoming.weapons) ? incoming.weapons : [],
+    usableItems: Array.isArray(incoming.usableItems)
+      ? incoming.usableItems.map((i) => ({
+          id: i.id,
+          name: i.name ?? '',
+          healAmount: Math.max(0, Math.floor(Number(i.healAmount ?? 0))),
+          quantity: Math.max(0, Math.floor(Number(i.quantity ?? 0))),
+          note: i.note ?? '',
+        }))
+      : [],
     spells: Array.isArray(incoming.spells)
       ? incoming.spells.map((s) => ({
           id: s.id,
@@ -217,6 +227,36 @@ const removeWeapon = (idx: number) => {
   const list = n.weapons ?? []
   list.splice(idx, 1)
   n.weapons = list
+  update(n)
+}
+
+// --- Verwendbare Gegenstaende (Heiltrank, Erste-Hilfe-Paket, …) ---
+const addUsableItem = () => {
+  const n = clone()
+  if (!n.usableItems) n.usableItems = []
+  n.usableItems.push({
+    id: crypto.randomUUID(),
+    name: '',
+    healAmount: 0,
+    quantity: 1,
+    note: '',
+  })
+  update(n)
+}
+const updateUsableItem = (idx: number, patch: Partial<HtbahUsableItem>) => {
+  const n = clone()
+  const list = n.usableItems ?? []
+  const current = list[idx]
+  if (!current) return
+  list[idx] = { ...current, ...patch }
+  n.usableItems = list
+  update(n)
+}
+const removeUsableItem = (idx: number) => {
+  const n = clone()
+  const list = n.usableItems ?? []
+  list.splice(idx, 1)
+  n.usableItems = list
   update(n)
 }
 
@@ -1232,6 +1272,73 @@ const postRollToGroup = async () => {
             </div>
           </div>
         </div>
+      </div>
+    </SheetSection>
+
+    <!-- Verwendbare Gegenstände: Heiltrank, Erste-Hilfe-Paket o.aE. mit festem
+         Heilwert + Anzahl. Im Battle-Map-Mini-Charsheet auf sich oder ein
+         Ziel anwendbar — Anzahl sinkt automatisch um 1. -->
+    <SheetSection title="Verwendbare Gegenstände" class="lg:col-span-2">
+      <div class="flex items-baseline justify-between gap-2 mb-2">
+        <p class="text-xs text-ink-300/80">
+          Heiltrank, Erste-Hilfe-Paket o.ä. — Heilwert in HP plus Anzahl.
+          Im Battle-Map-Mini-Charsheet wählst du Ziel + verwendest sie per Klick.
+        </p>
+        <UButton size="xs" variant="soft" icon="i-lucide-plus" @click="addUsableItem">
+          Gegenstand
+        </UButton>
+      </div>
+      <p
+        v-if="!(sheet.usableItems && sheet.usableItems.length)"
+        class="text-xs text-ink-300 italic"
+      >
+        Noch nichts eingetragen.
+      </p>
+      <div
+        v-for="(item, idx) in (sheet.usableItems ?? [])"
+        :key="item.id"
+        class="grid grid-cols-12 gap-2 items-center"
+      >
+        <UInput
+          class="col-span-5"
+          :model-value="item.name"
+          placeholder="z.B. Heiltrank, Erste-Hilfe-Paket"
+          :maxlength="60"
+          @update:model-value="updateUsableItem(idx, { name: String($event) })"
+        />
+        <UInput
+          class="col-span-2"
+          type="number"
+          min="0"
+          :model-value="item.healAmount"
+          placeholder="Heilung"
+          title="Heilwert in HP"
+          @update:model-value="updateUsableItem(idx, { healAmount: Math.max(0, Math.floor(Number($event) || 0)) })"
+        />
+        <UInput
+          class="col-span-2"
+          type="number"
+          min="0"
+          :model-value="item.quantity"
+          placeholder="Anzahl"
+          title="Wie viele du davon dabei hast"
+          @update:model-value="updateUsableItem(idx, { quantity: Math.max(0, Math.floor(Number($event) || 0)) })"
+        />
+        <UInput
+          class="col-span-2"
+          :model-value="item.note ?? ''"
+          placeholder="Notiz"
+          :maxlength="80"
+          @update:model-value="updateUsableItem(idx, { note: String($event) })"
+        />
+        <UButton
+          class="col-span-1"
+          size="xs"
+          variant="ghost"
+          color="error"
+          icon="i-lucide-x"
+          @click="removeUsableItem(idx)"
+        />
       </div>
     </SheetSection>
 

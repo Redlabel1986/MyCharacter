@@ -114,6 +114,14 @@ export interface HtbahCharacterData {
    */
   spells?: HtbahSpellEntry[]
   /**
+   * Verwendbare Gegenstaende (Heiltrank, Erste-Hilfe-Paket, …). Pro Item
+   * fester Heilwert in HP, dazu Anzahl im Beutel. Im Mini-Charsheet kann
+   * der Spieler das Item per Klick auf sich oder ein anderes Ziel-Token
+   * anwenden — Heilung wird angewandt, Anzahl wird um 1 reduziert, und
+   * im Gruppen-Chat erscheint eine Nachricht.
+   */
+  usableItems?: HtbahUsableItem[]
+  /**
    * Strukturierter Geldbeutel — wird vom Mini-Charsheet (Battle-Map) und vom
    * vollen Bogen gemeinsam gepflegt. Werte sind Ganzzahlen >= 0.
    * Umrechnung: 100 Kupfer = 1 Silber, 100 Silber = 1 Gold.
@@ -158,6 +166,7 @@ export function createBlankHtbah(name: string): HtbahCharacterData {
     armor: [],
     weapons: [],
     spells: [],
+    usableItems: [],
     purse: { copper: 0, silver: 0, gold: 0 },
     magic: '',
     notes: '',
@@ -233,6 +242,21 @@ export interface HtbahSpellEntry {
    */
   skillId: string
   levels: HtbahSpellLevel[]
+  note?: string
+}
+
+/**
+ * Verwendbarer Gegenstand mit festem Heilwert. Wird im Mini-Charsheet
+ * auf sich selbst oder ein anderes Token angewandt. Bei jedem Verwenden
+ * sinkt `quantity` um 1; ist 0 erreicht, verschwindet der Knopf.
+ */
+export interface HtbahUsableItem {
+  id: string
+  name: string
+  /** Fester Heilwert in HP. Negative Werte werden auf 0 geclampt. */
+  healAmount: number
+  /** Anzahl im Beutel. 0 = aufgebraucht. */
+  quantity: number
   note?: string
 }
 

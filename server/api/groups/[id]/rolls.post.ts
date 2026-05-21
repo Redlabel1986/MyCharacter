@@ -96,8 +96,10 @@ const dsa5AbilitySchema = baseSchema.extend({
 
 const freeSchema = baseSchema.extend({
   kind: z.literal('free'),
-  diceCount: z.number().int().min(1).max(20),
-  diceSides: z.number().int().min(2).max(1000),
+  // diceCount: 0 erlaubt fixe Effekte (Heiltrank, Erste-Hilfe-Paket) — dann
+  // ist die "Wurfsumme" einfach der Modifier, ohne echten Wurf.
+  diceCount: z.number().int().min(0).max(20),
+  diceSides: z.number().int().min(1).max(1000),
   label: z.string().min(1).max(80),
   system: z.enum(['dnd5e', 'dnd2024', 'dsa5', 'dsa41', 'htbah']),
   /**

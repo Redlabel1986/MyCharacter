@@ -23,6 +23,7 @@ import {
   type HtbahWeaponEntry,
   type HtbahSpellEntry,
   type HtbahSpellLevel,
+  type HtbahUsableItem,
 } from '~~/shared/engines/htbah'
 import {
   DND_ABILITIES,
@@ -673,6 +674,104 @@ const rollDamage = async () => {
     damageError.value = (e as { statusMessage?: string }).statusMessage ?? 'Wurf fehlgeschlagen.'
   } finally {
     damageSending.value = false
+  }
+}
+
+// --- Verwendbare Gegenstaende (Heiltrank, Erste-Hilfe-Paket, …) ---
+// Liste nur fuer HtbaH-Charaktere mit gepflegten Items. Items mit
+// quantity <= 0 werden nicht mehr angeboten.
+const characterUsableItems = computed<HtbahUsableItem[]>(() => {
+  if (!htbahData.value) return []
+  return (htbahData.value.usableItems ?? []).filter(
+    (i: HtbahUsableItem) => i.name?.trim() && i.quantity > 0,
+  )
+})
+// Pro Item ein eigenes Ziel-Token-Ref (key = item.id), damit der Spieler
+// pro Item separat Ziel waehlen kann.
+const usableTargetByItem = ref<Record<string, number>>({})
+// Default: erstes eigenes Token (oder das aktive Token).
+const defaultUsableTargetId = computed<number>(() => activeToken.value?.id ?? 0)
+const getItemTarget = (itemId: string): number =>
+  usableTargetByItem.value[itemId] ?? defaultUsableTargetId.value
+const setItemTarget = (itemId: string, tokenId: number) => {
+  usableTargetByItem.value = { ...usableTargetByItem.value, [itemId]: tokenId }
+}
+
+const usingItemId = ref<string | null>(null)
+const itemUseError = ref<string | null>(null)
+const itemUseResult = ref<string | null>(null)
+
+const useItem = async (item: HtbahUsableItem) => {
+  if (!character.value || !htbahData.value) return
+  const amount = Math.max(0, Math.floor(item.healAmount))
+  if (amount <= 0) {
+    itemUseError.value = 'Heilwert ist 0 — bitte am Charakterbogen einen Wert eintragen.'
+    return
+  }
+  const targetId = getItemTarget(item.id)
+  const target = damageTargetTokens.value.find((t: Token) => t.id === targetId) ?? null
+  if (!target) {
+    itemUseError.value = 'Bitte ein Ziel waehlen.'
+    return
+  }
+  usingItemId.value = item.id
+  itemUseError.value = null
+  itemUseResult.value = null
+  try {
+    // 1) Chat-Nachricht: kein echter Wurf — diceCount=0, modifier=amount.
+    //    Server stempelt damageKind='heal' + targetName, RollCard zeigt dann
+    //    "Effekt: N · <Ziel> wird um N geheilt".
+    await $fetch(`/api/groups/${props.groupId}/rolls`, {
+      method: 'POST',
+      body: {
+        kind: 'free',
+        diceCount: 0,
+        diceSides: 1,
+        modifier: amount,
+        label: `Verwende ${item.name}`,
+        system: 'htbah',
+        characterId: character.value.id,
+        targetTokenId: target.id,
+        damageKind: 'heal',
+      },
+    })
+
+    // 2) HP des Ziels anpassen — apply-damage verarbeitet Heilung korrekt.
+    if (target.hp !== null && target.hpMax !== null && target.hpMax !== undefined) {
+      const res = (await $fetch(
+        `/api/groups/${props.groupId}/maps/${props.mapId}/tokens/${target.id}/apply-damage`,
+        { method: 'POST', body: { amount, kind: 'heal' } },
+      )) as { oldHp: number; hp: number; hpMax: number; applied: number }
+      target.hp = res.hp
+      itemUseResult.value = `+${res.applied} HP an ${target.name} (${res.oldHp} → ${res.hp}/${res.hpMax}).`
+      emit('token-updated')
+    } else {
+      itemUseResult.value = `${item.name} verwendet — ${target.name} hat keine HP gepflegt, daher nicht automatisch angerechnet.`
+    }
+
+    // 3) Anzahl am Charakter um 1 verringern.
+    const nextData: HtbahCharacterData = JSON.parse(JSON.stringify(htbahData.value))
+    const list = nextData.usableItems ?? []
+    const existing = list.find((x: HtbahUsableItem) => x.id === item.id)
+    if (existing) {
+      existing.quantity = Math.max(0, existing.quantity - 1)
+      nextData.usableItems = list
+      const putRes = (await $fetch(`/api/characters/${character.value.id}`, {
+        method: 'PUT',
+        body: { data: nextData },
+      })) as { character: CharacterFull }
+      if (putRes.character) {
+        character.value = putRes.character
+        cacheByCharId.set(character.value.id, putRes.character)
+      }
+    }
+
+    setTimeout(() => (itemUseResult.value = null), 3500)
+  } catch (e: unknown) {
+    itemUseError.value =
+      (e as { statusMessage?: string }).statusMessage ?? 'Gegenstand konnte nicht verwendet werden.'
+  } finally {
+    usingItemId.value = null
   }
 }
 
@@ -1407,6 +1506,69 @@ const onImageError = (tokenId: number) => {
         >
           {{ damageApplyResult }}
         </p>
+      </div>
+
+      <!-- Verwendbare Gegenstände: Heiltrank, Erste-Hilfe-Paket o.aE. — pro
+           Eintrag Ziel-Dropdown + Verwenden-Knopf. Klick: heilt Ziel, postet
+           Chat-Nachricht, reduziert Anzahl. -->
+      <div
+        v-if="characterUsableItems.length"
+        class="space-y-2 border-t border-parchment-700/30 pt-3"
+      >
+        <div class="text-[10px] uppercase tracking-widest text-ink-300">
+          Verwendbare Gegenstände
+        </div>
+        <div
+          v-for="item in characterUsableItems"
+          :key="item.id"
+          class="grid grid-cols-12 gap-2 items-end"
+        >
+          <div class="col-span-4 flex items-center gap-2 min-w-0">
+            <span
+              class="text-[10px] tabular-nums px-1.5 py-0.5 rounded font-semibold"
+              :style="{
+                background: '#10b98122',
+                color: '#065f46',
+                border: '1px solid #10b981',
+              }"
+              :title="`Heilt ${item.healAmount} HP, ${item.quantity} dabei`"
+            >
+              ✚{{ item.healAmount }} · {{ item.quantity }}×
+            </span>
+            <span class="text-xs font-semibold truncate" :title="item.name">
+              {{ item.name }}
+            </span>
+          </div>
+          <UFormField label="Ziel" class="col-span-5">
+            <USelect
+              :model-value="getItemTarget(item.id)"
+              :items="damageTargetTokens.map((t) => ({
+                label: t.id === activeToken?.id
+                  ? `Auf mich (${t.name})`
+                  : `${t.name}${t.hp !== null && t.hpMax ? ' · ' + t.hp + '/' + t.hpMax : ''}`,
+                value: t.id,
+              }))"
+              value-key="value"
+              size="sm"
+              class="w-full"
+              @update:model-value="setItemTarget(item.id, Number($event))"
+            />
+          </UFormField>
+          <UButton
+            class="col-span-3"
+            color="success"
+            icon="i-lucide-heart-pulse"
+            size="sm"
+            block
+            :loading="usingItemId === item.id"
+            :disabled="usingItemId !== null"
+            @click="useItem(item)"
+          >
+            Verwenden
+          </UButton>
+        </div>
+        <p v-if="itemUseError" class="text-xs text-red-700">{{ itemUseError }}</p>
+        <p v-if="itemUseResult" class="text-xs text-emerald-700">{{ itemUseResult }}</p>
       </div>
 
       <!-- Klappbares Inventar / Beschreibung -->
