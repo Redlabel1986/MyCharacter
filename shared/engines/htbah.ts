@@ -93,6 +93,19 @@ export interface HtbahCharacterData {
   inventory: string
   beute: string
   /**
+   * Ruestungs-Teile (Helm, Lederruestung, Schild, …). Summe der `value`-
+   * Werte ergibt die Gesamt-Ruestung; sie wird bei Schadenswuerfen vom
+   * eingehenden Schaden abgezogen (clamped auf >= 0). Optional, damit alte
+   * Charaktere ohne Migration weiter funktionieren.
+   */
+  armor?: HtbahArmorPiece[]
+  /**
+   * Waffen-Liste (Kurzschwert 4d10, Bogen 6d10, …). Im Mini-Charsheet
+   * koennen diese fuer den Schadenswurf direkt ausgewaehlt werden, dann
+   * wird `damageFormula` automatisch ins Wurf-Feld uebernommen.
+   */
+  weapons?: HtbahWeaponEntry[]
+  /**
    * Strukturierter Geldbeutel — wird vom Mini-Charsheet (Battle-Map) und vom
    * vollen Bogen gemeinsam gepflegt. Werte sind Ganzzahlen >= 0.
    * Umrechnung: 100 Kupfer = 1 Silber, 100 Silber = 1 Gold.
@@ -134,10 +147,48 @@ export function createBlankHtbah(name: string): HtbahCharacterData {
     backstory: { text: '', points: 0 },
     inventory: '',
     beute: '',
+    armor: [],
+    weapons: [],
     purse: { copper: 0, silver: 0, gold: 0 },
     magic: '',
     notes: '',
   }
+}
+
+/**
+ * Ein Stueck Ruestung mit Schutzwert in HP-Punkten. Mehrere Teile (Helm,
+ * Brustpanzer, Schild …) werden bei der Schadensrechnung aufsummiert.
+ */
+export interface HtbahArmorPiece {
+  id: string
+  name: string
+  /** Schutzwert in HP. Negative Werte werden bei der Summe geclampt. */
+  value: number
+  note?: string
+}
+
+/**
+ * Waffe im Inventar — Name + Schadensformel (z.B. "4d10", "1d10+3").
+ * Wird im Mini-Charsheet als Auswahl angeboten und fuellt den Schaden-
+ * Wurf direkt aus.
+ */
+export interface HtbahWeaponEntry {
+  id: string
+  name: string
+  /** Beliebige NdM±X-Formel, wird in MiniCharSheet's Schaden-Wuerfler uebernommen. */
+  damageFormula: string
+  note?: string
+}
+
+/**
+ * Summe aller Ruestungs-Schutzwerte (>= 0). Wird sowohl im Bogen als auch
+ * serverseitig im apply-damage-Endpoint genutzt.
+ */
+export function htbahTotalArmor(data: HtbahCharacterData): number {
+  const list = data.armor ?? []
+  let sum = 0
+  for (const a of list) sum += Math.max(0, Math.floor(a.value || 0))
+  return Math.max(0, sum)
 }
 
 /**

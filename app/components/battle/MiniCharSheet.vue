@@ -15,10 +15,12 @@ import {
   HTBAH_TALENT_LABELS,
   htbahSkillTotal,
   htbahTalentValue,
+  htbahTotalArmor,
   normalizeHtbahPurse,
   type HtbahCharacterData,
   type HtbahSkill,
   type HtbahTalent,
+  type HtbahWeaponEntry,
 } from '~~/shared/engines/htbah'
 import {
   DND_ABILITIES,
@@ -396,6 +398,36 @@ watch(selectedTokenId, () => {
   damageLabel.value = 'Schaden'
 })
 
+// --- Waffen-Auswahl (nur HtbaH-Charaktere mit gepflegten Waffen) ---
+const characterWeapons = computed<HtbahWeaponEntry[]>(() => {
+  if (!htbahData.value) return []
+  return (htbahData.value.weapons ?? []).filter(
+    (w: HtbahWeaponEntry) => w.name?.trim() || w.damageFormula?.trim(),
+  )
+})
+const weaponOptions = computed(() => [
+  { label: '— Waffe waehlen —', value: '' },
+  ...characterWeapons.value.map((w: HtbahWeaponEntry) => ({
+    label: `${w.name} (${w.damageFormula})`,
+    value: w.id,
+  })),
+])
+const selectedWeaponId = ref<string>('')
+// Wenn der Spieler eine Waffe waehlt, Formel + Label uebernehmen.
+watch(selectedWeaponId, (id: string) => {
+  if (!id) return
+  const w = characterWeapons.value.find((x: HtbahWeaponEntry) => x.id === id)
+  if (!w) return
+  damageFormula.value = w.damageFormula
+  damageLabel.value = w.name || 'Schaden'
+})
+
+// Ruestungs-Anzeige fuer das aktive (eigene) Token, rein informativ.
+const activeArmor = computed(() => {
+  if (!htbahData.value) return 0
+  return htbahTotalArmor(htbahData.value)
+})
+
 // --- Schaden-Wuerfler (freier NdM+X-Wurf, fuer Charakter- und NPC-Tokens) ---
 const damageFormula = ref<string>('')
 const damageLabel = ref<string>('Schaden')
@@ -526,21 +558,26 @@ const rollDamage = async () => {
       } else {
         // Negativ-Ergebnis (z.B. wegen schwerer Wunde) wirkt sich nicht
         // umgekehrt aus — Wurfwert wird auf 0 geclampt.
-        const effective = Math.max(0, total)
-        const oldHp = target.hp ?? 0
-        const max = target.hpMax ?? oldHp
-        const newHp = isHeal
-          ? Math.min(max, oldHp + effective)
-          : Math.max(0, oldHp - effective)
+        const amount = Math.max(0, total)
         try {
-          await $fetch(
-            `/api/groups/${props.groupId}/maps/${props.mapId}/tokens/${target.id}`,
-            { method: 'PUT', body: { hp: newHp } },
-          )
-          target.hp = newHp
+          // apply-damage rechnet serverseitig Ruestung ab (HtbaH) und
+          // liefert oldHp/hp/hpMax/absorbed/applied zurueck.
+          const res = (await $fetch(
+            `/api/groups/${props.groupId}/maps/${props.mapId}/tokens/${target.id}/apply-damage`,
+            { method: 'POST', body: { amount, kind: isHeal ? 'heal' : 'damage' } },
+          )) as {
+            oldHp: number
+            hp: number
+            hpMax: number
+            absorbed: number
+            applied: number
+          }
+          target.hp = res.hp
+          const armorPart =
+            res.absorbed > 0 ? ` (Ruestung absorbiert ${res.absorbed})` : ''
           damageApplyResult.value = isHeal
-            ? `+${effective} HP an ${target.name} (${oldHp} → ${newHp}/${max}).`
-            : `−${effective} HP an ${target.name} (${oldHp} → ${newHp}/${max}).`
+            ? `+${res.applied} HP an ${target.name} (${res.oldHp} → ${res.hp}/${res.hpMax}).`
+            : `−${res.applied} HP an ${target.name}${armorPart} (${res.oldHp} → ${res.hp}/${res.hpMax}).`
           emit('token-updated')
         } catch (err: unknown) {
           damageApplyResult.value =
@@ -1144,9 +1181,37 @@ const onImageError = (tokenId: number) => {
            Ziel-Token. Wenn ein Ziel gewaehlt ist, wird das Ergebnis direkt von
            seinen HP abgezogen (Schaden) oder addiert (Heilung). -->
       <div class="space-y-2 border-t border-parchment-700/30 pt-3">
-        <div class="text-[10px] uppercase tracking-widest text-ink-300">
-          {{ damageMode === 'heal' ? 'Heilung' : 'Schaden' }} würfeln
+        <div class="flex items-baseline justify-between gap-2">
+          <div class="text-[10px] uppercase tracking-widest text-ink-300">
+            {{ damageMode === 'heal' ? 'Heilung' : 'Schaden' }} würfeln
+          </div>
+          <span
+            v-if="activeArmor > 0"
+            class="text-[10px] uppercase tracking-widest font-semibold px-2 py-0.5 rounded"
+            :style="{
+              background: '#1e3a8a22',
+              color: '#1e3a8a',
+              border: '1px solid #1e3a8a',
+            }"
+            title="Ruestung wird beim eingehenden Schaden serverseitig abgezogen."
+          >
+            🛡 Ruestung {{ activeArmor }}
+          </span>
         </div>
+        <!-- Waffe waehlen (nur HtbaH-Charaktere mit Waffen) -->
+        <UFormField
+          v-if="characterWeapons.length"
+          label="Waffe"
+          help="Auswahl fuellt Wuerfel + Bezeichnung automatisch."
+        >
+          <USelect
+            v-model="selectedWeaponId"
+            :items="weaponOptions"
+            value-key="value"
+            size="sm"
+            class="w-full"
+          />
+        </UFormField>
         <!-- Modus + Ziel -->
         <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
           <UFormField label="Modus" class="sm:col-span-4">
