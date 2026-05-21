@@ -2788,6 +2788,14 @@ const endResize = () => {
         >
           ← Karten
         </NuxtLink>
+        <NuxtLink
+          :to="`/groups/${groupId}/glossary`"
+          class="text-sm text-[var(--color-accent)] hover:underline flex items-center gap-1"
+          title="Bestiarium: alle Token, die je auf einer Karte waren"
+        >
+          <UIcon name="i-lucide-book-open" class="size-4" />
+          Glossar
+        </NuxtLink>
         <h1 class="font-serif text-2xl flex-1 truncate">{{ map.name }}</h1>
         <div class="flex items-center gap-2 flex-wrap">
           <UButton size="xs" variant="outline" icon="i-lucide-zoom-out" @click="zoomOut" />

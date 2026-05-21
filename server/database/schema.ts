@@ -558,6 +558,65 @@ export const npcLibrary = pgTable(
 export type NpcLibraryEntry = typeof npcLibrary.$inferSelect
 export type NewNpcLibraryEntry = typeof npcLibrary.$inferInsert
 
+/**
+ * Bestiarium / Glossar pro Gruppe. Sammelt alle Charaktere, NPCs und
+ * Monster, die JE auf einer Karte dieser Gruppe sichtbar waren
+ * (hidden=true zaehlt nicht — Spoiler bleiben Spoiler).
+ *
+ * Eintraege werden beim Spawn / Un-Hide eines Tokens upserted, gekeyed
+ * ueber `sourceKey`:
+ *   - 'char:<characterId>' fuer Charakter-Tokens (1 Eintrag pro PC pro Gruppe)
+ *   - 'npc-lib:<npcLibraryId>' fuer Library-Spawns (Goblin Wache #1 und #2 -> 1 Eintrag)
+ *   - 'name:<lowercased-name>' fuer ad-hoc-NPCs ohne stabile Quelle
+ *
+ * Spaetere Token-Updates (Name, Bild, Beschreibung, Stats) aktualisieren
+ * den vorhandenen Eintrag — Spieler sehen den letzten Stand.
+ */
+export const glossaryEntries = pgTable(
+  'glossary_entries',
+  {
+    id: serial('id').primaryKey(),
+    groupId: integer('group_id')
+      .notNull()
+      .references(() => groups.id, { onDelete: 'cascade' }),
+    sourceKey: text('source_key').notNull(),
+    name: text('name').notNull(),
+    /** Charakter-ID, falls Eintrag von einem Spieler-Charakter stammt. */
+    characterId: integer('character_id').references(() => characters.id, {
+      onDelete: 'set null',
+    }),
+    /** Letzter bekannter Token, von dem geschnappshottet wurde — fuer Bild-Fallback. */
+    lastTokenId: integer('last_token_id'),
+    imageUrl: text('image_url'),
+    description: text('description').notNull().default(''),
+    system: text('system').$type<'htbah' | 'dnd' | 'dsa5' | null>(),
+    npcAbilities: jsonb('npc_abilities')
+      .notNull()
+      .$type<import('~~/shared/npc').NpcAbility[]>()
+      .default([]),
+    hpMax: integer('hp_max'),
+    sizeMultiplier: integer('size_multiplier').notNull().default(1),
+    visionRadius: integer('vision_radius').notNull().default(1),
+    moveRange: integer('move_range').notNull().default(8),
+    firstSeenAt: timestamp('first_seen_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    unq: unique('uniq_glossary_group_source').on(table.groupId, table.sourceKey),
+    groupIdx: index('idx_glossary_group').on(table.groupId),
+  }),
+)
+
+export type GlossaryEntry = typeof glossaryEntries.$inferSelect
+export type NewGlossaryEntry = typeof glossaryEntries.$inferInsert
+
 // App-weite Einstellungen als Key/Value (z. B. library_password_hash).
 export const appSettings = pgTable('app_settings', {
   key: text('key').primaryKey(),

@@ -423,6 +423,34 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
     CREATE INDEX IF NOT EXISTS idx_npc_library_group ON npc_library(group_id)
   `)
 
+  // Glossar / Bestiarium pro Gruppe — sammelt jeden Token, der je auf einer
+  // Map sichtbar war (siehe shared/glossary).
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS glossary_entries (
+      id SERIAL PRIMARY KEY,
+      group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      source_key TEXT NOT NULL,
+      name TEXT NOT NULL,
+      character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL,
+      last_token_id INTEGER,
+      image_url TEXT,
+      description TEXT NOT NULL DEFAULT '',
+      system TEXT,
+      npc_abilities JSONB NOT NULL DEFAULT '[]'::jsonb,
+      hp_max INTEGER,
+      size_multiplier INTEGER NOT NULL DEFAULT 1,
+      vision_radius INTEGER NOT NULL DEFAULT 1,
+      move_range INTEGER NOT NULL DEFAULT 8,
+      first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT uniq_glossary_group_source UNIQUE (group_id, source_key)
+    )
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_glossary_group ON glossary_entries(group_id)
+  `)
+
   await db.execute(sql`
     UPDATE users SET role = 'admin' WHERE email = ${ADMIN_EMAIL} AND role <> 'admin'
   `)

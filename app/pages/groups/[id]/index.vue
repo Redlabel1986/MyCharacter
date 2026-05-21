@@ -99,18 +99,31 @@ const roleBadge = (r: 'player' | 'dm' | 'admin') =>
           </NuxtLink>
           <h1 class="font-serif text-2xl">{{ groupData.group.name }}</h1>
         </div>
-        <UButton
-          :to="`/groups/${id}/battle`"
-          color="primary"
-          size="lg"
-          icon="i-lucide-swords"
-          class="font-semibold shadow-md ring-2 ring-[var(--color-accent)]/40 hover:ring-[var(--color-accent)]/70 transition"
-          :title="groupData.isOwner
-            ? 'Karten verwalten und Sitzung steuern'
-            : 'Zur aktuell aktiven Karte springen'"
-        >
-          Spielen
-        </UButton>
+        <div class="flex items-center gap-2 flex-wrap">
+          <UButton
+            :to="`/groups/${id}/glossary`"
+            color="primary"
+            variant="soft"
+            size="lg"
+            icon="i-lucide-book-open"
+            class="font-semibold"
+            title="Bestiarium: alle Monster / Charaktere / NPCs der Gruppe"
+          >
+            Glossar
+          </UButton>
+          <UButton
+            :to="`/groups/${id}/battle`"
+            color="primary"
+            size="lg"
+            icon="i-lucide-swords"
+            class="font-semibold shadow-md ring-2 ring-[var(--color-accent)]/40 hover:ring-[var(--color-accent)]/70 transition"
+            :title="groupData.isOwner
+              ? 'Karten verwalten und Sitzung steuern'
+              : 'Zur aktuell aktiven Karte springen'"
+          >
+            Spielen
+          </UButton>
+        </div>
       </div>
       <div class="accent-rule my-3" />
       <GroupChat :group-id="id" class="flex-1 min-h-0" />

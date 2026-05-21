@@ -10,6 +10,7 @@ import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
 import { battleMaps, battleTokens, characters, groups } from '~~/server/database/schema'
 import { pushMapChanged } from '~~/server/utils/pusher'
+import { upsertGlossaryFromToken } from '~~/server/utils/glossary'
 import { DSA_ABILITIES } from '~~/shared/engines/dsa5'
 import { readCharacterHp, writeCharacterHp, type CharSystem } from '~~/shared/character-hp'
 import { cellsInTokenVision, uniqueCells, type CellTuple } from '~~/shared/fog'
@@ -217,6 +218,12 @@ export default defineEventHandler(async (event) => {
       .update(battleMaps)
       .set({ fogExplored: capped, updatedAt: new Date() })
       .where(eq(battleMaps.id, mapId))
+  }
+
+  // Glossar: Snapshot aktualisieren, sobald der Token sichtbar ist
+  // (z.B. Hidden -> Visible, oder Name/Beschreibung/Stats geaendert).
+  if (updated) {
+    await upsertGlossaryFromToken(db, groupId, updated)
   }
 
   // Realtime: Map-Zuhoerer benachrichtigen. Bewusst BEVOR wir auf den

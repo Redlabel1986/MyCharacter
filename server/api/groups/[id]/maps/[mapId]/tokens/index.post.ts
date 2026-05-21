@@ -16,6 +16,7 @@ import {
 } from '~~/server/database/schema'
 import { loadNpcAccessibleOrThrow } from '~~/server/utils/npc-access'
 import { pushMapChanged } from '~~/server/utils/pusher'
+import { upsertGlossaryFromToken } from '~~/server/utils/glossary'
 import { DSA_ABILITIES } from '~~/shared/engines/dsa5'
 
 const timeBonusesSchema = z
@@ -221,6 +222,14 @@ export default defineEventHandler(async (event) => {
         : {}),
     })
     .returning()
+
+  // Glossar: bei sichtbarem Spawn als Bestiarium-Eintrag aufnehmen.
+  if (inserted) {
+    await upsertGlossaryFromToken(db, groupId, {
+      ...inserted,
+      npcLibraryId: body.npcLibraryId ?? null,
+    })
+  }
 
   await pushMapChanged(mapId, 'token-created')
   return { token: inserted }
