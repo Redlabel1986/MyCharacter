@@ -413,19 +413,20 @@ export default defineEventHandler(async (event) => {
         .limit(1)
       if (targetTok) {
         payload.targetName = targetTok.name
-        let armor = 0
-        if (targetTok.characterId) {
-          const [c] = await db
-            .select({ system: characters.system, data: characters.data })
-            .from(characters)
-            .where(eq(characters.id, targetTok.characterId))
-            .limit(1)
-          if (c && c.system === 'htbah') {
-            armor = htbahTotalArmor(c.data as HtbahCharacterData)
+        const isHeal = body.damageKind === 'heal'
+        payload.damageKind = isHeal ? 'heal' : 'damage'
+        if (!isHeal) {
+          let armor = 0
+          if (targetTok.characterId) {
+            const [c] = await db
+              .select({ system: characters.system, data: characters.data })
+              .from(characters)
+              .where(eq(characters.id, targetTok.characterId))
+              .limit(1)
+            if (c && c.system === 'htbah') {
+              armor = htbahTotalArmor(c.data as HtbahCharacterData)
+            }
           }
-        }
-        const isDamage = body.damageKind !== 'heal'
-        if (isDamage) {
           payload.targetArmor = armor
           payload.finalDamage = Math.max(0, payload.target - armor)
         }

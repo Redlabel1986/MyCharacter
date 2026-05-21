@@ -26,6 +26,8 @@ interface RollPayload {
   targetArmor?: number
   /** Bei Schadens-Wurf: tatsächlicher Schaden nach Rüstung. */
   finalDamage?: number
+  /** Bei freiem Wurf mit Ziel: 'damage' oder 'heal'. */
+  damageKind?: 'damage' | 'heal'
   /** Marker fuer freie NdM±X-Wuerfe (Schaden/Heilung/Misc). */
   freeRoll?: boolean
 }
@@ -112,8 +114,16 @@ const freeDiceFormula = computed(() => props.payload.dice.join(' + '))
 // "− Rüstung 0" trotzdem zeigen, damit klar ist: hier wurde berücksichtigt.
 const hasArmorBreakdown = computed(
   () => props.payload.freeRoll
+    && props.payload.damageKind !== 'heal'
     && typeof props.payload.targetArmor === 'number'
     && typeof props.payload.finalDamage === 'number',
+)
+// Heilung gegen ein Ziel: Wurfsumme wird voll dem Ziel zugefuehrt (keine
+// Ruestung). Wir zeigen einen Hinweis "<Ziel> wird um <Summe> geheilt".
+const hasHealBreakdown = computed(
+  () => props.payload.freeRoll
+    && props.payload.damageKind === 'heal'
+    && !!props.payload.targetName,
 )
 </script>
 
@@ -167,6 +177,12 @@ const hasArmorBreakdown = computed(
           Schaden (Ziel ohne Rüstung)
         </template>
         <template v-if="payload.targetName"> an {{ payload.targetName }}</template>
+      </div>
+      <!-- Heilung gegen Ziel: voller Wurf wird zugefuehrt. -->
+      <div v-if="hasHealBreakdown" class="font-semibold">
+        {{ payload.targetName }} wird um
+        <span class="font-mono">{{ payload.target }}</span>
+        geheilt
       </div>
       <div v-if="qualityLabel">
         {{ qualityLabel }}<template v-if="margin !== null"> · um {{ margin }} unterboten</template>

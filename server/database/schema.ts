@@ -171,6 +171,13 @@ export interface RollPayload {
    */
   finalDamage?: number
   /**
+   * Bei einem freien Wurf mit Ziel: 'damage' = Schaden (Rüstung wird
+   * abgezogen, finalDamage ist gesetzt) oder 'heal' = Heilung (Wurfsumme
+   * wird voll dem Ziel zugefuehrt). RollCard rendert beide Faelle unter-
+   * schiedlich (z.B. „Tarya wird um 11 geheilt").
+   */
+  damageKind?: 'damage' | 'heal'
+  /**
    * Markiert einen freien NdM±X-Wurf (Schaden/Heilung/Misc). RollCard nutzt
    * das Flag, um die Wuerfel-Liste mit „+" statt Kommas zu rendern und die
    * Trefferanzeige (Ruestung/finalDamage) einzublenden.
