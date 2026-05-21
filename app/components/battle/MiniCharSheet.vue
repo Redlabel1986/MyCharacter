@@ -1278,109 +1278,111 @@ const onImageError = (tokenId: number) => {
           </span>
         </div>
         <!-- Waffe waehlen (nur HtbaH-Charaktere mit Waffen) -->
-        <UFormField
-          v-if="characterWeapons.length"
-          label="Waffe"
-          help="Auswahl fuellt Wuerfel + Bezeichnung automatisch."
-        >
-          <USelect
-            v-model="selectedWeaponId"
-            :items="weaponOptions"
-            value-key="value"
-            size="sm"
-            class="w-full"
-          />
-        </UFormField>
+        <div v-if="characterWeapons.length">
+          <UFormField label="Waffe">
+            <USelect
+              v-model="selectedWeaponId"
+              :items="weaponOptions"
+              value-key="value"
+              size="sm"
+              class="w-full"
+            />
+          </UFormField>
+          <p class="mt-1 text-[11px] text-ink-300 italic">
+            Auswahl fuellt Wuerfel + Bezeichnung automatisch.
+          </p>
+        </div>
         <!-- Zauber + Stufe (nur HtbaH-Charaktere mit Zaubern). Stufe befuellt
              damageFormula/-Label und stellt zugleich Probe-Skill + Mod ein,
              sodass der Spieler oben „Würfeln" (Probe) und unten „Würfeln"
              (Schaden) ohne weitere Einstellungen klicken kann. -->
-        <div
-          v-if="characterSpells.length"
-          class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end"
-        >
-          <UFormField
-            label="Zauber"
-            class="sm:col-span-6"
-            help="Probe und Schadensformel werden automatisch befüllt."
-          >
-            <USelect
-              v-model="selectedSpellId"
-              :items="spellOptions"
-              value-key="value"
-              size="sm"
-              class="w-full"
-            />
-          </UFormField>
-          <UFormField label="Stufe" class="sm:col-span-6">
-            <USelect
-              v-model="selectedSpellLevelId"
-              :items="spellLevelOptions"
-              value-key="value"
-              size="sm"
-              class="w-full"
-              :disabled="!selectedSpellId"
-            />
-          </UFormField>
+        <div v-if="characterSpells.length">
+          <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+            <UFormField label="Zauber" class="sm:col-span-6">
+              <USelect
+                v-model="selectedSpellId"
+                :items="spellOptions"
+                value-key="value"
+                size="sm"
+                class="w-full"
+              />
+            </UFormField>
+            <UFormField label="Stufe" class="sm:col-span-6">
+              <USelect
+                v-model="selectedSpellLevelId"
+                :items="spellLevelOptions"
+                value-key="value"
+                size="sm"
+                class="w-full"
+                :disabled="!selectedSpellId"
+              />
+            </UFormField>
+          </div>
+          <p class="mt-1 text-[11px] text-ink-300 italic">
+            Probe und Schadensformel werden automatisch befüllt.
+          </p>
         </div>
         <!-- Modus + Ziel -->
-        <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
-          <UFormField label="Modus" class="sm:col-span-4">
-            <USelect
-              v-model="damageMode"
-              :items="[
-                { label: '⚔ Schaden', value: 'damage' },
-                { label: '✚ Heilung', value: 'heal' },
-              ]"
-              value-key="value"
-              size="sm"
-              class="w-full"
-            />
-          </UFormField>
-          <UFormField
-            label="Ziel"
-            class="sm:col-span-8"
-            help="Wähle den Charakter/NPC, dem der Wurf angerechnet wird."
-          >
-            <USelect
-              v-model="damageTargetId"
-              :items="damageTargetOptions"
-              value-key="value"
-              size="sm"
-              class="w-full"
-            />
-          </UFormField>
+        <div>
+          <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+            <UFormField label="Modus" class="sm:col-span-4">
+              <USelect
+                v-model="damageMode"
+                :items="[
+                  { label: '⚔ Schaden', value: 'damage' },
+                  { label: '✚ Heilung', value: 'heal' },
+                ]"
+                value-key="value"
+                size="sm"
+                class="w-full"
+              />
+            </UFormField>
+            <UFormField label="Ziel" class="sm:col-span-8">
+              <USelect
+                v-model="damageTargetId"
+                :items="damageTargetOptions"
+                value-key="value"
+                size="sm"
+                class="w-full"
+              />
+            </UFormField>
+          </div>
+          <p class="mt-1 text-[11px] text-ink-300 italic">
+            Wähle den Charakter/NPC, dem der Wurf angerechnet wird.
+          </p>
         </div>
         <!-- Formel + Bezeichnung + Wuerfel-Button -->
-        <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
-          <UFormField label="Würfel" class="sm:col-span-4" help="z.B. 2d6, 4w8+3, 1d20−1">
-            <UInput
-              v-model="damageFormula"
-              placeholder="2d6+3"
-              size="sm"
-              @keydown.enter="rollDamage"
-            />
-          </UFormField>
-          <UFormField label="Bezeichnung" class="sm:col-span-4">
-            <UInput
-              v-model="damageLabel"
-              :placeholder="damageMode === 'heal' ? 'Heilung' : 'Schaden'"
-              size="sm"
-              :maxlength="60"
-            />
-          </UFormField>
-          <UButton
-            :color="damageMode === 'heal' ? 'success' : 'primary'"
-            :icon="damageMode === 'heal' ? 'i-lucide-heart-pulse' : 'i-lucide-swords'"
-            :disabled="!damageParsed || damageSending"
-            :loading="damageSending"
-            class="sm:col-span-4 roll-cta"
-            size="lg"
-            block
-            @click="rollDamage"
-          >
-            Würfeln
-          </UButton>
+        <div>
+          <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+            <UFormField label="Würfel" class="sm:col-span-4">
+              <UInput
+                v-model="damageFormula"
+                placeholder="2d6+3"
+                size="sm"
+                @keydown.enter="rollDamage"
+              />
+            </UFormField>
+            <UFormField label="Bezeichnung" class="sm:col-span-4">
+              <UInput
+                v-model="damageLabel"
+                :placeholder="damageMode === 'heal' ? 'Heilung' : 'Schaden'"
+                size="sm"
+                :maxlength="60"
+              />
+            </UFormField>
+            <UButton
+              :color="damageMode === 'heal' ? 'success' : 'primary'"
+              :icon="damageMode === 'heal' ? 'i-lucide-heart-pulse' : 'i-lucide-swords'"
+              :disabled="!damageParsed || damageSending"
+              :loading="damageSending"
+              class="sm:col-span-4 roll-cta"
+              size="lg"
+              block
+              @click="rollDamage"
+            >
+              Würfeln
+            </UButton>
+          </div>
         </div>
         <p
           v-if="damageFormula && !damageParsed"
