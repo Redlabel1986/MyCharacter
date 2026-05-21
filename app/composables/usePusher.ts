@@ -38,14 +38,27 @@ function getPusher(): Pusher | null {
 }
 
 export interface RealtimeSubscription {
+  /**
+   * Reaktiver Connection-State des PRIVATE-Channels. true, sobald Pusher
+   * `pusher:subscription_succeeded` gefeuert hat (= Auth war OK und Events
+   * fliessen). Bleibt false, wenn der Auth-Endpoint 4xx/5xx liefert.
+   *
+   * Konsumenten richten ihr Polling-Intervall hieran aus: live = lange
+   * Pause (30s als Backup), nicht-live = enges Polling.
+   */
+  isConnected: Ref<boolean>
   /** Loest das Subscribe auf und gibt Channel-Ressourcen frei. */
   unsubscribe: () => void
 }
 
 /**
  * Abonniert einen privaten Channel und fuehrt den Callback bei jedem
- * "changed"-Event aus. Liefert `null`, wenn Realtime nicht verfuegbar ist
- * (Caller faellt dann auf Polling zurueck).
+ * "changed"-Event aus. Liefert `null`, wenn Realtime ueberhaupt nicht
+ * konfiguriert ist (Aufrufer faellt dann auf Polling zurueck).
+ *
+ * Wichtig: das `subscribe()` selbst gibt sofort ein Channel-Objekt zurueck
+ * (auch wenn Auth danach scheitert). Den ECHTEN Connection-Status spiegelt
+ * `isConnected` — erst wenn der wahr ist, fliessen Events.
  */
 export function subscribeChanged(
   channelName: string,
@@ -54,12 +67,30 @@ export function subscribeChanged(
   const p = getPusher()
   if (!p) return null
   const channel = p.subscribe(channelName)
+  const isConnected = ref(false)
   const handler = (data: { kind?: string }) => onChange(data ?? {})
   channel.bind('changed', handler)
+  const onSuccess = () => {
+    isConnected.value = true
+    if (typeof window !== 'undefined') {
+      console.info(`[pusher] subscribed: ${channelName}`)
+    }
+  }
+  const onError = (status: unknown) => {
+    isConnected.value = false
+    if (typeof window !== 'undefined') {
+      console.warn(`[pusher] subscription_error: ${channelName}`, status)
+    }
+  }
+  channel.bind('pusher:subscription_succeeded', onSuccess)
+  channel.bind('pusher:subscription_error', onError)
   return {
+    isConnected,
     unsubscribe: () => {
       try {
         channel.unbind('changed', handler)
+        channel.unbind('pusher:subscription_succeeded', onSuccess)
+        channel.unbind('pusher:subscription_error', onError)
         p.unsubscribe(channelName)
       } catch {
         // ignore
