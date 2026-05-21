@@ -106,6 +106,14 @@ export interface HtbahCharacterData {
    */
   weapons?: HtbahWeaponEntry[]
   /**
+   * Zauber- und Magie-Faehigkeiten. Jeder Zauber referenziert einen Skill
+   * (Probe wird gegen dessen FW gewuerfelt) und hat mehrere Stufen, die je
+   * eigenen Erschwernis-Modifier + Schadensformel mitbringen. Im Mini-
+   * Charsheet waehlt der Spieler Zauber + Stufe, dann werden Probe-Mod
+   * und Schaden-Formel automatisch befuellt.
+   */
+  spells?: HtbahSpellEntry[]
+  /**
    * Strukturierter Geldbeutel — wird vom Mini-Charsheet (Battle-Map) und vom
    * vollen Bogen gemeinsam gepflegt. Werte sind Ganzzahlen >= 0.
    * Umrechnung: 100 Kupfer = 1 Silber, 100 Silber = 1 Gold.
@@ -149,6 +157,7 @@ export function createBlankHtbah(name: string): HtbahCharacterData {
     beute: '',
     armor: [],
     weapons: [],
+    spells: [],
     purse: { copper: 0, silver: 0, gold: 0 },
     magic: '',
     notes: '',
@@ -177,6 +186,45 @@ export interface HtbahWeaponEntry {
   name: string
   /** Beliebige NdM±X-Formel, wird in MiniCharSheet's Schaden-Wuerfler uebernommen. */
   damageFormula: string
+  note?: string
+}
+
+/**
+ * Eine Wirkungs-Stufe eines Zaubers. Hoehere Stufe = staerker (mehr Schaden)
+ * aber schwieriger zu wirken (negativer Modifikator auf die Probe).
+ */
+export interface HtbahSpellLevel {
+  id: string
+  /** Anzeigename der Stufe, z.B. "Stufe 1", "Flamme", "Inferno". */
+  label: string
+  /**
+   * Erschwernis/Erleichterung, die beim Wirken auf die Magie-Probe wirkt.
+   * Typisch negativ (z.B. −20 fuer schwere Stufe), kann aber auch +X sein,
+   * wenn die Stufe einfacher ist als die Standard-Probe.
+   */
+  modifier: number
+  /**
+   * NdM±X-Schadensformel fuer den Schaden bei Erfolg. Leer lassen, wenn
+   * die Stufe keinen Schaden macht (z.B. ein Lichtball, der nur leuchtet).
+   */
+  damageFormula: string
+  note?: string
+}
+
+/**
+ * Ein Zauber / eine Magie-Faehigkeit. Probt gegen einen vorhandenen Skill
+ * des Charakters (skillId), die einzelnen Stufen modifizieren Probe + Schaden.
+ */
+export interface HtbahSpellEntry {
+  id: string
+  name: string
+  /**
+   * ID eines Eintrags aus `data.skills`, gegen dessen FW die Magie-Probe geht.
+   * Wenn der referenzierte Skill nicht mehr existiert, faellt das Mini-
+   * Charsheet auf die nackte Stufe (nur Schaden, keine Probe) zurueck.
+   */
+  skillId: string
+  levels: HtbahSpellLevel[]
   note?: string
 }
 

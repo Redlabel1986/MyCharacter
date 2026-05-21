@@ -21,6 +21,8 @@ import {
   type HtbahSkill,
   type HtbahTalent,
   type HtbahWeaponEntry,
+  type HtbahSpellEntry,
+  type HtbahSpellLevel,
 } from '~~/shared/engines/htbah'
 import {
   DND_ABILITIES,
@@ -396,6 +398,8 @@ watch(selectedTokenId, () => {
   rollMode.value = 'normal'
   damageFormula.value = ''
   damageLabel.value = 'Schaden'
+  selectedSpellId.value = ''
+  selectedSpellLevelId.value = ''
 })
 
 // --- Waffen-Auswahl (nur HtbaH-Charaktere mit gepflegten Waffen) ---
@@ -420,6 +424,70 @@ watch(selectedWeaponId, (id: string) => {
   if (!w) return
   damageFormula.value = w.damageFormula
   damageLabel.value = w.name || 'Schaden'
+  // Andere Auswahl zuruecksetzen, damit nicht aus Versehen Zauber-Mod + Waffe
+  // gleichzeitig wirken.
+  selectedSpellId.value = ''
+  selectedSpellLevelId.value = ''
+})
+
+// --- Zauber- und Magie-Auswahl (HtbaH) ---
+// Anders als Waffen ist ein Zauber zweistufig: erst Zauber, dann Wirk-Stufe.
+// Die Stufe befuellt damageFormula/damageLabel UND setzt die Probe (pickedRollId
+// auf den verknuepften Skill, rollMod auf den Stufen-Mod). Damit kann der
+// Spieler in einem Rutsch erst die Probe und dann den Schaden wuerfeln.
+const characterSpells = computed<HtbahSpellEntry[]>(() => {
+  if (!htbahData.value) return []
+  return (htbahData.value.spells ?? []).filter(
+    (s: HtbahSpellEntry) => s.name?.trim() && s.levels?.length,
+  )
+})
+const spellOptions = computed(() => [
+  { label: '— Zauber waehlen —', value: '' },
+  ...characterSpells.value.map((s: HtbahSpellEntry) => ({
+    label: s.name,
+    value: s.id,
+  })),
+])
+const selectedSpellId = ref<string>('')
+const selectedSpellLevelId = ref<string>('')
+const selectedSpell = computed<HtbahSpellEntry | null>(
+  () => characterSpells.value.find((s: HtbahSpellEntry) => s.id === selectedSpellId.value) ?? null,
+)
+const spellLevelOptions = computed(() => {
+  const sp = selectedSpell.value
+  if (!sp) return [{ label: '— erst Zauber waehlen —', value: '' }]
+  return [
+    { label: '— Stufe waehlen —', value: '' },
+    ...sp.levels.map((l: HtbahSpellLevel) => {
+      const modStr = l.modifier > 0 ? `+${l.modifier}` : l.modifier < 0 ? `${l.modifier}` : '±0'
+      const dmgStr = l.damageFormula?.trim() ? ` · ${l.damageFormula}` : ''
+      return { label: `${l.label || '(unbenannt)'} (${modStr}${dmgStr})`, value: l.id }
+    }),
+  ]
+})
+// Bei Zauber-Wechsel die Stufe leeren — der Spieler soll bewusst neu waehlen.
+watch(selectedSpellId, () => {
+  selectedSpellLevelId.value = ''
+})
+// Bei Stufen-Wahl: Schaden-Formel + Label setzen, Probe vorbelegen, Mod setzen.
+watch(selectedSpellLevelId, (id: string) => {
+  if (!id) return
+  const sp = selectedSpell.value
+  if (!sp) return
+  const lvl = sp.levels.find((l: HtbahSpellLevel) => l.id === id)
+  if (!lvl) return
+  damageFormula.value = lvl.damageFormula
+  damageLabel.value = `${sp.name}${lvl.label ? ` – ${lvl.label}` : ''}`
+  // Probe gegen den verknuepften Skill — finde das passende RollOption.
+  if (sp.skillId) {
+    const skillRollId = `htbahSkill:${sp.skillId}:`
+    if (rollOptions.value.some((o: RollTarget) => `${o.kind}:${o.id}:${o.source ?? ''}` === skillRollId)) {
+      pickedRollId.value = skillRollId
+    }
+  }
+  rollMod.value = lvl.modifier || 0
+  // Waffen-Auswahl raeumen, damit Damage-Felder nicht von dort ueberschrieben werden.
+  selectedWeaponId.value = ''
 })
 
 // Ruestungs-Anzeige fuer das aktive (eigene) Token, rein informativ.
@@ -1220,6 +1288,38 @@ const onImageError = (tokenId: number) => {
             class="w-full"
           />
         </UFormField>
+        <!-- Zauber + Stufe (nur HtbaH-Charaktere mit Zaubern). Stufe befuellt
+             damageFormula/-Label und stellt zugleich Probe-Skill + Mod ein,
+             sodass der Spieler oben „Würfeln" (Probe) und unten „Würfeln"
+             (Schaden) ohne weitere Einstellungen klicken kann. -->
+        <div
+          v-if="characterSpells.length"
+          class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end"
+        >
+          <UFormField
+            label="Zauber"
+            class="sm:col-span-6"
+            help="Probe und Schadensformel werden automatisch befüllt."
+          >
+            <USelect
+              v-model="selectedSpellId"
+              :items="spellOptions"
+              value-key="value"
+              size="sm"
+              class="w-full"
+            />
+          </UFormField>
+          <UFormField label="Stufe" class="sm:col-span-6">
+            <USelect
+              v-model="selectedSpellLevelId"
+              :items="spellLevelOptions"
+              value-key="value"
+              size="sm"
+              class="w-full"
+              :disabled="!selectedSpellId"
+            />
+          </UFormField>
+        </div>
         <!-- Modus + Ziel -->
         <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
           <UFormField label="Modus" class="sm:col-span-4">

@@ -25,6 +25,8 @@ import {
   type HtbahPurse,
   type HtbahArmorPiece,
   type HtbahWeaponEntry,
+  type HtbahSpellEntry,
+  type HtbahSpellLevel,
 } from '~~/shared/engines/htbah'
 import type { GameSystem } from '~~/shared/systems'
 import SheetSection from '~/components/ui/SheetSection.vue'
@@ -86,6 +88,23 @@ const sheet = computed<HtbahCharacterData>(() => {
     beute: incoming.beute ?? '',
     armor: Array.isArray(incoming.armor) ? incoming.armor : [],
     weapons: Array.isArray(incoming.weapons) ? incoming.weapons : [],
+    spells: Array.isArray(incoming.spells)
+      ? incoming.spells.map((s) => ({
+          id: s.id,
+          name: s.name ?? '',
+          skillId: s.skillId ?? '',
+          levels: Array.isArray(s.levels)
+            ? s.levels.map((l) => ({
+                id: l.id,
+                label: l.label ?? '',
+                modifier: Number(l.modifier ?? 0),
+                damageFormula: l.damageFormula ?? '',
+                note: l.note ?? '',
+              }))
+            : [],
+          note: s.note ?? '',
+        }))
+      : [],
     purse: {
       copper: Number(incoming.purse?.copper ?? 0),
       silver: Number(incoming.purse?.silver ?? 0),
@@ -199,6 +218,94 @@ const removeWeapon = (idx: number) => {
   n.weapons = list
   update(n)
 }
+
+// --- Zauber & Magie-Faehigkeiten ---
+// Jeder Zauber referenziert einen Skill (Probe). Die Stufen modifizieren die
+// Probe (modifier) und liefern die Schadensformel. Im Mini-Charsheet wird der
+// gewaehlte Zauber + Stufe in Probe-Skill, Probe-Mod und Damage-Formel uebertragen.
+const addSpell = () => {
+  const n = clone()
+  if (!n.spells) n.spells = []
+  n.spells.push({
+    id: crypto.randomUUID(),
+    name: '',
+    skillId: '',
+    levels: [
+      { id: crypto.randomUUID(), label: 'Stufe 1', modifier: 0, damageFormula: '' },
+    ],
+    note: '',
+  })
+  update(n)
+}
+const updateSpell = (idx: number, patch: Partial<HtbahSpellEntry>) => {
+  const n = clone()
+  const list = n.spells ?? []
+  const current = list[idx]
+  if (!current) return
+  list[idx] = { ...current, ...patch }
+  n.spells = list
+  update(n)
+}
+const removeSpell = (idx: number) => {
+  const n = clone()
+  const list = n.spells ?? []
+  list.splice(idx, 1)
+  n.spells = list
+  update(n)
+}
+const addSpellLevel = (spellIdx: number) => {
+  const n = clone()
+  const list = n.spells ?? []
+  const spell = list[spellIdx]
+  if (!spell) return
+  const nextNum = (spell.levels?.length ?? 0) + 1
+  spell.levels = [
+    ...(spell.levels ?? []),
+    {
+      id: crypto.randomUUID(),
+      label: `Stufe ${nextNum}`,
+      modifier: 0,
+      damageFormula: '',
+    },
+  ]
+  n.spells = list
+  update(n)
+}
+const updateSpellLevel = (
+  spellIdx: number,
+  levelIdx: number,
+  patch: Partial<HtbahSpellLevel>,
+) => {
+  const n = clone()
+  const list = n.spells ?? []
+  const spell = list[spellIdx]
+  if (!spell) return
+  const lvl = spell.levels?.[levelIdx]
+  if (!lvl) return
+  spell.levels[levelIdx] = { ...lvl, ...patch }
+  n.spells = list
+  update(n)
+}
+const removeSpellLevel = (spellIdx: number, levelIdx: number) => {
+  const n = clone()
+  const list = n.spells ?? []
+  const spell = list[spellIdx]
+  if (!spell || !spell.levels) return
+  spell.levels.splice(levelIdx, 1)
+  n.spells = list
+  update(n)
+}
+
+// Skill-Auswahl-Optionen fuer das Zauber-"Probe-gegen"-Dropdown.
+const spellSkillOptions = computed(() => [
+  { label: '— Skill waehlen —', value: '' },
+  ...sheet.value.skills
+    .filter((s: HtbahSkill) => s.name?.trim())
+    .map((s: HtbahSkill) => ({
+      label: `${s.name} (${HTBAH_TALENT_LABELS[s.talent]} · FW ${htbahSkillTotal(sheet.value, s)})`,
+      value: s.id,
+    })),
+])
 
 const refreshAllInsights = () => {
   const n = clone()
@@ -981,6 +1088,137 @@ const postRollToGroup = async () => {
             icon="i-lucide-x"
             @click="removeWeapon(idx)"
           />
+        </div>
+      </div>
+    </SheetSection>
+
+    <!-- Zauber & Magie-Fähigkeiten: probt gegen einen vorhandenen Skill;
+         jede Stufe modifiziert die Probe und liefert eine Schadensformel. -->
+    <SheetSection title="Zauber & Magie" class="lg:col-span-2">
+      <div class="flex items-baseline justify-between gap-2 mb-2">
+        <p class="text-xs text-ink-300/80">
+          Wähle pro Zauber einen Skill (Probe gegen dessen FW). Jede Stufe
+          bekommt eigene Erschwernis und Schadensformel — im Battle-Map-Wurf
+          kannst du Stufe wählen, beides wird automatisch befüllt.
+        </p>
+        <UButton size="xs" variant="soft" icon="i-lucide-plus" @click="addSpell">
+          Zauber hinzufügen
+        </UButton>
+      </div>
+      <p
+        v-if="!(sheet.spells && sheet.spells.length)"
+        class="text-xs text-ink-300 italic"
+      >
+        Noch kein Zauber eingetragen.
+      </p>
+      <div class="space-y-3">
+        <div
+          v-for="(spell, sIdx) in (sheet.spells ?? [])"
+          :key="spell.id"
+          class="border border-parchment-700/30 rounded p-2 bg-white/30 space-y-2"
+        >
+          <!-- Kopf: Name + Skill-Auswahl + Notiz + Löschen -->
+          <div class="grid grid-cols-12 gap-2 items-center">
+            <UInput
+              class="col-span-4"
+              :model-value="spell.name"
+              placeholder="Zaubername (z.B. Feuerball)"
+              :maxlength="60"
+              @update:model-value="updateSpell(sIdx, { name: String($event) })"
+            />
+            <USelect
+              class="col-span-4"
+              :model-value="spell.skillId"
+              :items="spellSkillOptions"
+              value-key="value"
+              size="sm"
+              @update:model-value="updateSpell(sIdx, { skillId: String($event) })"
+            />
+            <UInput
+              class="col-span-3"
+              :model-value="spell.note ?? ''"
+              placeholder="Notiz (optional)"
+              :maxlength="120"
+              @update:model-value="updateSpell(sIdx, { note: String($event) })"
+            />
+            <UButton
+              class="col-span-1"
+              size="xs"
+              variant="ghost"
+              color="error"
+              icon="i-lucide-trash-2"
+              :title="`Zauber „${spell.name || '(unbenannt)'}“ löschen`"
+              @click="removeSpell(sIdx)"
+            />
+          </div>
+
+          <!-- Stufen-Liste -->
+          <div class="pl-3 border-l-2 border-parchment-700/30 space-y-1">
+            <div class="flex items-baseline justify-between">
+              <div class="text-[10px] uppercase tracking-widest text-ink-300">
+                Stufen
+                <span class="normal-case tracking-normal text-ink-300/70">
+                  · Mod typisch negativ (Erschwernis) · NdM±X für Schaden
+                </span>
+              </div>
+              <UButton
+                size="xs"
+                variant="ghost"
+                icon="i-lucide-plus"
+                @click="addSpellLevel(sIdx)"
+              >
+                Stufe
+              </UButton>
+            </div>
+            <p
+              v-if="!spell.levels.length"
+              class="text-xs text-ink-300 italic"
+            >
+              Noch keine Stufen — pro Stufe Erschwernis & Schaden anlegen.
+            </p>
+            <div
+              v-for="(lvl, lIdx) in spell.levels"
+              :key="lvl.id"
+              class="grid grid-cols-12 gap-2 items-center"
+            >
+              <UInput
+                class="col-span-3"
+                :model-value="lvl.label"
+                placeholder="z.B. Stufe 1 / Funke"
+                :maxlength="40"
+                @update:model-value="updateSpellLevel(sIdx, lIdx, { label: String($event) })"
+              />
+              <UInput
+                class="col-span-2"
+                type="number"
+                :model-value="lvl.modifier"
+                placeholder="Mod ±"
+                @update:model-value="updateSpellLevel(sIdx, lIdx, { modifier: Number($event) })"
+              />
+              <UInput
+                class="col-span-3"
+                :model-value="lvl.damageFormula"
+                placeholder="z.B. 4d10 (leer = kein Schaden)"
+                :maxlength="20"
+                @update:model-value="updateSpellLevel(sIdx, lIdx, { damageFormula: String($event) })"
+              />
+              <UInput
+                class="col-span-3"
+                :model-value="lvl.note ?? ''"
+                placeholder="Notiz (optional)"
+                :maxlength="120"
+                @update:model-value="updateSpellLevel(sIdx, lIdx, { note: String($event) })"
+              />
+              <UButton
+                class="col-span-1"
+                size="xs"
+                variant="ghost"
+                color="error"
+                icon="i-lucide-x"
+                @click="removeSpellLevel(sIdx, lIdx)"
+              />
+            </div>
+          </div>
         </div>
       </div>
     </SheetSection>
