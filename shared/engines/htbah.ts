@@ -198,14 +198,22 @@ export interface HtbahSpellLevel {
   /** Anzeigename der Stufe, z.B. "Stufe 1", "Flamme", "Inferno". */
   label: string
   /**
+   * Wirkt diese Stufe Schaden oder Heilung? Default 'damage' (Backwards-
+   * Kompatibilitaet). Wird im Mini-Charsheet beim Auswaehlen der Stufe in
+   * den Damage-Wuerfler-Modus uebernommen, damit Schaden vs. Heilung sofort
+   * stimmt — und Ruestung NUR bei Schaden abgezogen wird.
+   */
+  kind?: 'damage' | 'heal'
+  /**
    * Erschwernis/Erleichterung, die beim Wirken auf die Magie-Probe wirkt.
    * Typisch negativ (z.B. −20 fuer schwere Stufe), kann aber auch +X sein,
    * wenn die Stufe einfacher ist als die Standard-Probe.
    */
   modifier: number
   /**
-   * NdM±X-Schadensformel fuer den Schaden bei Erfolg. Leer lassen, wenn
-   * die Stufe keinen Schaden macht (z.B. ein Lichtball, der nur leuchtet).
+   * NdM±X-Formel fuer Schaden bzw. Heilung bei Erfolg. Leer lassen, wenn
+   * die Stufe keinen direkten Wurf macht (z.B. ein Lichtball, der nur
+   * leuchtet).
    */
   damageFormula: string
   note?: string

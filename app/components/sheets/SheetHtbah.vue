@@ -97,6 +97,7 @@ const sheet = computed<HtbahCharacterData>(() => {
             ? s.levels.map((l) => ({
                 id: l.id,
                 label: l.label ?? '',
+                kind: l.kind === 'heal' ? 'heal' : 'damage',
                 modifier: Number(l.modifier ?? 0),
                 damageFormula: l.damageFormula ?? '',
                 note: l.note ?? '',
@@ -1188,6 +1189,17 @@ const postRollToGroup = async () => {
                 :maxlength="40"
                 @update:model-value="updateSpellLevel(sIdx, lIdx, { label: String($event) })"
               />
+              <USelect
+                class="col-span-2"
+                :model-value="lvl.kind ?? 'damage'"
+                :items="[
+                  { label: '⚔ Schaden', value: 'damage' },
+                  { label: '✚ Heilung', value: 'heal' },
+                ]"
+                value-key="value"
+                size="sm"
+                @update:model-value="updateSpellLevel(sIdx, lIdx, { kind: String($event) === 'heal' ? 'heal' : 'damage' })"
+              />
               <UInput
                 class="col-span-2"
                 type="number"
@@ -1196,16 +1208,16 @@ const postRollToGroup = async () => {
                 @update:model-value="updateSpellLevel(sIdx, lIdx, { modifier: Number($event) })"
               />
               <UInput
-                class="col-span-3"
+                class="col-span-2"
                 :model-value="lvl.damageFormula"
-                placeholder="z.B. 4d10 (leer = kein Schaden)"
+                placeholder="z.B. 4d10"
                 :maxlength="20"
                 @update:model-value="updateSpellLevel(sIdx, lIdx, { damageFormula: String($event) })"
               />
               <UInput
-                class="col-span-3"
+                class="col-span-2"
                 :model-value="lvl.note ?? ''"
-                placeholder="Notiz (optional)"
+                placeholder="Notiz"
                 :maxlength="120"
                 @update:model-value="updateSpellLevel(sIdx, lIdx, { note: String($event) })"
               />

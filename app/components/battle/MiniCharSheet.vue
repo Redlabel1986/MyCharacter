@@ -469,7 +469,9 @@ const spellLevelOptions = computed(() => {
 watch(selectedSpellId, () => {
   selectedSpellLevelId.value = ''
 })
-// Bei Stufen-Wahl: Schaden-Formel + Label setzen, Probe vorbelegen, Mod setzen.
+// Bei Stufen-Wahl: Schaden-Formel + Label setzen, Probe vorbelegen, Mod setzen
+// und den Schaden/Heilung-Modus passend zur Stufe vorbelegen (Heilzauber
+// landen damit direkt im Heil-Modus, sodass Ruestung nicht abgezogen wird).
 watch(selectedSpellLevelId, (id: string) => {
   if (!id) return
   const sp = selectedSpell.value
@@ -478,6 +480,7 @@ watch(selectedSpellLevelId, (id: string) => {
   if (!lvl) return
   damageFormula.value = lvl.damageFormula
   damageLabel.value = `${sp.name}${lvl.label ? ` – ${lvl.label}` : ''}`
+  damageMode.value = lvl.kind === 'heal' ? 'heal' : 'damage'
   // Probe gegen den verknuepften Skill — finde das passende RollOption.
   if (sp.skillId) {
     const skillRollId = `htbahSkill:${sp.skillId}:`
