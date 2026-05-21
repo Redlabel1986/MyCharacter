@@ -6,6 +6,7 @@ import { and, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupOwner } from '~~/server/utils/group-access'
 import { battleMaps, GRID_TYPES, TIMES_OF_DAY } from '~~/server/database/schema'
+import { pushMapChanged } from '~~/server/utils/pusher'
 
 const cellTupleSchema = z.tuple([z.number().int(), z.number().int()])
 const wallSchema = z.object({
@@ -54,5 +55,6 @@ export default defineEventHandler(async (event) => {
   if (!updated) {
     throw createError({ statusCode: 404, statusMessage: 'Karte nicht gefunden.' })
   }
+  await pushMapChanged(mapId, 'map-settings')
   return { map: updated }
 })

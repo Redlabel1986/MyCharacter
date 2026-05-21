@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
 import { groupMembers, messages } from '~~/server/database/schema'
+import { pushGroupChanged } from '~~/server/utils/pusher'
 
 const bodySchema = z.object({
   content: z.string().min(1).max(2000),
@@ -57,5 +58,6 @@ export default defineEventHandler(async (event) => {
     })
     .returning()
 
+  await pushGroupChanged(groupId, 'chat-message')
   return { message: inserted }
 })

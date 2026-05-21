@@ -7,6 +7,7 @@ import { and, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
 import { battleMaps, battleDrawings } from '~~/server/database/schema'
+import { pushMapChanged } from '~~/server/utils/pusher'
 
 const pointSchema = z.object({
   x: z.number().min(-50000).max(50000),
@@ -53,5 +54,6 @@ export default defineEventHandler(async (event) => {
     })
     .returning()
 
+  await pushMapChanged(mapId, 'drawing-created')
   return { drawing: inserted }
 })

@@ -17,6 +17,7 @@ import {
   mapObjects,
 } from '~~/server/database/schema'
 import { cellsInTokenVision, uniqueCells, type CellTuple } from '~~/shared/fog'
+import { pushMapChanged } from '~~/server/utils/pusher'
 
 const bodySchema = z.object({
   x: z.number().min(-50000).max(50000).optional(),
@@ -147,5 +148,6 @@ export default defineEventHandler(async (event) => {
       .where(eq(battleMaps.id, mapId))
   }
 
+  await pushMapChanged(mapId, 'object-updated')
   return { object: updated }
 })

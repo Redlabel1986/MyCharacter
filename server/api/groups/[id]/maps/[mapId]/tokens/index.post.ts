@@ -15,6 +15,7 @@ import {
   groups,
 } from '~~/server/database/schema'
 import { loadNpcAccessibleOrThrow } from '~~/server/utils/npc-access'
+import { pushMapChanged } from '~~/server/utils/pusher'
 import { DSA_ABILITIES } from '~~/shared/engines/dsa5'
 
 const timeBonusesSchema = z
@@ -221,5 +222,6 @@ export default defineEventHandler(async (event) => {
     })
     .returning()
 
+  await pushMapChanged(mapId, 'token-created')
   return { token: inserted }
 })

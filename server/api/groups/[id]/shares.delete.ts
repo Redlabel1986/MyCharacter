@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
 import { groupSharedCharacters } from '~~/server/database/schema'
+import { pushGroupChanged } from '~~/server/utils/pusher'
 
 /** Entfernt den eigenen geteilten Bogen aus der Gruppe. */
 export default defineEventHandler(async (event) => {
@@ -22,5 +23,6 @@ export default defineEventHandler(async (event) => {
       ),
     )
 
+  await pushGroupChanged(groupId, 'shares')
   return { ok: true }
 })

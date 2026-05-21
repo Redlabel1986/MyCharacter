@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
 import { characters, groupSharedCharacters } from '~~/server/database/schema'
+import { pushGroupChanged } from '~~/server/utils/pusher'
 
 const bodySchema = z.object({
   characterId: z.number().int().positive(),
@@ -58,5 +59,6 @@ export default defineEventHandler(async (event) => {
       },
     })
 
+  await pushGroupChanged(groupId, 'shares')
   return { ok: true }
 })

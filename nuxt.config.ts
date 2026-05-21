@@ -41,7 +41,16 @@ export default defineNuxtConfig({
   runtimeConfig: {
     sessionPassword: process.env.NUXT_SESSION_PASSWORD,
     databaseUrl: process.env.DATABASE_URL || process.env.POSTGRES_URL || '',
-    public: {},
+    // Pusher Channels — server-only Secrets. Wenn nicht gesetzt, faellt die
+    // Realtime-Schicht stumm auf das langsamere Polling-Fallback zurueck.
+    pusherAppId: process.env.PUSHER_APP_ID || '',
+    pusherSecret: process.env.PUSHER_SECRET || '',
+    public: {
+      // Im Browser sichtbar: Pusher-Public-Key + Cluster. Auch hier optional.
+      pusherKey: process.env.PUSHER_KEY || process.env.NUXT_PUBLIC_PUSHER_KEY || '',
+      pusherCluster:
+        process.env.PUSHER_CLUSTER || process.env.NUXT_PUBLIC_PUSHER_CLUSTER || 'eu',
+    },
   },
 
   typescript: {

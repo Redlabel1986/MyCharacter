@@ -7,6 +7,7 @@ import { and, eq, lt } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
 import { battleMaps, battlePings } from '~~/server/database/schema'
+import { pushMapChanged } from '~~/server/utils/pusher'
 
 const PING_TTL_MS = 6000
 
@@ -52,5 +53,6 @@ export default defineEventHandler(async (event) => {
     })
     .returning()
 
+  await pushMapChanged(mapId, 'ping')
   return { ping: inserted }
 })

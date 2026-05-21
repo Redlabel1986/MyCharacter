@@ -28,6 +28,7 @@ import { DND_ABILITIES } from '~~/shared/engines/dnd'
 import { DSA_ABILITIES } from '~~/shared/engines/dsa5'
 import { readCharacterHp, type CharSystem } from '~~/shared/character-hp'
 import { computeDamageLevel, type DamageLevelInfo } from '~~/shared/damage-level'
+import { pushGroupChanged } from '~~/server/utils/pusher'
 import type {
   NpcAbility,
   NpcAbilityDnd,
@@ -399,5 +400,6 @@ export default defineEventHandler(async (event) => {
     })
     .returning()
 
+  await pushGroupChanged(groupId, 'roll')
   return { message: inserted }
 })

@@ -11,6 +11,7 @@ import { and, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupOwner } from '~~/server/utils/group-access'
 import { battleAudioTracks, groups, type AudioState } from '~~/server/database/schema'
+import { pushGroupChanged } from '~~/server/utils/pusher'
 
 const bodySchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('play'), trackId: z.number().int().positive() }),
@@ -74,5 +75,6 @@ export default defineEventHandler(async (event) => {
     .set({ audioState: next })
     .where(eq(groups.id, groupId))
     .returning()
+  await pushGroupChanged(groupId, 'audio')
   return { audioState: updated?.audioState ?? next }
 })

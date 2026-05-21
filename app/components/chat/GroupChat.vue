@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import RollCard from '~/components/chat/RollCard.vue'
+import { subscribeGroup, type RealtimeSubscription } from '~/composables/usePusher'
 
 interface RollPayload {
   system: 'dnd5e' | 'dnd2024' | 'dsa5' | 'dsa41' | 'htbah'
@@ -132,13 +133,23 @@ const send = async () => {
 }
 
 let pollHandle: ReturnType<typeof setInterval> | null = null
+let realtimeSub: RealtimeSubscription | null = null
 onMounted(async () => {
   await fetchMembers()
   await fetchNew()
-  pollHandle = setInterval(fetchNew, 3000)
+  // Realtime: bei jedem Chat-/Roll-Event im Gruppen-Channel die neuen
+  // Nachrichten abholen. Polling-Fallback bleibt aktiv (selten, wenn
+  // Realtime laeuft; dichter, wenn nicht).
+  realtimeSub = subscribeGroup(props.groupId, (payload) => {
+    if (payload.kind === 'chat-message' || payload.kind === 'roll') {
+      fetchNew()
+    }
+  })
+  pollHandle = setInterval(fetchNew, realtimeSub ? 30_000 : 5_000)
 })
 onUnmounted(() => {
   if (pollHandle) clearInterval(pollHandle)
+  realtimeSub?.unsubscribe()
 })
 
 const formatTime = (iso: string) =>

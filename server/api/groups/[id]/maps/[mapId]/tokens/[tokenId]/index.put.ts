@@ -9,6 +9,7 @@ import { and, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
 import { battleMaps, battleTokens, characters, groups } from '~~/server/database/schema'
+import { pushMapChanged } from '~~/server/utils/pusher'
 import { DSA_ABILITIES } from '~~/shared/engines/dsa5'
 import { readCharacterHp, writeCharacterHp, type CharSystem } from '~~/shared/character-hp'
 import { cellsInTokenVision, uniqueCells, type CellTuple } from '~~/shared/fog'
@@ -217,6 +218,11 @@ export default defineEventHandler(async (event) => {
       .set({ fogExplored: capped, updatedAt: new Date() })
       .where(eq(battleMaps.id, mapId))
   }
+
+  // Realtime: Map-Zuhoerer benachrichtigen. Bewusst BEVOR wir auf den
+  // Charakter-HP-Reload warten — der Refetch beim Client zieht eh die neuesten
+  // Daten frisch aus der DB.
+  await pushMapChanged(mapId, 'token-updated')
 
   // Wenn HP an den Charakter geschrieben wurde, im Response die effektiven Werte
   // liefern, damit der Client sofort den richtigen Stand sieht.

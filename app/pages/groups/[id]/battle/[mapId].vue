@@ -26,6 +26,7 @@ import {
   type Wall,
 } from '~~/shared/fog'
 import { computeDamageLevel, damageLevelColor } from '~~/shared/damage-level'
+import { subscribeMap, subscribeGroup, type RealtimeSubscription } from '~/composables/usePusher'
 import {
   BUILT_IN_MAP_OBJECTS,
   CATEGORY_LABELS,
@@ -289,12 +290,43 @@ const fetchMapList = async () => {
   allMapsForSwitcher.value = res.maps
 }
 
+// Realtime: Pusher liefert „changed"-Events fuer Map und Gruppe, daraufhin
+// refetchen wir gezielt. Polling bleibt als langsamer Fallback (30s) — falls
+// die WS-Verbindung mal weg ist oder Pusher gar nicht konfiguriert ist.
+let mapSub: RealtimeSubscription | null = null
+let groupSub: RealtimeSubscription | null = null
 let pollHandle: ReturnType<typeof setInterval> | null = null
+const FALLBACK_POLL_MS = 30_000
+const REALTIME_POLL_MS = 30_000
+const POLLING_ONLY_MS = 5_000
 onMounted(() => {
-  pollHandle = setInterval(fetchMap, 2000)
+  mapSub = subscribeMap(mapId, () => {
+    // Lokal gerade gezogene/editierte Resourcen werden in fetchMap durch
+    // protectedIds-Check geschuetzt — wir koennen also "blind" refetchen.
+    fetchMap()
+  })
+  groupSub = subscribeGroup(groupId, (payload) => {
+    // Aktive Karte hat sich geaendert → ggf. Spieler umleiten.
+    if (payload.kind === 'active-map') {
+      fetchMap()
+    }
+    // Audio/Initiative kommt auch ueber denselben Map-Refetch mit rein (der
+    // GET /maps/:id liefert audioState + initiativeState gleich mit).
+    if (payload.kind === 'audio' || payload.kind === 'initiative') {
+      fetchMap()
+    }
+  })
+  // Ohne Realtime: dichter pollen, damit Mitspieler nicht zu lange warten.
+  // Mit Realtime: nur als seltener Sicherheits-Refresh.
+  const interval = mapSub ? REALTIME_POLL_MS : POLLING_ONLY_MS
+  pollHandle = setInterval(fetchMap, interval)
 })
 onUnmounted(() => {
   if (pollHandle) clearInterval(pollHandle)
+  mapSub?.unsubscribe()
+  groupSub?.unsubscribe()
+  // Marker, damit der Bundler die Konstante nicht raus-shaked
+  void FALLBACK_POLL_MS
 })
 
 // --- Bild-Dimensionen ---

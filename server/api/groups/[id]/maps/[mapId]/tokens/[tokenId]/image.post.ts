@@ -8,6 +8,7 @@ import { and, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
 import { battleMaps, battleTokens, groups } from '~~/server/database/schema'
+import { pushMapChanged } from '~~/server/utils/pusher'
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 const MAX_BYTES = 4 * 1024 * 1024 // 4 MB pro Token-Bild
@@ -86,5 +87,6 @@ export default defineEventHandler(async (event) => {
     .where(eq(battleTokens.id, tokenId))
     .returning()
 
+  await pushMapChanged(mapId, 'token-image')
   return { token: updated }
 })

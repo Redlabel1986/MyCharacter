@@ -13,6 +13,7 @@ import { and, eq, isNotNull, inArray } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupOwner } from '~~/server/utils/group-access'
 import { battleMaps, battleTokens, groups } from '~~/server/database/schema'
+import { pushGroupChanged, pushMapChanged } from '~~/server/utils/pusher'
 
 const bodySchema = z.object({
   mapId: z.number().int().positive().nullable(),
@@ -118,5 +119,13 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  // Spieler erfahren ueber den Gruppen-Channel, dass die aktive Karte sich
+  // geaendert hat (sie werden im Client dann automatisch auf die neue Karte
+  // umgeleitet). Zusaetzlich publish auf die neue Map, damit etwaige Tokens,
+  // die wir gerade mit umgezogen haben, sofort sichtbar werden.
+  await pushGroupChanged(groupId, 'active-map')
+  if (newMap) {
+    await pushMapChanged(newMap.id, 'active-map')
+  }
   return { group: updated }
 })

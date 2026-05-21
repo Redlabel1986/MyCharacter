@@ -6,6 +6,7 @@ import { and, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
 import { battleDrawings, battleMaps, groups } from '~~/server/database/schema'
+import { pushMapChanged } from '~~/server/utils/pusher'
 
 export default defineEventHandler(async (event) => {
   const { user } = await requireUserSession(event)
@@ -45,5 +46,6 @@ export default defineEventHandler(async (event) => {
   }
 
   await db.delete(battleDrawings).where(eq(battleDrawings.id, drawingId))
+  await pushMapChanged(mapId, 'drawing-deleted')
   return { ok: true }
 })

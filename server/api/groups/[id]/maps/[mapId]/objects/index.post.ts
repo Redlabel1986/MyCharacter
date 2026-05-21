@@ -17,6 +17,7 @@ import {
   mapObjects,
 } from '~~/server/database/schema'
 import { findBuiltin } from '~~/shared/map-objects'
+import { pushMapChanged } from '~~/server/utils/pusher'
 
 const bodySchema = z
   .object({
@@ -163,5 +164,6 @@ export default defineEventHandler(async (event) => {
     })
     .returning()
 
+  await pushMapChanged(mapId, 'object-created')
   return { object: inserted }
 })

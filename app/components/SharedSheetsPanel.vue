@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { HtbahTalent } from '~~/shared/engines/htbah'
 import { HTBAH_TALENT_LABELS, HTBAH_TALENTS } from '~~/shared/engines/htbah'
+import { subscribeGroup, type RealtimeSubscription } from '~/composables/usePusher'
 
 interface SkillEntry {
   id: string
@@ -47,12 +48,18 @@ const fetchShares = async () => {
 }
 
 let pollHandle: ReturnType<typeof setInterval> | null = null
+let realtimeSub: RealtimeSubscription | null = null
 onMounted(async () => {
   await fetchShares()
-  pollHandle = setInterval(fetchShares, 5000)
+  realtimeSub = subscribeGroup(props.groupId, (payload) => {
+    if (payload.kind === 'shares') fetchShares()
+  })
+  // Realtime aktiv → 30s als Sicherheits-Refresh; sonst zuegiger pollen.
+  pollHandle = setInterval(fetchShares, realtimeSub ? 30_000 : 10_000)
 })
 onUnmounted(() => {
   if (pollHandle) clearInterval(pollHandle)
+  realtimeSub?.unsubscribe()
 })
 
 defineExpose({ refresh: fetchShares })

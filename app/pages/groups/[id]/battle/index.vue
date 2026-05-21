@@ -3,6 +3,8 @@
  * Karten-Uebersicht einer Gruppe. Spieler sehen nur freigegebene Karten,
  * Gruppen-Owner (DM) sieht alle und kann hochladen.
  */
+import { subscribeGroup, type RealtimeSubscription } from '~/composables/usePusher'
+
 definePageMeta({ middleware: ['auth'] })
 
 interface BattleMap {
@@ -34,25 +36,35 @@ const isDm = computed(() => !!data.value?.isDm)
 const activeMapId = computed(() => data.value?.activeMapId ?? null)
 
 // Auto-Redirect fuer Spieler: wenn der DM eine Karte aktiv gesetzt hat,
-// direkt dorthin springen — kein „Liste"-Schritt fuer den Spieler.
+// direkt dorthin springen — kein „Liste"-Schritt fuer den Spieler. Mit
+// Pusher reagieren wir auf 'active-map'-Events und sparen das schnelle
+// Polling — ein langsamer 30s-Fallback bleibt als Sicherheitsnetz.
 let activePoll: ReturnType<typeof setInterval> | null = null
+let activeSub: RealtimeSubscription | null = null
 onMounted(() => {
   if (!isDm.value && activeMapId.value) {
     navigateTo(`/groups/${groupId}/battle/${activeMapId.value}`)
     return
   }
-  // Spieler ohne aktive Karte: regelmaessig pruefen, ob der DM gestartet hat.
   if (!isDm.value) {
+    activeSub = subscribeGroup(groupId, async (payload) => {
+      if (payload.kind !== 'active-map') return
+      await refresh()
+      if (activeMapId.value) {
+        navigateTo(`/groups/${groupId}/battle/${activeMapId.value}`)
+      }
+    })
     activePoll = setInterval(async () => {
       await refresh()
       if (activeMapId.value) {
         navigateTo(`/groups/${groupId}/battle/${activeMapId.value}`)
       }
-    }, 3000)
+    }, activeSub ? 30_000 : 5_000)
   }
 })
 onUnmounted(() => {
   if (activePoll) clearInterval(activePoll)
+  activeSub?.unsubscribe()
 })
 
 const setActive = async (map: BattleMap) => {

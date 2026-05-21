@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupOwner } from '~~/server/utils/group-access'
 import { groups } from '~~/server/database/schema'
+import { pushGroupChanged } from '~~/server/utils/pusher'
 
 const entrySchema = z.object({
   id: z.string().min(1).max(64),
@@ -42,5 +43,6 @@ export default defineEventHandler(async (event) => {
     .set({ initiativeState: body })
     .where(eq(groups.id, groupId))
     .returning()
+  await pushGroupChanged(groupId, 'initiative')
   return { initiativeState: updated?.initiativeState ?? null }
 })
