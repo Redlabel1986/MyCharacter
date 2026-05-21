@@ -588,7 +588,10 @@ const rollDamage = async () => {
     }
 
     damageSuccess.value = true
-    damageFormula.value = ''
+    // damageFormula bewusst NICHT zuruecksetzen — sonst muesste der Spieler
+    // fuer jeden weiteren Angriff erst wieder die Waffe waehlen oder die
+    // Formel tippen. So funktioniert wiederholtes Klicken auf "Wuerfeln"
+    // fuer dasselbe Ziel mit derselben Waffe direkt.
     setTimeout(() => (damageSuccess.value = false), 2200)
   } catch (e: unknown) {
     damageError.value = (e as { statusMessage?: string }).statusMessage ?? 'Wurf fehlgeschlagen.'
