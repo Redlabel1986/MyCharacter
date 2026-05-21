@@ -669,7 +669,7 @@ const postRollToGroup = async () => {
         <div class="col-span-1 text-center">+Beg.</div>
         <div
           class="col-span-2 text-center"
-          title="Allgemeiner Modifikator. Wird immer zur Probe addiert (Vor- oder Nachteil aus Eigenschaften, Wunden o.aE.)."
+          title="Allgemeiner Modifikator. Wird immer zur Probe addiert (Vor- oder Nachteil aus Eigenschaften, Wunden o.Ä.)."
         >Mod</div>
         <div class="col-span-2 text-center">Total</div>
         <div class="col-span-1"></div>
@@ -1139,8 +1139,8 @@ const postRollToGroup = async () => {
       <div class="flex items-baseline justify-between gap-2 mb-2">
         <p class="text-xs text-ink-300/80">
           Wähle pro Zauber einen Skill (Probe gegen dessen FW). Jede Stufe
-          bekommt eigene Erschwernis und Schadensformel — im Battle-Map-Wurf
-          kannst du Stufe wählen, beides wird automatisch befüllt.
+          bekommt eine eigene Erschwernis und Schadensformel — im Battle-Map-Wurf
+          kannst du die entsprechende Stufe wählen, beides wird automatisch befüllt.
         </p>
         <UButton size="xs" variant="soft" icon="i-lucide-plus" @click="addSpell">
           Zauber hinzufügen
@@ -1282,7 +1282,7 @@ const postRollToGroup = async () => {
       <div class="flex items-baseline justify-between gap-2 mb-2">
         <p class="text-xs text-ink-300/80">
           Heiltrank, Erste-Hilfe-Paket o.ä. — Heilwert in HP plus Anzahl.
-          Im Battle-Map-Mini-Charsheet wählst du Ziel + verwendest sie per Klick.
+          Im Battle-Map-Mini-Charsheet wählst du ein Ziel + verwendest sie per Klick.
         </p>
         <UButton size="xs" variant="soft" icon="i-lucide-plus" @click="addUsableItem">
           Gegenstand
