@@ -17,13 +17,70 @@ import Pusher from 'pusher'
 
 let _client: Pusher | null = null
 
+/**
+ * Liefert den ersten nicht-leeren Wert aus runtimeConfig ODER process.env.
+ * Hintergrund: Nuxt friert `runtimeConfig` beim Build ein. Wenn die ENV-Vars
+ * NACH dem letzten Vercel-Build gesetzt wurden, sind sie in der runtimeConfig
+ * leer — auf der Serverless-Function ist `process.env` aber trotzdem
+ * gefuellt. Mit dem Fallback wirkt ein nachtraegliches Setzen ohne Redeploy.
+ */
+function resolveEnv(
+  configValue: unknown,
+  ...envNames: string[]
+): string {
+  const fromConfig = typeof configValue === 'string' ? configValue : ''
+  if (fromConfig) return fromConfig
+  for (const name of envNames) {
+    const v = process.env[name]
+    if (v) return v
+  }
+  return ''
+}
+
+/**
+ * Welche Pusher-Variablen sind aktuell gesetzt? Wird vom Auth-Endpoint
+ * verwendet, um im 503-Body zu sagen, was konkret fehlt.
+ */
+export function pusherEnvStatus(): {
+  appId: boolean
+  key: boolean
+  secret: boolean
+  cluster: string
+} {
+  const config = useRuntimeConfig()
+  return {
+    appId: !!resolveEnv(config.pusherAppId, 'PUSHER_APP_ID', 'NUXT_PUSHER_APP_ID'),
+    key: !!resolveEnv(
+      config.public.pusherKey,
+      'PUSHER_KEY',
+      'NUXT_PUBLIC_PUSHER_KEY',
+    ),
+    secret: !!resolveEnv(config.pusherSecret, 'PUSHER_SECRET', 'NUXT_PUSHER_SECRET'),
+    cluster:
+      resolveEnv(
+        config.public.pusherCluster,
+        'PUSHER_CLUSTER',
+        'NUXT_PUBLIC_PUSHER_CLUSTER',
+      ) || 'eu',
+  }
+}
+
 function getClient(): Pusher | null {
   if (_client) return _client
   const config = useRuntimeConfig()
-  const appId = config.pusherAppId as string
-  const key = (config.public.pusherKey as string) ?? ''
-  const secret = config.pusherSecret as string
-  const cluster = (config.public.pusherCluster as string) ?? 'eu'
+  const appId = resolveEnv(config.pusherAppId, 'PUSHER_APP_ID', 'NUXT_PUSHER_APP_ID')
+  const key = resolveEnv(
+    config.public.pusherKey,
+    'PUSHER_KEY',
+    'NUXT_PUBLIC_PUSHER_KEY',
+  )
+  const secret = resolveEnv(config.pusherSecret, 'PUSHER_SECRET', 'NUXT_PUSHER_SECRET')
+  const cluster =
+    resolveEnv(
+      config.public.pusherCluster,
+      'PUSHER_CLUSTER',
+      'NUXT_PUBLIC_PUSHER_CLUSTER',
+    ) || 'eu'
   if (!appId || !key || !secret) return null
   _client = new Pusher({
     appId,

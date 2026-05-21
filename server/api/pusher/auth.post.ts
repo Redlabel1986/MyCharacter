@@ -12,7 +12,7 @@
 import { eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
-import { authorizeChannel } from '~~/server/utils/pusher'
+import { authorizeChannel, pusherEnvStatus } from '~~/server/utils/pusher'
 import { battleMaps } from '~~/server/database/schema'
 
 interface AuthBody {
@@ -60,9 +60,16 @@ export default defineEventHandler(async (event) => {
 
   const auth = authorizeChannel(socketId, channelName)
   if (!auth) {
+    const env = pusherEnvStatus()
+    const missing = [
+      env.appId ? null : 'PUSHER_APP_ID',
+      env.key ? null : 'PUSHER_KEY',
+      env.secret ? null : 'PUSHER_SECRET',
+    ].filter(Boolean)
     throw createError({
       statusCode: 503,
-      statusMessage: 'Realtime nicht konfiguriert (PUSHER_APP_ID/KEY/SECRET fehlen).',
+      statusMessage: `Pusher nicht konfiguriert. Fehlt: ${missing.join(', ')}.`,
+      data: { missing },
     })
   }
   return auth
