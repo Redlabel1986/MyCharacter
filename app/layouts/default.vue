@@ -75,6 +75,13 @@ const returnToAdminView = async () => {
             <NuxtLink to="/profile" class="hover:text-[var(--color-accent)]">
               Profil
             </NuxtLink>
+            <NuxtLink
+              to="/changelog"
+              class="hover:text-[var(--color-accent)]"
+              title="Was hat sich geändert?"
+            >
+              Changelog
+            </NuxtLink>
             <span class="text-ink-300">|</span>
             <span class="text-ink-400">
               {{ user?.username }}
@@ -88,6 +95,7 @@ const returnToAdminView = async () => {
             </UButton>
           </template>
           <template v-else>
+            <NuxtLink to="/changelog" class="hover:text-[var(--color-accent)]">Changelog</NuxtLink>
             <NuxtLink to="/login" class="hover:text-[var(--color-accent)]">Anmelden</NuxtLink>
             <NuxtLink to="/register" class="hover:text-[var(--color-accent)]">Registrieren</NuxtLink>
             <ThemeSwitcher />
