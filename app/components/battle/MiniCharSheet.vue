@@ -953,6 +953,29 @@ const paradeOptions = computed<Array<{ id: string; label: string; kind: 'talent'
 })
 const paradeRolling = ref(false)
 const paradeError = ref<string | null>(null)
+
+// --- Kampfmanoever (§4.1) ---
+// Setzt rollMod + Notiz vor — der Spieler klickt danach nur noch „Wuerfeln".
+const maneuverOpen = ref(false)
+interface Maneuver {
+  id: string
+  label: string
+  modifier: number
+  note: string
+}
+const HTBAH_MANEUVERS: Maneuver[] = [
+  { id: 'sturmangriff', label: 'Sturmangriff', modifier: -20, note: 'Sturmangriff: 3× Bewegung, dann Angriff (−20)' },
+  { id: 'vorbeilaufen', label: 'Angriff im Vorbeilaufen', modifier: -10, note: 'Angriff im Vorbeilaufen (−10) — Gegner bekommt Gelegenheitsangriff' },
+  { id: 'entwaffnen', label: 'Entwaffnen', modifier: 0, note: 'Entwaffnen — bei Erfolg Waffe fallen; Krit = Waffe übernommen' },
+  { id: 'zufall', label: 'Zu Fall bringen', modifier: 0, note: 'Zu Fall bringen — bei Erfolg Ziel liegend; Krit = +1W10 Schaden' },
+  { id: 'ringen', label: 'Ringkampf', modifier: 10, note: 'Ringkampf (+10 wenn beidhändig) — beide werden Ringend' },
+  { id: 'zerstoeren', label: 'Gegenstand zerstören', modifier: 0, note: 'Gegenstand zerstören — Schaden geht aufs Objekt; Krit = sofort zerstört' },
+]
+const applyManeuver = (m: Maneuver) => {
+  rollMod.value = m.modifier
+  rollNote.value = m.note
+  maneuverOpen.value = false
+}
 const paradeRoll = async (id: string, kind: 'talent' | 'skill') => {
   if (!character.value || !isHtbah.value) return
   paradeRolling.value = true
@@ -1509,6 +1532,16 @@ const onImageError = (tokenId: number) => {
         >
           Parade/Ausweichen
         </UButton>
+        <UButton
+          color="neutral"
+          variant="soft"
+          icon="i-lucide-swords"
+          size="sm"
+          title="Kampfmanöver (Regelwerk §4.1) — setzt Modifier + Notiz vor"
+          @click="maneuverOpen = !maneuverOpen"
+        >
+          Manöver
+        </UButton>
         <div
           v-if="initLastResult"
           class="text-xs px-2 py-1 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 self-center"
@@ -1546,6 +1579,36 @@ const onImageError = (tokenId: number) => {
         <p v-if="paradeError" class="text-xs text-red-700">{{ paradeError }}</p>
         <p class="text-[10px] text-ink-300/80">
           Erfolg = kein Schaden. Krit. Angriffe und Schusswaffen sind nicht parierbar.
+        </p>
+      </div>
+
+      <!-- Kampfmanoever-Popup: setzt Modifier + Notiz vor, Spieler klickt dann
+           den normalen Wuerfeln-Button. -->
+      <div
+        v-if="maneuverOpen && isHtbah"
+        class="p-2 rounded border border-parchment-700/30 bg-white/60 space-y-1"
+      >
+        <div class="text-[10px] uppercase tracking-widest text-ink-300 mb-1">
+          Kampfmanöver — welches?
+        </div>
+        <div
+          v-for="m in HTBAH_MANEUVERS"
+          :key="m.id"
+        >
+          <UButton
+            block
+            size="xs"
+            variant="outline"
+            @click="applyManeuver(m)"
+          >
+            {{ m.label }}
+            <span class="ml-auto text-[10px] opacity-70">
+              {{ m.modifier > 0 ? '+' : '' }}{{ m.modifier !== 0 ? m.modifier : '±0' }}
+            </span>
+          </UButton>
+        </div>
+        <p class="text-[10px] text-ink-300/80 mt-1">
+          Setzt Modifier + Notiz für deinen nächsten Wurf vor.
         </p>
       </div>
 
