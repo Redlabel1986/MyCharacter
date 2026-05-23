@@ -195,23 +195,24 @@ const applyPurseNormalize = () => {
 // Wird beim Schadenswurf vom eingehenden Schaden abgezogen. Summe siehe
 // htbahTotalArmor(); im Bogen pflegt der Spieler beliebig viele Teile.
 const totalArmor = computed(() => htbahTotalArmor(sheet.value))
-const armorSlotOptions = [
-  { label: '— Slot —', value: '' },
-  ...HTBAH_ARMOR_SLOTS.map((s) => ({ label: HTBAH_ARMOR_SLOT_LABELS[s], value: s })),
-]
+// Sentinel-Wert fuer "nichts ausgewaehlt" — Radix-Select (Nuxt UI 3) verbietet
+// empty-string als Option-Value, also nutzen wir einen non-empty Sentinel und
+// uebersetzen ihn in den Setter-Handlern wieder zu undefined / Default.
+const NONE_VALUE = '__none__'
+const armorSlotOptions = HTBAH_ARMOR_SLOTS.map((s) => ({
+  label: HTBAH_ARMOR_SLOT_LABELS[s],
+  value: s,
+}))
 const armorTagOptions = [
-  { label: '— Klasse —', value: '' },
+  { label: '— Klasse —', value: NONE_VALUE },
   ...HTBAH_ARMOR_TAGS.map((t) => ({ label: HTBAH_ARMOR_TAG_LABELS[t], value: t })),
 ]
-const weaponCategoryOptions = [
-  { label: '— Kategorie —', value: '' },
-  ...HTBAH_WEAPON_CATEGORIES.map((c) => ({
-    label: HTBAH_WEAPON_CATEGORY_LABELS[c],
-    value: c,
-  })),
-]
+const weaponCategoryOptions = HTBAH_WEAPON_CATEGORIES.map((c) => ({
+  label: HTBAH_WEAPON_CATEGORY_LABELS[c],
+  value: c,
+}))
 const attackSkillOptions = computed(() => [
-  { label: '— Trefferwurf-Skill (optional) —', value: '' },
+  { label: '— Trefferwurf-Skill (optional) —', value: NONE_VALUE },
   ...sheet.value.skills
     .filter((s: HtbahSkill) => s.name?.trim())
     .map((s: HtbahSkill) => ({
@@ -242,7 +243,8 @@ const removeArmor = (idx: number) => {
   update(n)
 }
 // Vue-Template kann TS-Casts nicht — daher diese duennen Wrapper im Script,
-// die die Slot/Tag-Werte typsicher zuruecksetzen.
+// die die Slot/Tag-Werte typsicher zuruecksetzen. NONE_VALUE wird als "keine
+// Auswahl" interpretiert (Radix verbietet empty-string als Select-Value).
 const setArmorSlot = (idx: number, raw: unknown) => {
   const v = String(raw)
   const slot = (HTBAH_ARMOR_SLOTS as readonly string[]).includes(v)
@@ -252,6 +254,10 @@ const setArmorSlot = (idx: number, raw: unknown) => {
 }
 const setArmorTag = (idx: number, raw: unknown) => {
   const v = String(raw)
+  if (v === NONE_VALUE) {
+    updateArmor(idx, { tag: undefined })
+    return
+  }
   const tag = (HTBAH_ARMOR_TAGS as readonly string[]).includes(v)
     ? (v as HtbahArmorTag)
     : undefined
@@ -266,7 +272,7 @@ const setWeaponCategory = (idx: number, raw: unknown) => {
 }
 const setWeaponAttackSkill = (idx: number, raw: unknown) => {
   const v = String(raw ?? '')
-  updateWeapon(idx, { attackSkillId: v ? v : undefined })
+  updateWeapon(idx, { attackSkillId: v && v !== NONE_VALUE ? v : undefined })
 }
 
 // --- Waffen ---
@@ -420,7 +426,7 @@ const removeSpellLevel = (spellIdx: number, levelIdx: number) => {
 
 // Skill-Auswahl-Optionen fuer das Zauber-"Probe-gegen"-Dropdown.
 const spellSkillOptions = computed(() => [
-  { label: '— Skill waehlen —', value: '' },
+  { label: '— Skill waehlen —', value: NONE_VALUE },
   ...sheet.value.skills
     .filter((s: HtbahSkill) => s.name?.trim())
     .map((s: HtbahSkill) => ({
@@ -1206,7 +1212,7 @@ const postRollToGroup = async () => {
               />
               <USelect
                 class="col-span-6"
-                :model-value="piece.tag ?? ''"
+                :model-value="piece.tag ?? NONE_VALUE"
                 :items="armorTagOptions"
                 value-key="value"
                 size="sm"
@@ -1277,7 +1283,7 @@ const postRollToGroup = async () => {
               />
               <USelect
                 class="col-span-6"
-                :model-value="w.attackSkillId ?? ''"
+                :model-value="w.attackSkillId ?? NONE_VALUE"
                 :items="attackSkillOptions"
                 value-key="value"
                 size="sm"
@@ -1375,11 +1381,11 @@ const postRollToGroup = async () => {
             />
             <USelect
               class="col-span-4"
-              :model-value="spell.skillId"
+              :model-value="spell.skillId || NONE_VALUE"
               :items="spellSkillOptions"
               value-key="value"
               size="sm"
-              @update:model-value="updateSpell(sIdx, { skillId: String($event) })"
+              @update:model-value="updateSpell(sIdx, { skillId: String($event) === NONE_VALUE ? '' : String($event) })"
             />
             <UInput
               class="col-span-3"

@@ -411,8 +411,12 @@ const characterWeapons = computed<HtbahWeaponEntry[]>(() => {
     (w: HtbahWeaponEntry) => w.name?.trim() || w.damageFormula?.trim(),
   )
 })
+// Radix-Select (Nuxt UI 3) verbietet empty-string als Option-Value — daher
+// dieser Sentinel als "nichts ausgewaehlt"-Marker. In den Watchern wird er
+// wie '' behandelt.
+const NONE_VALUE = '__none__'
 const weaponOptions = computed(() => [
-  { label: '— Waffe waehlen —', value: '' },
+  { label: '— Waffe waehlen —', value: NONE_VALUE },
   ...characterWeapons.value.map((w: HtbahWeaponEntry) => {
     // Sonderregel-Suffix fuer schnellen visuellen Abgleich:
     // "Streitkolben (3d10+10, Schlag, RB-30)"
@@ -439,6 +443,10 @@ const selectedWeapon = computed<HtbahWeaponEntry | null>(
 // die Trefferprobe vorbelegen (attackSkillId), wenn die Waffe einen Trefferskill
 // gepflegt hat — damit der Spieler nicht zwei Mal das Dropdown anfassen muss.
 watch(selectedWeaponId, (id: string) => {
+  if (id === NONE_VALUE) {
+    selectedWeaponId.value = ''
+    return
+  }
   if (!id) return
   const w = characterWeapons.value.find((x: HtbahWeaponEntry) => x.id === id)
   if (!w) return
@@ -468,7 +476,7 @@ const characterSpells = computed<HtbahSpellEntry[]>(() => {
   )
 })
 const spellOptions = computed(() => [
-  { label: '— Zauber waehlen —', value: '' },
+  { label: '— Zauber waehlen —', value: NONE_VALUE },
   ...characterSpells.value.map((s: HtbahSpellEntry) => ({
     label: s.name,
     value: s.id,
@@ -481,9 +489,9 @@ const selectedSpell = computed<HtbahSpellEntry | null>(
 )
 const spellLevelOptions = computed(() => {
   const sp = selectedSpell.value
-  if (!sp) return [{ label: '— erst Zauber waehlen —', value: '' }]
+  if (!sp) return [{ label: '— erst Zauber waehlen —', value: NONE_VALUE }]
   return [
-    { label: '— Stufe waehlen —', value: '' },
+    { label: '— Stufe waehlen —', value: NONE_VALUE },
     ...sp.levels.map((l: HtbahSpellLevel) => {
       const modStr = l.modifier > 0 ? `+${l.modifier}` : l.modifier < 0 ? `${l.modifier}` : '±0'
       const dmgStr = l.damageFormula?.trim() ? ` · ${l.damageFormula}` : ''
@@ -492,13 +500,20 @@ const spellLevelOptions = computed(() => {
   ]
 })
 // Bei Zauber-Wechsel die Stufe leeren — der Spieler soll bewusst neu waehlen.
-watch(selectedSpellId, () => {
+// Wenn Sentinel gewaehlt wurde, gleich auf '' zuruecksetzen, damit die
+// nachgelagerte Logik wie gewohnt "kein Zauber gewaehlt" sieht.
+watch(selectedSpellId, (id: string) => {
   selectedSpellLevelId.value = ''
+  if (id === NONE_VALUE) selectedSpellId.value = ''
 })
 // Bei Stufen-Wahl: Schaden-Formel + Label setzen, Probe vorbelegen, Mod setzen
 // und den Schaden/Heilung-Modus passend zur Stufe vorbelegen (Heilzauber
 // landen damit direkt im Heil-Modus, sodass Ruestung nicht abgezogen wird).
 watch(selectedSpellLevelId, (id: string) => {
+  if (id === NONE_VALUE) {
+    selectedSpellLevelId.value = ''
+    return
+  }
   if (!id) return
   const sp = selectedSpell.value
   if (!sp) return
