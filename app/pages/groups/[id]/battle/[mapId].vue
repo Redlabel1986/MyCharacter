@@ -122,6 +122,8 @@ interface InitiativeState {
   round: number
   currentIndex: number
   entries: InitiativeEntry[]
+  /** Spieler-Charakter-IDs, von denen noch Init-Wuerfe ausstehen (SL-Anfrage). */
+  awaitingFromCharacters?: number[]
 }
 interface AudioTrack {
   id: number
@@ -1907,6 +1909,49 @@ const initRemoveEntry = async (id: string) => {
   const entries = initiativeState.value.entries.filter((e) => e.id !== id)
   await saveInitiative({ ...initiativeState.value, entries })
 }
+
+// --- Initiative-Anfrage (SL fordert Spieler-Wuerfe an) ---
+// Sammelt alle Spieler-Token-Charaktere auf der Karte (nicht-NPC, Charakter
+// vorhanden) und legt deren characterId in `awaitingFromCharacters`. Im
+// MiniCharSheet jedes Spielers erscheint dann ein roter "Initiative wuerfeln"-
+// Button, der server-seitig 1W10 + Handeln wuerfelt und das Ergebnis hier
+// eintraegt.
+const initRequestPlayerRolls = async () => {
+  // Alle Token mit Charakter-Bezug, die NICHT dem DM gehoeren → das sind die
+  // Spieler, die wuerfeln sollen. Mehrere Token desselben Charakters werden
+  // deduppt (Set).
+  const dmId = user.value?.id ?? -1
+  const playerCharacterIds: number[] = Array.from(
+    new Set<number>(
+      tokens.value
+        .filter((t: Token) => t.characterId !== null && t.ownerUserId !== dmId)
+        .map((t: Token) => t.characterId as number),
+    ),
+  )
+  if (!playerCharacterIds.length) {
+    alert('Keine Spieler-Charaktere auf der Karte. Lege erst Token mit Charakter-Bezug an.')
+    return
+  }
+  const s = initiativeState.value
+  await saveInitiative({
+    active: s?.active ?? true,
+    round: s?.round ?? 1,
+    currentIndex: s?.currentIndex ?? 0,
+    // Bisherige Spieler-Eintraege rauswerfen, NPCs/manuelle Eintraege behalten —
+    // sonst hat man nach der zweiten Anfrage doppelte Eintraege.
+    entries: (s?.entries ?? []).filter(
+      (e) => !e.characterId || !playerCharacterIds.includes(e.characterId),
+    ),
+    awaitingFromCharacters: playerCharacterIds,
+  })
+}
+const initCancelRequest = async () => {
+  if (!initiativeState.value) return
+  await saveInitiative({ ...initiativeState.value, awaitingFromCharacters: undefined })
+}
+const initAwaitingCount = computed(
+  () => initiativeState.value?.awaitingFromCharacters?.length ?? 0,
+)
 const initSetInitiative = async (id: string, value: number) => {
   if (!initiativeState.value) return
   const entries = initiativeState.value.entries.map((e) =>
@@ -3838,6 +3883,30 @@ const endResize = () => {
             <UButton size="xs" variant="outline" icon="i-lucide-plus" @click="initAddManual">
               Manuell
             </UButton>
+            <!-- Initiative-Anfrage an Spieler: Spieler-Charaktere bekommen im
+                 MiniCharSheet einen roten Wuerfel-Button. Wuerfe landen direkt
+                 in `entries`. -->
+            <UButton
+              v-if="!initAwaitingCount"
+              size="xs"
+              color="warning"
+              icon="i-lucide-megaphone"
+              title="Alle Spieler-Charaktere zum Initiative-Wurf auffordern"
+              @click="initRequestPlayerRolls"
+            >
+              Anfrage an Spieler
+            </UButton>
+            <UButton
+              v-else
+              size="xs"
+              color="error"
+              variant="soft"
+              icon="i-lucide-x"
+              :title="`Warte noch auf ${initAwaitingCount} Wurf/Wuerfe — Anfrage abbrechen`"
+              @click="initCancelRequest"
+            >
+              Anfrage abbrechen ({{ initAwaitingCount }})
+            </UButton>
             <UButton
               v-if="initiativeState"
               size="xs"
@@ -3913,6 +3982,7 @@ const endResize = () => {
         :tokens="myTokensOnMap"
         :all-tokens="tokens"
         :time-of-day="currentTimeOfDay"
+        :awaiting-initiative-for="initiativeState?.awaitingFromCharacters ?? []"
         @token-updated="fetchMap"
       />
 

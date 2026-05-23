@@ -25,6 +25,7 @@ const stateSchema = z
     round: z.number().int().min(1).max(10000),
     currentIndex: z.number().int().min(0).max(1000),
     entries: z.array(entrySchema).max(50),
+    awaitingFromCharacters: z.array(z.number().int().positive()).max(50).optional(),
   })
   .nullable()
 

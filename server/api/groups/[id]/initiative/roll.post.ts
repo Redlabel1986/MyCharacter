@@ -1,0 +1,149 @@
+/**
+ * POST /api/groups/:id/initiative/roll — Spieler-Initiative-Wurf
+ *
+ * Wird vom MiniCharSheet ausgeloest, wenn der SL eine Initiative-Anfrage
+ * laufen hat und die characterId des Spielers in `awaitingFromCharacters`
+ * steht. Server wuerfelt 1W10 + Handeln-Begabungswert (HtbaH-Regelwerk
+ * §2.2 Initiative), legt einen Eintrag in `initiativeState.entries` an
+ * (oder ersetzt einen vorhandenen Eintrag desselben Charakters) und
+ * entfernt die characterId aus `awaitingFromCharacters`.
+ *
+ * Zusaetzlich landet eine Roll-Message im Gruppen-Chat, damit auch andere
+ * Spieler den Wurf live sehen.
+ */
+import { z } from 'zod'
+import { and, eq } from 'drizzle-orm'
+import { useDb } from '~~/server/utils/db'
+import { requireGroupMember } from '~~/server/utils/group-access'
+import {
+  battleTokens,
+  characters,
+  groups,
+  messages,
+  type InitiativeEntry,
+  type InitiativeState,
+  type RollPayload,
+} from '~~/server/database/schema'
+import {
+  htbahInitiativeBonus,
+  type HtbahCharacterData,
+} from '~~/shared/engines/htbah'
+import { pushGroupChanged } from '~~/server/utils/pusher'
+
+const bodySchema = z.object({
+  characterId: z.number().int().positive(),
+})
+
+export default defineEventHandler(async (event) => {
+  const { user } = await requireUserSession(event)
+  const groupId = Number(getRouterParam(event, 'id'))
+  if (!Number.isFinite(groupId)) {
+    throw createError({ statusCode: 400, statusMessage: 'Ungültige Gruppen-ID.' })
+  }
+  const body = await readValidatedBody(event, bodySchema.parse)
+  const db = useDb()
+  await requireGroupMember(db, groupId, user.id)
+
+  // Charakter muss dem User gehoeren — sonst koennte jemand fuer Andere wuerfeln.
+  const [char] = await db
+    .select()
+    .from(characters)
+    .where(eq(characters.id, body.characterId))
+    .limit(1)
+  if (!char) {
+    throw createError({ statusCode: 404, statusMessage: 'Charakter nicht gefunden.' })
+  }
+  if (char.userId !== user.id) {
+    throw createError({ statusCode: 403, statusMessage: 'Nicht dein Charakter.' })
+  }
+  if (char.system !== 'htbah') {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Initiative-Wurf nur fuer HtbaH-Charaktere.',
+    })
+  }
+
+  // Gruppe + Initiative-State laden.
+  const [grp] = await db
+    .select({ id: groups.id, initiativeState: groups.initiativeState })
+    .from(groups)
+    .where(eq(groups.id, groupId))
+    .limit(1)
+  if (!grp) {
+    throw createError({ statusCode: 404, statusMessage: 'Gruppe nicht gefunden.' })
+  }
+  const state = (grp.initiativeState as InitiativeState | null) ?? null
+  if (!state || !Array.isArray(state.awaitingFromCharacters) || state.awaitingFromCharacters.length === 0) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Aktuell keine Initiative-Anfrage offen.',
+    })
+  }
+  if (!state.awaitingFromCharacters.includes(body.characterId)) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Dein Charakter steht nicht auf der Anfrageliste (vielleicht schon gewuerfelt?).',
+    })
+  }
+
+  // Server wuerfelt 1W10 + Handeln-Begabungswert (Regelwerk §2.2).
+  const data = char.data as HtbahCharacterData
+  const handelnBonus = htbahInitiativeBonus(data)
+  const die = Math.floor(Math.random() * 10) + 1
+  const total = die + handelnBonus
+
+  // Snapshot des Token-Bilds (wenn der Spieler ein Token auf einer der Karten
+  // dieser Gruppe hat) — rein kosmetisch fuer den SL-Tracker.
+  const [tok] = await db
+    .select({ imageUrl: battleTokens.imageUrl })
+    .from(battleTokens)
+    .where(eq(battleTokens.characterId, body.characterId))
+    .limit(1)
+
+  // Eintrag in entries setzen — entweder bestehenden Eintrag des Chars updaten
+  // oder neuen anlegen. ID = `char:<id>` damit es deterministisch ist.
+  const entryId = `char:${body.characterId}`
+  const newEntry: InitiativeEntry = {
+    id: entryId,
+    name: char.name,
+    initiative: total,
+    characterId: body.characterId,
+    ownerUserId: user.id,
+    hasActed: false,
+    imageUrl: tok?.imageUrl ?? undefined,
+  }
+  const nextEntries = [
+    ...state.entries.filter((e) => e.id !== entryId && e.characterId !== body.characterId),
+    newEntry,
+  ]
+  const nextAwaiting = state.awaitingFromCharacters.filter((id) => id !== body.characterId)
+  const nextState: InitiativeState = {
+    ...state,
+    entries: nextEntries,
+    awaitingFromCharacters: nextAwaiting.length ? nextAwaiting : undefined,
+  }
+  await db.update(groups).set({ initiativeState: nextState }).where(eq(groups.id, groupId))
+
+  // Roll-Message in den Chat — damit der Wurf transparent ist.
+  const payload: RollPayload = {
+    system: 'htbah',
+    label: `Initiative — ${char.name}`,
+    characterId: char.id,
+    characterName: char.name,
+    target: total,
+    modifier: handelnBonus || undefined,
+    dice: [die],
+    success: true,
+    freeRoll: true,
+  }
+  await db.insert(messages).values({
+    groupId,
+    userId: user.id,
+    type: 'roll',
+    content: `Initiative ${char.name}: ${die}${handelnBonus ? ` + ${handelnBonus}` : ''} = ${total}`,
+    payload,
+  })
+
+  await pushGroupChanged(groupId, 'initiative')
+  return { initiativeState: nextState, rolled: total, die, handelnBonus }
+})

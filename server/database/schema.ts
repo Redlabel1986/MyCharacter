@@ -721,6 +721,14 @@ export interface InitiativeState {
   round: number
   currentIndex: number
   entries: InitiativeEntry[]
+  /**
+   * Wenn true, wartet der SL auf Initiative-Wuerfe der Spieler. Im MiniCharSheet
+   * jedes Spielers erscheint ein roter "Initiative wuerfeln"-Button. Sobald ein
+   * Spieler gewuerfelt hat, wird seine characterId hier aus der Liste entfernt;
+   * ist die Liste leer, kann der SL die Anfrage beenden (oder sie laeuft so
+   * lange, bis er sie manuell stoppt). Default undefined / nicht aktiv.
+   */
+  awaitingFromCharacters?: number[]
 }
 
 /**

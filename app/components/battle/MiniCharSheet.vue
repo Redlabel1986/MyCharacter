@@ -79,6 +79,12 @@ const props = defineProps<{
    */
   allTokens?: Token[]
   timeOfDay?: TimeOfDay
+  /**
+   * Charakter-IDs, fuer die der SL gerade Initiative-Wuerfe anfordert.
+   * Wenn die characterId des aktiven Charakter-Tokens hier auftaucht,
+   * erscheint im MiniCharSheet ein roter "Initiative wuerfeln"-Button.
+   */
+  awaitingInitiativeFor?: number[]
 }>()
 
 const emit = defineEmits<{
@@ -863,6 +869,95 @@ const useItem = async (item: HtbahUsableItem) => {
 const rollSending = ref(false)
 const rollError = ref<string | null>(null)
 const rollSuccess = ref(false)
+
+// --- Initiative-Wurf (Spieler) ---
+// SL gibt Initiative-Anfrage frei → `awaitingInitiativeFor` enthaelt die
+// characterId des Spielers → roter Button erscheint, Klick wuerfelt
+// server-seitig 1W10 + Handeln und schreibt das Ergebnis in den
+// Initiative-Tracker des SL.
+const initShowButton = computed(() => {
+  if (!isHtbah.value) return false
+  const charId = character.value?.id
+  if (!charId) return false
+  return (props.awaitingInitiativeFor ?? []).includes(charId)
+})
+const initRolling = ref(false)
+const initError = ref<string | null>(null)
+const initLastResult = ref<{ total: number; die: number; bonus: number } | null>(null)
+const rollInitiative = async () => {
+  if (!character.value || !isHtbah.value) return
+  initRolling.value = true
+  initError.value = null
+  try {
+    const res = (await $fetch(`/api/groups/${props.groupId}/initiative/roll`, {
+      method: 'POST',
+      body: { characterId: character.value.id },
+    })) as { rolled: number; die: number; handelnBonus: number }
+    initLastResult.value = { total: res.rolled, die: res.die, bonus: res.handelnBonus }
+  } catch (e: unknown) {
+    initError.value =
+      (e as { statusMessage?: string }).statusMessage ?? 'Initiative-Wurf fehlgeschlagen.'
+  } finally {
+    initRolling.value = false
+  }
+}
+
+// --- Parade/Ausweichen-Wurf (Spieler) ---
+// Regelwerk §2.4: Einmal pro Runde, Wurf auf Handeln ODER passende Fertigkeit
+// (Ausweichen, Parieren, Blocken). Der Button oeffnet ein Popup mit allen
+// passenden Skills sowie der Handeln-Begabungsprobe als Fallback.
+const paradeOpen = ref(false)
+const paradeOptions = computed<Array<{ id: string; label: string; kind: 'talent' | 'skill' }>>(() => {
+  if (!isHtbah.value || !htbahData.value) return []
+  const out: Array<{ id: string; label: string; kind: 'talent' | 'skill' }> = []
+  // Handeln-Begabung immer als Default.
+  out.push({
+    id: 'handeln',
+    label: `Handeln (Begabung · ${htbahTalentValue(htbahData.value, 'handeln')})`,
+    kind: 'talent',
+  })
+  // Skills, deren Name nach Parade/Ausweichen/Block/Parier riecht.
+  const re = /pari|ausweich|block|parade/i
+  for (const s of htbahData.value.skills) {
+    if (!s.name?.trim() || !re.test(s.name)) continue
+    out.push({
+      id: s.id,
+      label: `${s.name} (FW ${htbahSkillTotal(htbahData.value, s)})`,
+      kind: 'skill',
+    })
+  }
+  return out
+})
+const paradeRolling = ref(false)
+const paradeError = ref<string | null>(null)
+const paradeRoll = async (id: string, kind: 'talent' | 'skill') => {
+  if (!character.value || !isHtbah.value) return
+  paradeRolling.value = true
+  paradeError.value = null
+  try {
+    const body =
+      kind === 'talent'
+        ? {
+            kind: 'htbahTalent' as const,
+            characterId: character.value.id,
+            talent: id as HtbahTalent,
+            note: 'Parade/Ausweichen',
+          }
+        : {
+            kind: 'htbahSkill' as const,
+            characterId: character.value.id,
+            skillId: id,
+            note: 'Parade/Ausweichen',
+          }
+    await $fetch(`/api/groups/${props.groupId}/rolls`, { method: 'POST', body })
+    paradeOpen.value = false
+  } catch (e: unknown) {
+    paradeError.value =
+      (e as { statusMessage?: string }).statusMessage ?? 'Parade-Wurf fehlgeschlagen.'
+  } finally {
+    paradeRolling.value = false
+  }
+}
 /**
  * Letztes Probe-Ergebnis (Krit ja/nein) — wird beim htbahSkill-Wurf gesetzt
  * und vom Schadensanwender ausgewertet, damit "Aufspießen + Krit"
@@ -1299,6 +1394,72 @@ const onImageError = (tokenId: number) => {
             />
           </div>
         </div>
+      </div>
+
+      <!-- Quick-Actions: Initiative (nur wenn SL angefordert hat) und
+           Parade/Ausweichen. Nur fuer HtbaH-Charaktere relevant. -->
+      <div
+        v-if="isHtbah && character"
+        class="flex flex-wrap gap-2"
+      >
+        <UButton
+          v-if="initShowButton"
+          color="error"
+          icon="i-lucide-dices"
+          size="sm"
+          :loading="initRolling"
+          @click="rollInitiative"
+        >
+          Initiative würfeln!
+        </UButton>
+        <UButton
+          color="neutral"
+          variant="soft"
+          icon="i-lucide-shield"
+          size="sm"
+          title="Parade/Ausweichen (Regelwerk §2.4)"
+          @click="paradeOpen = !paradeOpen"
+        >
+          Parade/Ausweichen
+        </UButton>
+        <div
+          v-if="initLastResult"
+          class="text-xs px-2 py-1 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 self-center"
+        >
+          Init: {{ initLastResult.die }} + {{ initLastResult.bonus }} = <strong>{{ initLastResult.total }}</strong>
+        </div>
+        <div v-if="initError" class="text-xs text-red-700 self-center">{{ initError }}</div>
+      </div>
+      <!-- Parade-Auswahl-Popup: Handeln-Begabung + alle Skills, die nach Parade
+           riechen. Direkt unter den Quick-Actions, damit der Klickfluss kurz ist. -->
+      <div
+        v-if="paradeOpen && isHtbah"
+        class="p-2 rounded border border-parchment-700/30 bg-white/60 space-y-1"
+      >
+        <div class="text-[10px] uppercase tracking-widest text-ink-300 mb-1">
+          Parade/Ausweichen — Womit?
+        </div>
+        <div
+          v-for="opt in paradeOptions"
+          :key="opt.id"
+        >
+          <UButton
+            block
+            size="xs"
+            variant="outline"
+            :loading="paradeRolling"
+            @click="paradeRoll(opt.id, opt.kind)"
+          >
+            {{ opt.label }}
+          </UButton>
+        </div>
+        <p v-if="!paradeOptions.length" class="text-[10px] text-ink-300 italic">
+          Keine Skills/Begabungen verfuegbar.
+        </p>
+        <p v-if="paradeError" class="text-xs text-red-700">{{ paradeError }}</p>
+        <p class="text-[10px] text-ink-300/80">
+          Erfolg = kein Schaden. Krit. Angriffe und Schusswaffen sind nicht parierbar.
+        </p>
       </div>
 
       <!-- Schadensstufen-Badge: zeigt, welcher Wunden-Malus aktuell auf jeden
