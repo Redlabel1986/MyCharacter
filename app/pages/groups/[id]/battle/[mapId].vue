@@ -1369,6 +1369,38 @@ const tokenImageSrc = (t: Token) => {
 
 // --- Map-Settings (DM) ---
 const settingsOpen = ref(false)
+
+// --- App-Modus (Vollbild-Karte) ---
+// Blendet Layout-Header, Footer und Sidebar aus, damit die Karte volle
+// Viewport-Hoehe einnimmt. Spieler koennen den Mini-CharSheet als floating
+// Sheet aufrufen oder in einem zweiten Fenster oeffnen (siehe openSheetWindow).
+// Toggle wird auf <html>.classList eingehaengt, damit das wide-Layout
+// Header/Footer per globaler CSS verstecken kann.
+const appMode = ref(false)
+const toggleAppMode = () => {
+  appMode.value = !appMode.value
+  if (typeof document !== 'undefined') {
+    document.documentElement.classList.toggle('app-mode-active', appMode.value)
+  }
+}
+// Beim Verlassen der Seite sicher wieder aufraeumen, damit andere Pages den
+// Modus nicht "erben".
+onBeforeUnmount(() => {
+  if (typeof document !== 'undefined') {
+    document.documentElement.classList.remove('app-mode-active')
+  }
+})
+
+// Sheet-Floating-Panel (im App-Modus): Spieler-Mini-CharSheet als Bottom-Sheet,
+// damit man die Karte nicht verlaesst, um zu wuerfeln.
+const sheetSheetOpen = ref(false)
+// Sheet in neuem Fenster oeffnen (fuer Multi-Monitor-Spieler oder zwei Geraete).
+const openSheetWindow = () => {
+  if (typeof window === 'undefined') return
+  const url = `/groups/${groupId}/play/${mapId}`
+  // 420x900 ist ein guter Smartphone-Hochformat-Aspect — passt nebenher.
+  window.open(url, `paperheros-sheet-${mapId}`, 'width=420,height=900,resizable=yes,scrollbars=yes')
+}
 const settingsDraft = ref({
   name: '',
   gridType: 'square' as 'square' | 'hex',
@@ -2847,6 +2879,24 @@ const endResize = () => {
           <span class="text-xs tabular-nums w-12 text-center">{{ Math.round(zoom * 100) }}%</span>
           <UButton size="xs" variant="outline" icon="i-lucide-zoom-in" @click="zoomIn" />
           <UButton size="xs" variant="ghost" @click="zoomReset">100%</UButton>
+          <!-- App-Modus (Vollbild-Karte) + Sheet-in-Fenster -->
+          <UButton
+            size="xs"
+            :variant="appMode ? 'solid' : 'outline'"
+            :color="appMode ? 'primary' : 'neutral'"
+            :icon="appMode ? 'i-lucide-minimize-2' : 'i-lucide-maximize-2'"
+            :title="appMode ? 'App-Modus verlassen' : 'Vollbild-Karte (App-Modus)'"
+            @click="toggleAppMode"
+          />
+          <UButton
+            size="xs"
+            variant="outline"
+            icon="i-lucide-external-link"
+            title="Mein Mini-Charakterblatt in eigenem Fenster (für zweites Display)"
+            @click="openSheetWindow"
+          >
+            Sheet-Fenster
+          </UButton>
           <UButton
             v-if="isDm"
             size="md"
@@ -3815,7 +3865,10 @@ const endResize = () => {
         </div>
       </div>
 
-      <p class="text-xs text-ink-300">
+      <p
+        class="text-xs text-ink-300"
+        :class="appMode ? 'app-mode-hide' : ''"
+      >
         Klick = Info-Karte · Ziehen = bewegen · Doppelklick = bearbeiten · Shift = nicht ans Raster snappen · <strong>Alt+Klick = Ping</strong>
       </p>
 
@@ -3975,19 +4028,25 @@ const endResize = () => {
         </ol>
       </div>
 
-      <!-- Mein Mini-Charbogen (HP-Sync, Skill-Würfler, Inventar) -->
-      <MiniCharSheet
-        :group-id="groupId"
-        :map-id="mapId"
-        :tokens="myTokensOnMap"
-        :all-tokens="tokens"
-        :time-of-day="currentTimeOfDay"
-        :awaiting-initiative-for="initiativeState?.awaitingFromCharacters ?? []"
-        @token-updated="fetchMap"
-      />
+      <!-- Mein Mini-Charbogen (HP-Sync, Skill-Würfler, Inventar) — im App-Modus
+           im Bottom-Sheet (siehe unten) statt inline. -->
+      <div :class="appMode ? 'app-mode-hide' : ''">
+        <MiniCharSheet
+          :group-id="groupId"
+          :map-id="mapId"
+          :tokens="myTokensOnMap"
+          :all-tokens="tokens"
+          :time-of-day="currentTimeOfDay"
+          :awaiting-initiative-for="initiativeState?.awaitingFromCharacters ?? []"
+          @token-updated="fetchMap"
+        />
+      </div>
 
       <!-- Audio-Panel (DM steuert, alle sehen den Embed-Player) -->
-      <div class="parchment-card p-3 space-y-2">
+      <div
+        class="parchment-card p-3 space-y-2"
+        :class="appMode ? 'app-mode-hide' : ''"
+      >
         <div class="flex items-center justify-between gap-2 flex-wrap">
           <h2 class="font-serif text-lg flex items-center gap-2">
             <UIcon name="i-lucide-music" />
@@ -4291,7 +4350,10 @@ const endResize = () => {
     <!-- Resize-Handle (nur lg+) -->
     <div
       class="hidden lg:flex w-3 cursor-col-resize self-stretch rounded items-center justify-center group flex-none touch-none"
-      :class="resizing ? 'bg-[var(--color-accent)]/30' : 'hover:bg-[var(--color-accent)]/15'"
+      :class="[
+        resizing ? 'bg-[var(--color-accent)]/30' : 'hover:bg-[var(--color-accent)]/15',
+        appMode ? 'app-mode-hide' : '',
+      ]"
       @pointerdown="startResize"
       @pointermove="onResize"
       @pointerup="endResize"
@@ -4308,7 +4370,7 @@ const endResize = () => {
     <!-- Rechte Spalte: Chat (auf mobile volle Breite, auf lg+ resizable Breite) -->
     <aside
       class="parchment-card p-3 flex-col flex-none w-full lg:w-[var(--chat-w)]"
-      :class="showChat ? 'flex' : 'hidden lg:flex'"
+      :class="[showChat ? 'flex' : 'hidden lg:flex', appMode ? 'app-mode-hide' : '']"
       :style="{ height: '80vh', '--chat-w': chatWidth + 'px' } as Record<string, string>"
     >
       <div class="flex items-center justify-between mb-2">
@@ -4929,6 +4991,45 @@ const endResize = () => {
         </div>
       </template>
     </UModal>
+
+    <!-- App-Modus: Floating Action Button + Bottom-Sheet fuer Mini-CharSheet.
+         FAB ist immer sichtbar, wenn appMode aktiv ist — Klick oeffnet ein
+         Bottom-Sheet mit dem vollstaendigen MiniCharSheet, damit der Spieler
+         nicht aus dem Karten-Vollbild raus muss. -->
+    <template v-if="appMode">
+      <button
+        type="button"
+        class="fab-bottom px-4 py-3 bg-[var(--color-accent)] text-white font-semibold flex items-center gap-2"
+        :title="sheetSheetOpen ? 'Mini-Sheet schliessen' : 'Mini-Sheet oeffnen'"
+        @click="sheetSheetOpen = !sheetSheetOpen"
+      >
+        <UIcon
+          :name="sheetSheetOpen ? 'i-lucide-x' : 'i-lucide-user-round'"
+          class="size-5"
+        />
+        <span class="hidden sm:inline">{{ sheetSheetOpen ? 'Schliessen' : 'Mein Sheet' }}</span>
+      </button>
+
+      <!-- Bottom-Sheet (Slide-up Drawer) -->
+      <template v-if="sheetSheetOpen">
+        <div
+          class="bottom-sheet-backdrop"
+          @click="sheetSheetOpen = false"
+        />
+        <div class="bottom-sheet">
+          <div class="bottom-sheet-handle" />
+          <MiniCharSheet
+            :group-id="groupId"
+            :map-id="mapId"
+            :tokens="myTokensOnMap"
+            :all-tokens="tokens"
+            :time-of-day="currentTimeOfDay"
+            :awaiting-initiative-for="initiativeState?.awaitingFromCharacters ?? []"
+            @token-updated="fetchMap"
+          />
+        </div>
+      </template>
+    </template>
   </div>
 </template>
 

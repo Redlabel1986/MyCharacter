@@ -303,3 +303,109 @@ label {
 .text-ink-400 { color: var(--color-ink-400) !important; }
 .text-ink-500 { color: var(--color-ink-500) !important; }
 .text-ink-700 { color: var(--color-ink-700) !important; }
+
+/* ============================================================
+   App-Modus (Battle-Map Vollbild)
+   Wird per JS aktiviert: document.documentElement.classList.add('app-mode-active')
+   Versteckt Layout-Header/-Footer komplett, lässt die Battle-Map den ganzen
+   Viewport einnehmen, damit Mobile/Tablet wie eine App wirkt.
+   ============================================================ */
+html.app-mode-active body > div > header,
+html.app-mode-active body > div > footer {
+  display: none !important;
+}
+html.app-mode-active body > div {
+  min-height: 100vh !important;
+}
+html.app-mode-active main {
+  padding: 0 !important;
+}
+html.app-mode-active .app-mode-hide {
+  display: none !important;
+}
+html.app-mode-active .app-mode-fill {
+  height: 100vh !important;
+  max-height: 100vh !important;
+}
+
+/* App-Modus + Mobile: Karte nimmt volle Höhe, Sticky-Buttons unten erreichbar */
+html.app-mode-active .battle-stage-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: var(--bg-paper);
+}
+
+/* Floating Action Button (Bottom-Sheet-Trigger im App-Modus) */
+.fab-bottom {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  z-index: 60;
+  border-radius: 9999px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+
+/* Bottom-Sheet (Slide-up Drawer für Mini-CharSheet im App-Modus) */
+.bottom-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 70;
+  max-height: 92vh;
+  overflow-y: auto;
+  background: var(--bg-paper);
+  border-top: 1px solid color-mix(in srgb, var(--color-parchment-700) 40%, transparent);
+  border-top-left-radius: 1rem;
+  border-top-right-radius: 1rem;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.18);
+  padding: 0.75rem 0.75rem 1rem;
+  animation: bottom-sheet-up 220ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.bottom-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  animation: backdrop-fade 180ms ease-out;
+}
+.bottom-sheet-handle {
+  width: 40px;
+  height: 4px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--color-ink-500) 35%, transparent);
+  margin: 0 auto 0.5rem;
+}
+@keyframes bottom-sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes backdrop-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Mobile-Touch-Polish: größere Tap-Targets, weniger horizontales Padding,
+   Buttons werden auf kleinen Bildschirmen mit etwas mehr Höhe gerendert. */
+@media (max-width: 640px) {
+  .parchment-card {
+    border-radius: 0.75rem;
+    padding: 0.75rem;
+  }
+  /* Buttons in MiniCharSheet/Map-Toolbar auf >= 36px Höhe (Touch-Komfort) */
+  button, .u-button, [role="button"] {
+    min-height: 32px;
+  }
+  /* Wuerfeln-Hauptbuttons gross machen */
+  .roll-cta {
+    min-height: 48px !important;
+    font-size: 1rem !important;
+  }
+  /* Input-Felder im Mobile bequemer */
+  input, textarea, select {
+    min-height: 36px;
+    font-size: 16px; /* verhindert iOS-Zoom beim Focus */
+  }
+}
