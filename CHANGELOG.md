@@ -520,10 +520,156 @@ drei Doku-Seiten teilen sich dasselbe Markdown-/Prosa-Styling.
 
 ---
 
-## 16. Was noch nicht drin ist
+## 16. Alternative LP- und Kampfmodule (§3 + §7.2)
 
-- "Regel der Drei"-LP-System (§7.2) und Universalkampfsystem (§3)
-  als alternative Module — sind eigenständige Subsysteme mit Modul-
-  Switching, das wäre eine größere Sache.
-- Alternative Magiemodule (Fünfstufenmagie, Sonnen-Magie,
-  Seelensplitter — §8.13).
+Pro Charakter im Bogen aktivierbar — Module sind nicht parallel nutzbar,
+aber Wechsel ist verlustfrei (Felder bleiben am Datenmodell, werden nur
+ein-/ausgeblendet).
+
+### 16.1 Regel der Drei (§7.2)
+
+Datenmodell:
+
+```ts
+HtbahCharacterData.rdd?: {
+  active, mortality (1-10),
+  current: { lebenspunkte, geistigeGesundheit, prestige },
+  max:     { lebenspunkte, geistigeGesundheit, prestige },
+  wounds: HtbahRddWound[],
+}
+```
+
+Berechnungen (alle als Engine-Helper):
+
+```
+Basiswert pro Skala  = Geistesblitzpunkte(Kategorie) + 1
+Punkte-Budget        = (Mortalität − 1) × 9
+Max-Abstand          = Mortalität × 3
+Schlaf-Regeneration  = round((Σ max) × Mortalität / 10)
+Aktive Heilung (1×/Tag): wenig / mittel / viel
+Schaden → Slots:     1-2W10=1, 3-4W10=2, 5-6W10=3, 7-8W10=4, 9+=5
+Faustregel:          1 RdD-LP ≈ 9 Standard-LP
+```
+
+Wunden-Schwellen (§7.2.6) sind als Konstante `HTBAH_RDD_WOUND_THRESHOLDS`
+hinterlegt; `htbahRddCheckWound(mortality, attackRoll)` liefert
+`'temporary' | 'permanent' | undefined`.
+
+**Im Bogen** (Status-Sektion):
+
+- Toggle „Regel der Drei" aktiviert das Modul, ersetzt die LP-Anzeige.
+- Mortalitäts-Input (1-10) + Live-Anzeige des Punkte-Budgets, Max-Abstand,
+  Schlaf-Regen und aktive Heilung.
+- Drei Skalen-Reihen mit current/max + „Auffüllen"-Button pro Skala.
+- Wunden-Liste: Skala + Typ (temporär/dauerhaft) + Schadens-Slots + Notiz.
+
+**Im MiniCharSheet**: bei aktivem Modul wird die HP-Bar durch drei farb­
+codierte Skalen-Balken ersetzt (rot/lila/blau).
+
+### 16.2 Universalkampfsystem (§3)
+
+Pro Charakter:
+
+```ts
+HtbahCharacterData.combatModule?: 'standard' | 'universal'  // Default 'standard'
+```
+
+Engine-Helper (§3.1/§3.2):
+
+```ts
+htbahUniversalDamage({ talentValue, attackRoll, weaponKind, armorKind })
+  // Schaden = (Talent − Wurf) / (WaffenMod + RüstungsMod)
+  // Min 10 LP bei Treffer; max combinedMod = 4
+
+htbahUniversalKonterdifferenz(defenderTalentValue, defenderRoll)
+  // = Talent(V) − Würfelaugen(V); positiv = Aggressor erschwert
+
+htbahUniversalAreaDamage({ roll, distanceMeters, basePower=100 })
+  // 1m: base − roll; pro weiterem m: −10
+```
+
+Waffen-Mod: Schusswaffe 1, Handwaffe 2, waffenlos 3.
+Rüstungs-Mod: keine 0, leicht 1, schwer 2.
+
+**Im Bogen**: Toggle „Universalkampf" neben „Regel der Drei".
+
+**Im MiniCharSheet**: bei aktivem Modul zusätzlicher Quick-Rechner über
+der Damage-Sektion — Talent/Wurf/Waffen-Art/Rüstungs-Art eingeben →
+Live-Schaden mit Mod-Anzeige. Der klassische NdM±X-Wurf bleibt parallel
+nutzbar (Spieler kann frei wählen welchen Modus er für welchen Treffer
+einsetzt).
+
+---
+
+## 17. Alternative Magiemodule (§8.13)
+
+Magie-State bekommt ein `module`-Feld; je nach Wert blendet der Bogen den
+passenden Block ein:
+
+```ts
+HtbahMagicState.module: 'zauberei' | 'fuenfstufen' | 'sonnen' | 'seelensplitter' | 'frei'
+```
+
+**Zauberei** (Default, §8 — bereits beschrieben in Abschnitt 6).
+
+**Fünfstufenmagie** (§8.13.1):
+
+```
+Kontingent = Magie-Punkte / 5
+Belegte Slots = Σ (stufe × charges) aller vorbereiteten Sprüche
+Vorbereiten: 1 h Rast pro Spruch
+Beim Wirken: Charge eines Spruchs wird verbraucht
+```
+
+Datenmodell: `fsMagiePunkte`, `fsVorbereitet[{name,stufe,charges}]`.
+Im Bogen: Eingabe Magie-Punkte + Liste vorbereiteter Sprüche mit Stufe
+und Charges. Slot-Anzeige live (`belegt/Kontingent`).
+
+**Sonnen-Magie** (§8.13.2):
+
+```
+Aufladerunden = Zauberstufe ÷ 2 + 1
+Konzentration: Default 70, pro Unterbrechung −10
+Strahlenbündel lvl X: X·W10 + ⌊X/3⌋·W5
+Sphären-Radius lvl 1-5: 3, 10, 20, 35, 50 m
+```
+
+Datenmodell: `sonnenKonzentration` (0-100).
+Im Bogen: Konzentrations-Tracker mit Reset-Button auf 70.
+Engine: `htbahSonnenChargeRounds`, `htbahSonnenStrahlenbuendel`, `htbahSonnenSphaerenRadius`.
+
+**Seelensplittermagie** (§8.13.3):
+
+```
+Mind. 1 % Seele pro Zauber
+Vor JEDER Probe: W100 ≤ verbraucht% → Schreckens-/Todesvision
+> 99 % verbraucht → Charakter gilt als (vermutet) tot
+```
+
+Datenmodell: `seeleVerbraucht` (0-100).
+Im Bogen: Slider/Input für %; Warn-Badge „💀 KRITISCH" ab > 99 %;
+Fortschrittsbalken mit Rot-Gradient.
+
+**Im MiniCharSheet Quick-Cast**: Header + Hinweistext zeigt das aktive
+Modul mit modul­spezifischer Erinnerungs-Box (Konzentration / Kontingent /
+Seelen-Verbrauch). Komplexitätswurf-Pflicht bleibt für Zauberei + Sonnen;
+für Fünfstufen / Seelensplitter pflegt der Spieler den Spruch frei.
+
+---
+
+## 18. Was noch offen ist
+
+Alle MD-Punkte aus dem Regelwerk sind jetzt abgebildet — entweder
+strukturiert mit Auto-Würfen oder als Tracker, der SL-Hand-Würfe
+unterstützt.
+
+Mögliche Erweiterungen für später:
+
+- Pre-built Zauber-Kataloge auch für Fünfstufen/Sonnen/Seelensplitter
+  (analog zum bestehenden Zauberei-Katalog mit allen 60 Sprüchen).
+- Auto-Vision-Trigger-Roll für Seelensplittermagie (aktuell muss der
+  Spieler den W100-Wurf selbst auslösen — könnte vor jeder Probe
+  automatisch passieren).
+- Universalkampf-Schadensanwendung an Ziel-Token direkt aus dem
+  Rechner heraus (aktuell zeigt der Rechner nur das Ergebnis, der
+  Spieler trägt manuell ins Ziel ein).

@@ -12,6 +12,17 @@ import {
   HTBAH_DC_PRESETS,
   HTBAH_SPELL_LEHREN,
   HTBAH_ARKANUM_MAX,
+  HTBAH_RDD_SCALES,
+  HTBAH_RDD_SCALE_LABELS,
+  HTBAH_MAGIC_MODULES,
+  HTBAH_MAGIC_MODULE_LABELS,
+  htbahRddBaseValue,
+  htbahRddPointsBudget,
+  htbahRddMaxSpread,
+  htbahRddSleepRegen,
+  htbahRddActiveHealing,
+  htbahFsKontingent,
+  htbahFsUsedSlots,
   htbahManaMax,
   htbahSkillTotal,
   htbahTalentValue,
@@ -36,7 +47,11 @@ import {
   type HtbahTalent,
   type HtbahSkill,
   type HtbahMagicState,
+  type HtbahMagicModuleId,
   type HtbahSpellLehreId,
+  type HtbahRddState,
+  type HtbahRddScale,
+  type HtbahRddWound,
   type HtbahPerk,
   type HtbahPurse,
   type HtbahArmorPiece,
@@ -146,6 +161,11 @@ const sheet = computed<HtbahCharacterData>(() => {
     magicState: incoming.magicState
       ? {
           active: !!incoming.magicState.active,
+          module: (HTBAH_MAGIC_MODULES as readonly string[]).includes(
+            String(incoming.magicState.module ?? 'zauberei'),
+          )
+            ? (incoming.magicState.module as HtbahMagicModuleId)
+            : 'zauberei',
           mana: Math.max(0, Math.floor(Number(incoming.magicState.mana ?? 0))),
           arkanum: Math.max(
             0,
@@ -157,8 +177,47 @@ const sheet = computed<HtbahCharacterData>(() => {
           knownSpellKeys: Array.isArray(incoming.magicState.knownSpellKeys)
             ? incoming.magicState.knownSpellKeys.filter((k): k is string => typeof k === 'string')
             : [],
+          fsMagiePunkte: Math.max(0, Math.floor(Number(incoming.magicState.fsMagiePunkte ?? 0))),
+          fsVorbereitet: Array.isArray(incoming.magicState.fsVorbereitet)
+            ? incoming.magicState.fsVorbereitet.map((v: { name?: unknown; stufe?: unknown; charges?: unknown }) => ({
+                name: String(v.name ?? ''),
+                stufe: Math.max(1, Math.min(5, Math.floor(Number(v.stufe ?? 1)))) as 1 | 2 | 3 | 4 | 5,
+                charges: Math.max(0, Math.floor(Number(v.charges ?? 0))),
+              }))
+            : [],
+          sonnenKonzentration: Math.max(0, Math.min(100, Math.floor(Number(incoming.magicState.sonnenKonzentration ?? 70)))),
+          seeleVerbraucht: Math.max(0, Math.min(100, Math.floor(Number(incoming.magicState.seeleVerbraucht ?? 0)))),
         }
       : undefined,
+    rdd: incoming.rdd
+      ? {
+          active: !!incoming.rdd.active,
+          mortality: Math.max(1, Math.min(10, Math.floor(Number(incoming.rdd.mortality ?? 4)))),
+          current: {
+            lebenspunkte: Math.max(0, Math.floor(Number(incoming.rdd.current?.lebenspunkte ?? 0))),
+            geistigeGesundheit: Math.max(0, Math.floor(Number(incoming.rdd.current?.geistigeGesundheit ?? 0))),
+            prestige: Math.max(0, Math.floor(Number(incoming.rdd.current?.prestige ?? 0))),
+          },
+          max: {
+            lebenspunkte: Math.max(0, Math.floor(Number(incoming.rdd.max?.lebenspunkte ?? 0))),
+            geistigeGesundheit: Math.max(0, Math.floor(Number(incoming.rdd.max?.geistigeGesundheit ?? 0))),
+            prestige: Math.max(0, Math.floor(Number(incoming.rdd.max?.prestige ?? 0))),
+          },
+          wounds: Array.isArray(incoming.rdd.wounds)
+            ? incoming.rdd.wounds.map((w: { id?: unknown; scale?: unknown; amount?: unknown; kind?: unknown; note?: unknown; inflictedAt?: unknown }) => ({
+                id: String(w.id ?? crypto.randomUUID()),
+                scale: ((HTBAH_RDD_SCALES as readonly string[]).includes(String(w.scale))
+                  ? w.scale
+                  : 'lebenspunkte') as HtbahRddScale,
+                amount: Math.max(0, Math.floor(Number(w.amount ?? 1))),
+                kind: w.kind === 'permanent' ? 'permanent' : 'temporary',
+                note: typeof w.note === 'string' ? w.note : '',
+                inflictedAt: typeof w.inflictedAt === 'string' ? w.inflictedAt : new Date().toISOString(),
+              }))
+            : [],
+        }
+      : undefined,
+    combatModule: incoming.combatModule === 'universal' ? 'universal' : 'standard',
     notes: incoming.notes ?? '',
   }
 })
@@ -460,6 +519,174 @@ const ensureMagicState = (n: HtbahCharacterData): HtbahMagicState => {
   if (!n.magicState.knownSpellKeys) n.magicState.knownSpellKeys = []
   return n.magicState
 }
+// --- Regel der Drei (§7.2) ---
+const ensureRdd = (n: HtbahCharacterData): HtbahRddState => {
+  if (!n.rdd) {
+    // Default-State: Mortality 4 (HtbaH-Standard), Skalen auf Basiswert.
+    n.rdd = {
+      active: true,
+      mortality: 4,
+      max: {
+        lebenspunkte: htbahRddBaseValue(n, 'lebenspunkte'),
+        geistigeGesundheit: htbahRddBaseValue(n, 'geistigeGesundheit'),
+        prestige: htbahRddBaseValue(n, 'prestige'),
+      },
+      current: {
+        lebenspunkte: htbahRddBaseValue(n, 'lebenspunkte'),
+        geistigeGesundheit: htbahRddBaseValue(n, 'geistigeGesundheit'),
+        prestige: htbahRddBaseValue(n, 'prestige'),
+      },
+      wounds: [],
+    }
+  }
+  return n.rdd
+}
+const toggleRdd = () => {
+  const n = clone()
+  if (!n.rdd) {
+    ensureRdd(n)
+  } else {
+    n.rdd.active = !n.rdd.active
+  }
+  update(n)
+}
+const setRddMortality = (v: number) => {
+  const n = clone()
+  const r = ensureRdd(n)
+  r.mortality = Math.max(1, Math.min(10, Math.floor(v || 4)))
+  update(n)
+}
+const setRddCurrent = (scale: HtbahRddScale, v: number) => {
+  const n = clone()
+  const r = ensureRdd(n)
+  r.current[scale] = Math.max(0, Math.min(r.max[scale], Math.floor(v || 0)))
+  update(n)
+}
+const setRddMax = (scale: HtbahRddScale, v: number) => {
+  const n = clone()
+  const r = ensureRdd(n)
+  r.max[scale] = Math.max(0, Math.floor(v || 0))
+  // Current auf neuen Max clampen.
+  r.current[scale] = Math.min(r.current[scale], r.max[scale])
+  update(n)
+}
+const restoreRddScale = (scale: HtbahRddScale) => {
+  const n = clone()
+  const r = ensureRdd(n)
+  r.current[scale] = r.max[scale]
+  update(n)
+}
+const restoreRddAll = () => {
+  const n = clone()
+  const r = ensureRdd(n)
+  r.current.lebenspunkte = r.max.lebenspunkte
+  r.current.geistigeGesundheit = r.max.geistigeGesundheit
+  r.current.prestige = r.max.prestige
+  update(n)
+}
+const addRddWound = (scale: HtbahRddScale, kind: 'temporary' | 'permanent') => {
+  const n = clone()
+  const r = ensureRdd(n)
+  r.wounds.push({
+    id: crypto.randomUUID(),
+    scale,
+    amount: 1,
+    kind,
+    note: '',
+    inflictedAt: new Date().toISOString(),
+  })
+  update(n)
+}
+const updateRddWound = (id: string, patch: Partial<HtbahRddWound>) => {
+  const n = clone()
+  const r = ensureRdd(n)
+  const idx = r.wounds.findIndex((w) => w.id === id)
+  if (idx < 0) return
+  r.wounds[idx] = { ...r.wounds[idx]!, ...patch }
+  update(n)
+}
+const removeRddWound = (id: string) => {
+  const n = clone()
+  const r = ensureRdd(n)
+  r.wounds = r.wounds.filter((w) => w.id !== id)
+  update(n)
+}
+const setRddWoundScale = (id: string, raw: unknown) => {
+  const v = String(raw)
+  const scale = (HTBAH_RDD_SCALES as readonly string[]).includes(v)
+    ? (v as HtbahRddScale)
+    : 'lebenspunkte'
+  updateRddWound(id, { scale })
+}
+
+// --- Kampf-Modul ---
+const setCombatModule = (v: 'standard' | 'universal') => {
+  const n = clone()
+  n.combatModule = v
+  update(n)
+}
+
+// --- Magie-Modul-Switching ---
+const setMagicModule = (raw: unknown) => {
+  const v = String(raw)
+  const module: HtbahMagicModuleId = (HTBAH_MAGIC_MODULES as readonly string[]).includes(v)
+    ? (v as HtbahMagicModuleId)
+    : 'zauberei'
+  const n = clone()
+  const ms = ensureMagicState(n)
+  ms.module = module
+  update(n)
+}
+const setMagicMagiePunkte = (v: number) => {
+  const n = clone()
+  const ms = ensureMagicState(n)
+  ms.fsMagiePunkte = Math.max(0, Math.floor(v || 0))
+  update(n)
+}
+const addFsPrepared = () => {
+  const n = clone()
+  const ms = ensureMagicState(n)
+  if (!ms.fsVorbereitet) ms.fsVorbereitet = []
+  ms.fsVorbereitet.push({ name: '', stufe: 1, charges: 1 })
+  update(n)
+}
+const updateFsPrepared = (
+  idx: number,
+  patch: Partial<{ name: string; stufe: 1 | 2 | 3 | 4 | 5; charges: number }>,
+) => {
+  const n = clone()
+  const ms = ensureMagicState(n)
+  const list = ms.fsVorbereitet ?? []
+  if (!list[idx]) return
+  list[idx] = { ...list[idx]!, ...patch }
+  ms.fsVorbereitet = list
+  update(n)
+}
+const removeFsPrepared = (idx: number) => {
+  const n = clone()
+  const ms = ensureMagicState(n)
+  const list = ms.fsVorbereitet ?? []
+  list.splice(idx, 1)
+  ms.fsVorbereitet = list
+  update(n)
+}
+const setFsPreparedStufe = (idx: number, raw: unknown) => {
+  const stufe = Math.max(1, Math.min(5, Math.floor(Number(raw) || 1))) as 1 | 2 | 3 | 4 | 5
+  updateFsPrepared(idx, { stufe })
+}
+const setSonnenKonzentration = (v: number) => {
+  const n = clone()
+  const ms = ensureMagicState(n)
+  ms.sonnenKonzentration = Math.max(0, Math.min(100, Math.floor(v || 0)))
+  update(n)
+}
+const setSeeleVerbraucht = (v: number) => {
+  const n = clone()
+  const ms = ensureMagicState(n)
+  ms.seeleVerbraucht = Math.max(0, Math.min(100, Math.floor(v || 0)))
+  update(n)
+}
+
 const toggleKnownSpell = (spellKey: string) => {
   const n = clone()
   const ms = ensureMagicState(n)
@@ -788,9 +1015,169 @@ const postRollToGroup = async () => {
           <UInput type="number" :model-value="sheet.hp.max" @update:model-value="setHp('max', Number($event))" />
         </UFormField>
       </div>
-      <p class="text-[10px] text-ink-300 mt-1">
+      <p
+        v-if="!sheet.rdd?.active"
+        class="text-[10px] text-ink-300 mt-1"
+      >
         &lt; 10 LP = bewusstlos · 0 LP = tot · &gt; 60 Schaden in einem Treffer = sofort bewusstlos
       </p>
+
+      <!-- Alternative Module: Regel der Drei + Kampf-Modul-Switcher -->
+      <div class="accent-rule my-3" />
+      <div class="text-xs uppercase tracking-widest text-ink-300 mb-2">Alternative Module</div>
+      <div class="grid grid-cols-2 gap-2">
+        <UButton
+          size="xs"
+          :variant="sheet.rdd?.active ? 'solid' : 'outline'"
+          :color="sheet.rdd?.active ? 'primary' : 'neutral'"
+          :icon="sheet.rdd?.active ? 'i-lucide-toggle-right' : 'i-lucide-toggle-left'"
+          title="Regel der Drei (§7.2) — drei Skalen statt LP"
+          @click="toggleRdd"
+        >
+          Regel der Drei
+        </UButton>
+        <UButton
+          size="xs"
+          :variant="sheet.combatModule === 'universal' ? 'solid' : 'outline'"
+          :color="sheet.combatModule === 'universal' ? 'primary' : 'neutral'"
+          :icon="sheet.combatModule === 'universal' ? 'i-lucide-toggle-right' : 'i-lucide-toggle-left'"
+          title="Universalkampfsystem (§3) — Schadensformel statt W10-Wurf"
+          @click="setCombatModule(sheet.combatModule === 'universal' ? 'standard' : 'universal')"
+        >
+          Universalkampf
+        </UButton>
+      </div>
+
+      <!-- Regel-der-Drei-Skalen (§7.2.1) -->
+      <div v-if="sheet.rdd?.active" class="mt-3 space-y-2 border border-blue-200 rounded p-2 bg-blue-50/40">
+        <div class="text-xs uppercase tracking-widest text-blue-900 flex items-baseline justify-between">
+          <span>Drei Skalen (Regel der Drei)</span>
+          <span class="text-[10px] normal-case tracking-normal opacity-75">
+            1 RdD-LP ≈ 9 Standard-LP
+          </span>
+        </div>
+        <div class="grid grid-cols-3 gap-1 items-end">
+          <UFormField label="Mortalität (1–10)">
+            <UInput
+              type="number"
+              min="1"
+              max="10"
+              :model-value="sheet.rdd.mortality"
+              @update:model-value="setRddMortality(Number($event))"
+            />
+          </UFormField>
+          <div class="col-span-2 text-[10px] text-ink-300 space-y-0.5 pb-1">
+            <div>Punkte: <strong>{{ htbahRddPointsBudget(sheet.rdd.mortality) }}</strong></div>
+            <div>Max-Abstand: <strong>{{ htbahRddMaxSpread(sheet.rdd.mortality) }}</strong></div>
+            <div>Schlaf-Regen: <strong>{{ htbahRddSleepRegen(sheet.rdd) }}</strong> · Aktive Heilung: {{ htbahRddActiveHealing(sheet.rdd).wenig }}/{{ htbahRddActiveHealing(sheet.rdd).mittel }}/{{ htbahRddActiveHealing(sheet.rdd).viel }}</div>
+          </div>
+        </div>
+        <div
+          v-for="scale in HTBAH_RDD_SCALES"
+          :key="scale"
+          class="grid grid-cols-12 gap-1 items-center"
+        >
+          <div class="col-span-4 text-xs font-semibold">{{ HTBAH_RDD_SCALE_LABELS[scale] }}</div>
+          <UInput
+            class="col-span-3"
+            size="xs"
+            type="number"
+            min="0"
+            :model-value="sheet.rdd.current[scale]"
+            placeholder="aktuell"
+            @update:model-value="setRddCurrent(scale, Number($event))"
+          />
+          <div class="col-span-1 text-center text-[10px] text-ink-300">/</div>
+          <UInput
+            class="col-span-3"
+            size="xs"
+            type="number"
+            min="0"
+            :model-value="sheet.rdd.max[scale]"
+            placeholder="max"
+            @update:model-value="setRddMax(scale, Number($event))"
+          />
+          <UButton
+            class="col-span-1"
+            size="xs"
+            variant="ghost"
+            icon="i-lucide-refresh-cw"
+            :title="`${HTBAH_RDD_SCALE_LABELS[scale]} auf Maximum auffüllen`"
+            @click="restoreRddScale(scale)"
+          />
+        </div>
+        <div class="flex gap-2">
+          <UButton size="xs" variant="soft" icon="i-lucide-refresh-cw" @click="restoreRddAll">
+            Alle Skalen auffüllen
+          </UButton>
+        </div>
+
+        <!-- Wunden-Liste -->
+        <div class="mt-2 pt-2 border-t border-blue-200/60">
+          <div class="text-[10px] uppercase tracking-widest text-blue-900 mb-1 flex items-baseline justify-between">
+            <span>Wunden ({{ sheet.rdd.wounds.length }})</span>
+            <span class="text-[9px] normal-case tracking-normal opacity-75">
+              temporär heilt in W10/2 h · dauerhaft nur durch Behandlung
+            </span>
+          </div>
+          <div
+            v-for="w in sheet.rdd.wounds"
+            :key="w.id"
+            class="grid grid-cols-12 gap-1 items-center mb-1"
+          >
+            <USelect
+              class="col-span-3"
+              size="xs"
+              :model-value="w.scale"
+              :items="HTBAH_RDD_SCALES.map((s) => ({ label: HTBAH_RDD_SCALE_LABELS[s], value: s }))"
+              value-key="value"
+              @update:model-value="setRddWoundScale(w.id, $event)"
+            />
+            <USelect
+              class="col-span-2"
+              size="xs"
+              :model-value="w.kind"
+              :items="[
+                { label: 'temp.', value: 'temporary' },
+                { label: 'dauerh.', value: 'permanent' },
+              ]"
+              value-key="value"
+              @update:model-value="updateRddWound(w.id, { kind: $event === 'permanent' ? 'permanent' : 'temporary' })"
+            />
+            <UInput
+              class="col-span-2"
+              size="xs"
+              type="number"
+              min="0"
+              :model-value="w.amount"
+              @update:model-value="updateRddWound(w.id, { amount: Math.max(0, Math.floor(Number($event) || 0)) })"
+            />
+            <UInput
+              class="col-span-4"
+              size="xs"
+              :model-value="w.note ?? ''"
+              placeholder="Notiz"
+              @update:model-value="updateRddWound(w.id, { note: String($event) })"
+            />
+            <UButton
+              class="col-span-1"
+              size="xs"
+              variant="ghost"
+              color="error"
+              icon="i-lucide-x"
+              @click="removeRddWound(w.id)"
+            />
+          </div>
+          <div class="flex gap-1">
+            <UButton size="xs" variant="ghost" icon="i-lucide-plus" @click="addRddWound('lebenspunkte', 'temporary')">
+              Temp. Wunde
+            </UButton>
+            <UButton size="xs" variant="ghost" icon="i-lucide-plus" @click="addRddWound('lebenspunkte', 'permanent')">
+              Dauerh. Wunde
+            </UButton>
+          </div>
+        </div>
+      </div>
 
       <!-- Ruestungs-Nebenwirkungen (Regelwerk §6.2.3 — erweitertes Modul):
            Parade +RW, Init −RW/10, Athletik −RW/2. Wird nur eingeblendet, wenn
@@ -1886,6 +2273,19 @@ const postRollToGroup = async () => {
         </div>
 
         <div v-if="sheet.magicState?.active" class="space-y-3">
+          <!-- Modul-Switcher -->
+          <UFormField label="Magie-Modul">
+            <USelect
+              :model-value="sheet.magicState.module ?? 'zauberei'"
+              :items="HTBAH_MAGIC_MODULES.map((m) => ({ label: HTBAH_MAGIC_MODULE_LABELS[m], value: m }))"
+              value-key="value"
+              size="sm"
+              @update:model-value="setMagicModule(String($event))"
+            />
+          </UFormField>
+
+          <!-- Zauberei (Default-Modul) + Sonnen-Magie nutzen Arkanum/Mana. -->
+          <template v-if="sheet.magicState.module === 'zauberei' || sheet.magicState.module === 'sonnen' || !sheet.magicState.module">
           <!-- Arkanum + Mana -->
           <div class="grid grid-cols-3 gap-2">
             <UFormField label="Arkanum (0–5)">
@@ -2011,6 +2411,170 @@ const postRollToGroup = async () => {
             class="text-[10px] text-ink-300/80 italic"
           >
             Wähle oben mindestens eine Lehre, um Sprüche aus dem Katalog lernen zu können.
+          </p>
+          </template>
+
+          <!-- ====== Sonnen-Magie-spezifischer Block (§8.13.2) ====== -->
+          <div
+            v-if="sheet.magicState.module === 'sonnen'"
+            class="mt-2 p-2 rounded border border-amber-300 bg-amber-50/60 space-y-2"
+          >
+            <div class="text-xs uppercase tracking-widest text-amber-900">
+              Sonnen-Magie (§8.13.2) — Konzentration
+            </div>
+            <div class="grid grid-cols-2 gap-2 items-end">
+              <UFormField label="Konzentration (0–100)">
+                <UInput
+                  type="number"
+                  min="0"
+                  max="100"
+                  :model-value="sheet.magicState.sonnenKonzentration ?? 70"
+                  @update:model-value="setSonnenKonzentration(Number($event))"
+                />
+              </UFormField>
+              <UButton
+                size="sm"
+                variant="outline"
+                icon="i-lucide-refresh-cw"
+                title="Konzentration auf 70 zurücksetzen (Default)"
+                @click="setSonnenKonzentration(70)"
+              >
+                Reset auf 70
+              </UButton>
+            </div>
+            <p class="text-[10px] text-amber-900/80">
+              Pro Unterbrechung −10 · Aufladerunden je Spruchstufe: Stufe ÷ 2 + 1 ·
+              Strahlenbündel lvl X: X·W10 + (X÷3)·W5 · Sphären-Radius lvl 1–5: 3–50 m
+            </p>
+          </div>
+
+          <!-- ====== Fünfstufenmagie-Block (§8.13.1) ====== -->
+          <div
+            v-if="sheet.magicState.module === 'fuenfstufen'"
+            class="mt-2 p-2 rounded border border-purple-300 bg-purple-50/60 space-y-2"
+          >
+            <div class="text-xs uppercase tracking-widest text-purple-900 flex items-baseline justify-between">
+              <span>Fünfstufenmagie (§8.13.1)</span>
+              <span class="font-mono normal-case tracking-normal text-[10px]">
+                Slots: {{ htbahFsUsedSlots(sheet.magicState.fsVorbereitet ?? []) }}/{{ htbahFsKontingent(sheet.magicState.fsMagiePunkte ?? 0) }}
+              </span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 items-end">
+              <UFormField label="Magie-Punkte (Wissen)">
+                <UInput
+                  type="number"
+                  min="0"
+                  :model-value="sheet.magicState.fsMagiePunkte ?? 0"
+                  @update:model-value="setMagicMagiePunkte(Number($event))"
+                />
+              </UFormField>
+              <div class="text-[10px] text-purple-900/80 pb-1">
+                Kontingent = Magie-Punkte ÷ 5<br>
+                Ein Spruch belegt Plätze = Stärkeklasse
+              </div>
+            </div>
+
+            <div class="space-y-1">
+              <div class="text-[10px] uppercase tracking-widest text-purple-900">
+                Vorbereitete Sprüche (Vorbereiten: 1 h Rast pro Spruch)
+              </div>
+              <div
+                v-for="(spell, idx) in (sheet.magicState.fsVorbereitet ?? [])"
+                :key="idx"
+                class="grid grid-cols-12 gap-1 items-center"
+              >
+                <UInput
+                  class="col-span-6"
+                  size="xs"
+                  :model-value="spell.name"
+                  placeholder="Spruchname"
+                  :maxlength="60"
+                  @update:model-value="updateFsPrepared(idx, { name: String($event) })"
+                />
+                <USelect
+                  class="col-span-2"
+                  size="xs"
+                  :model-value="spell.stufe"
+                  :items="[1,2,3,4,5].map((n) => ({ label: 'St. ' + n, value: n }))"
+                  value-key="value"
+                  @update:model-value="setFsPreparedStufe(idx, $event)"
+                />
+                <UInput
+                  class="col-span-2"
+                  size="xs"
+                  type="number"
+                  min="0"
+                  :model-value="spell.charges"
+                  placeholder="Anz."
+                  title="Wie oft kann der Spruch noch gewirkt werden?"
+                  @update:model-value="updateFsPrepared(idx, { charges: Math.max(0, Math.floor(Number($event) || 0)) })"
+                />
+                <UButton
+                  class="col-span-2"
+                  size="xs"
+                  variant="ghost"
+                  color="error"
+                  icon="i-lucide-x"
+                  @click="removeFsPrepared(idx)"
+                />
+              </div>
+              <UButton size="xs" variant="ghost" icon="i-lucide-plus" @click="addFsPrepared">
+                Spruch
+              </UButton>
+            </div>
+            <p class="text-[10px] text-purple-900/80">
+              Rituale: Stufe = Anzahl Magie-Würfe · 3 Fehlschläge = Ritual scheitert ·
+              W100 vs. Magie −30 bei Misserfolg → Zutat zurück
+            </p>
+          </div>
+
+          <!-- ====== Seelensplittermagie-Block (§8.13.3) ====== -->
+          <div
+            v-if="sheet.magicState.module === 'seelensplitter'"
+            class="mt-2 p-2 rounded border border-red-300 bg-red-50/60 space-y-2"
+          >
+            <div class="text-xs uppercase tracking-widest text-red-900 flex items-baseline justify-between">
+              <span>Seelensplittermagie (§8.13.3)</span>
+              <span
+                v-if="(sheet.magicState.seeleVerbraucht ?? 0) > 99"
+                class="text-[10px] normal-case tracking-normal font-mono px-1.5 py-0.5 rounded bg-red-700 text-white"
+                title="Über 99 % Seelen-Verbrauch — Charakter gilt als (vermutet) tot."
+              >
+                💀 KRITISCH
+              </span>
+            </div>
+            <UFormField label="Verbrauchte Seele (%)">
+              <UInput
+                type="number"
+                min="0"
+                max="100"
+                :model-value="sheet.magicState.seeleVerbraucht ?? 0"
+                @update:model-value="setSeeleVerbraucht(Number($event))"
+              />
+            </UFormField>
+            <!-- Fortschrittsbalken: rot intensiver, je höher der Wert. -->
+            <div class="h-2 rounded overflow-hidden bg-white/60 border border-red-200">
+              <div
+                class="h-full transition-all"
+                :style="{
+                  width: Math.min(100, sheet.magicState.seeleVerbraucht ?? 0) + '%',
+                  background: 'linear-gradient(90deg, #fca5a5, #b91c1c)',
+                }"
+              />
+            </div>
+            <p class="text-[10px] text-red-900/80">
+              Mind. 1 % pro Zauber · Vor jeder Probe W100; Wurf ≤ verbrauchter % = Schreckens-/Todesvision ·
+              &gt; 99 % = vermutet tot
+            </p>
+          </div>
+
+          <!-- ====== "Frei"-Modul (kein strukturiertes System) ====== -->
+          <p
+            v-if="sheet.magicState.module === 'frei'"
+            class="text-[10px] text-ink-300 italic"
+          >
+            Kein strukturiertes Magie-Modul aktiv. Nutze das Freitext-Feld unten oder
+            die Standard-Zauber-Sektion ("Zauber & Magie") für freie Spruch-Definitionen.
           </p>
         </div>
       </div>

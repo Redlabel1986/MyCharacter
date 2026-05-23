@@ -138,6 +138,20 @@ export interface HtbahCharacterData {
    * und das MiniCharSheet bietet Komplexitaetswuerfe ueber die Zauber-Stufen.
    */
   magicState?: HtbahMagicState
+  /**
+   * Optionales LP-Alternativsystem "Regel der Drei" (§7.2). Wenn rdd.active
+   * gesetzt ist, ersetzt das Modul die Standard-LP-Anzeige durch drei Skalen
+   * mit Mortalitaets-Mechanik. Bestehendes hp-Feld bleibt im Datenmodell —
+   * UI blendet es einfach aus, damit Wechsel zurueck reversibel ist.
+   */
+  rdd?: HtbahRddState
+  /**
+   * Optionales Kampf-Alternativsystem "Universalkampfsystem" (§3). Standard-
+   * Schadenswurf bleibt, aber im MiniCharSheet kann der Spieler den
+   * universellen Schaden-Modus (Talentwert − Wuerfelaugen / Modifikator)
+   * waehlen. Wenn `combatModule='universal'`, wird das als Default vorgewaehlt.
+   */
+  combatModule?: 'standard' | 'universal'
   notes: string
 }
 
@@ -176,6 +190,8 @@ export function createBlankHtbah(name: string): HtbahCharacterData {
     purse: { copper: 0, silver: 0, gold: 0 },
     magic: '',
     magicState: undefined,
+    rdd: undefined,
+    combatModule: 'standard',
     notes: '',
   }
 }
@@ -574,10 +590,282 @@ export function htbahManaMax(arkanum: number): number {
  * Wird im HtbahCharacterData.magicState gespeichert. Optional — Charaktere
  * ohne Magie-Modul haben keinen magicState.
  */
+/* ==================================================================== */
+/*  Alternative LP-Module — Regel der Drei (§7.2)                        */
+/* ==================================================================== */
+
+/**
+ * "Regel der Drei" — alternatives LP-System mit drei Skalen statt LP.
+ *
+ * Aktivierung pro Charakter via `data.rdd.active = true`. Wenn aktiv,
+ * ersetzt das System die Standard-LP-Anzeige (hp.current/hp.max) durch
+ * drei Skalen (Lebenspunkte / Geistige Gesundheit / Prestige). Die hp-
+ * Werte bleiben am Modell erhalten, werden aber im UI ausgeblendet.
+ */
+export const HTBAH_RDD_SCALES = ['lebenspunkte', 'geistigeGesundheit', 'prestige'] as const
+export type HtbahRddScale = (typeof HTBAH_RDD_SCALES)[number]
+export const HTBAH_RDD_SCALE_LABELS: Record<HtbahRddScale, string> = {
+  lebenspunkte: 'Lebenspunkte',
+  geistigeGesundheit: 'Geistige Gesundheit',
+  prestige: 'Prestige',
+}
+export const HTBAH_RDD_SCALE_KATEGORIE: Record<HtbahRddScale, HtbahTalent> = {
+  lebenspunkte: 'handeln',
+  geistigeGesundheit: 'wissen',
+  prestige: 'soziales',
+}
+
+export interface HtbahRddWound {
+  id: string
+  scale: HtbahRddScale
+  /** Anzahl Punkte Wundverlust (Slot-Wert nach §7.2.3). */
+  amount: number
+  /** Temporaer (heilt nach W10/2 h) oder dauerhaft (nur durch Behandlung). */
+  kind: 'temporary' | 'permanent'
+  note?: string
+  /** ISO-Timestamp, wann die Wunde zugefuegt wurde. Hilft beim Tracken der Heilung. */
+  inflictedAt: string
+}
+
+/**
+ * Regel-der-Drei-State. Wenn `active=true`, wird das Modul angewandt.
+ */
+export interface HtbahRddState {
+  active?: boolean
+  /** Mortalitaetsskala 1-10, Default 4 (entspricht HtbaH-Original). */
+  mortality: number
+  /** Aktuelle Werte pro Skala. */
+  current: Record<HtbahRddScale, number>
+  /** Max-Werte pro Skala (= Basis + Verteilte Punkte). */
+  max: Record<HtbahRddScale, number>
+  /** Wundenliste. */
+  wounds: HtbahRddWound[]
+}
+
+/**
+ * Basiswert pro Skala = Geistesblitzpunkte(Kategorie) + 1 (§7.2.1).
+ */
+export function htbahRddBaseValue(data: HtbahCharacterData, scale: HtbahRddScale): number {
+  const kat = HTBAH_RDD_SCALE_KATEGORIE[scale]
+  return htbahInsightMax(data, kat) + 1
+}
+
+/**
+ * Verteilbare Punkte = (Mortalitaet − 1) × 9 (§7.2.2).
+ */
+export function htbahRddPointsBudget(mortality: number): number {
+  const m = Math.max(1, Math.min(10, Math.floor(mortality || 0)))
+  return (m - 1) * 9
+}
+
+/**
+ * Max-Abstand der Skalen = Mortalitaet × 3 (§7.2.2).
+ */
+export function htbahRddMaxSpread(mortality: number): number {
+  const m = Math.max(1, Math.min(10, Math.floor(mortality || 0)))
+  return m * 3
+}
+
+/**
+ * Schaden-Umrechnung W10 → Slots (§7.2.3).
+ * 1W10/2W10 = 1 Slot, 3W10/4W10 = 2 Slots, ..., 9W10/10W10 = 5 Slots.
+ */
+export function htbahRddDamageToSlots(diceCount: number): number {
+  const d = Math.max(0, Math.floor(diceCount || 0))
+  if (d <= 0) return 0
+  if (d <= 2) return 1
+  if (d <= 4) return 2
+  if (d <= 6) return 3
+  if (d <= 8) return 4
+  return 5
+}
+
+/**
+ * Schlaf-Regeneration (§7.2.4). 6h ohne Unterbrechung → Mortalitaet × 10%
+ * der Summe aller Skalen-Max-Werte. Aufteilung auf Skalen frei waehlbar.
+ */
+export function htbahRddSleepRegen(state: HtbahRddState): number {
+  const m = Math.max(1, Math.min(10, Math.floor(state.mortality || 4)))
+  const sum =
+    state.max.lebenspunkte + state.max.geistigeGesundheit + state.max.prestige
+  return Math.max(1, Math.round((sum * m) / 10))
+}
+
+/**
+ * Aktive-Heilung-Werte (§7.2.5). 1× pro Tag, zusaetzlich zu Schlaf.
+ * Mortalitaeten 4-6 sind im Regelwerk tabelliert; fuer andere mortalities
+ * wird mit derselben Logik interpoliert (mittel = regen × 1, wenig = /2,
+ * viel = × 2). Werte gerundet.
+ */
+export function htbahRddActiveHealing(state: HtbahRddState): {
+  wenig: number
+  mittel: number
+  viel: number
+} {
+  const reg = htbahRddSleepRegen(state)
+  return {
+    wenig: Math.max(1, Math.round(reg / 2)),
+    mittel: Math.max(1, Math.round(reg / 1.6)), // mittel ≈ Schlaf-Regen × 0.6
+    viel: Math.max(1, reg * 2),
+  }
+}
+
+/**
+ * Wundenschwellen pro Mortalitaet (§7.2.6) — Trefferwurf unterhalb der
+ * Schwelle erzeugt zusaetzlich eine Wunde. Werte aus dem Regelwerk.
+ */
+export const HTBAH_RDD_WOUND_THRESHOLDS: Record<number, { temp: number; perm: number | null }> = {
+  1: { temp: 100, perm: 50 },
+  2: { temp: 80, perm: 40 },
+  3: { temp: 43, perm: 22 },
+  4: { temp: 25, perm: 13 },
+  5: { temp: 18, perm: 9 },
+  6: { temp: 12, perm: 6 },
+  7: { temp: 9, perm: 4 },
+  8: { temp: 6, perm: 3 },
+  9: { temp: 2, perm: 1 },
+  10: { temp: 1, perm: null }, // dauerhafte Wunde nicht moeglich
+}
+
+/**
+ * Ueberprueft, ob ein Trefferwurf zusaetzlich eine Wunde verursacht.
+ * Liefert undefined wenn keine Wunde.
+ */
+export function htbahRddCheckWound(
+  mortality: number,
+  attackRoll: number,
+): 'temporary' | 'permanent' | undefined {
+  const m = Math.max(1, Math.min(10, Math.floor(mortality || 4)))
+  const th = HTBAH_RDD_WOUND_THRESHOLDS[m]
+  if (!th) return undefined
+  if (th.perm !== null && attackRoll <= th.perm) return 'permanent'
+  if (attackRoll <= th.temp) return 'temporary'
+  return undefined
+}
+
+/**
+ * Faustregel-Umrechnung: 1 LP "Regel der Drei" entspricht etwa 9 LP
+ * im Standard-System (Regelwerk-Hinweis §7.2.3).
+ */
+export const HTBAH_RDD_LP_PER_STANDARD_LP = 9
+
+/* ==================================================================== */
+/*  Alternatives Kampfmodul — Universalkampfsystem (§3)                  */
+/* ==================================================================== */
+
+/**
+ * Universalkampf — Waffen-Modifikator nach §3.2.
+ *   Schusswaffe = 1, Handwaffe = 2, waffenlos = 3.
+ * Hoeherer Modifikator = weniger Schaden (steht im Nenner).
+ */
+export const HTBAH_UNIVERSAL_WEAPON_MOD = {
+  schusswaffe: 1,
+  handwaffe: 2,
+  waffenlos: 3,
+} as const
+export type HtbahUniversalWeaponKind = keyof typeof HTBAH_UNIVERSAL_WEAPON_MOD
+
+/**
+ * Universalkampf — Ruestungs-Modifikator nach §3.2.
+ *   keine = 0, leicht = 1, schwer = 2.
+ */
+export const HTBAH_UNIVERSAL_ARMOR_MOD = {
+  keine: 0,
+  leicht: 1,
+  schwer: 2,
+} as const
+export type HtbahUniversalArmorKind = keyof typeof HTBAH_UNIVERSAL_ARMOR_MOD
+
+/** Max. kombinierter Modifikator (§3.2). */
+export const HTBAH_UNIVERSAL_MAX_MOD = 4
+
+/**
+ * Schadensformel Universalkampf (§3.2):
+ *   Schaden = (Talentwert − Wuerfelaugen) / (WaffenMod + RuestungsMod)
+ *   Min-Schaden bei Treffer = 10 LP.
+ *
+ * `attackRoll` = das Ergebnis des Trefferwurfs (W100). Erfolg setzt voraus,
+ * dass `attackRoll <= talentValue` (Aggressor-Probe getroffen).
+ *
+ * Liefert 0 (kein Schaden) wenn `attackRoll > talentValue` — Treffer ist
+ * voraussetzung; bei Erfolg mindestens 10 LP Schaden.
+ */
+export function htbahUniversalDamage(input: {
+  talentValue: number
+  attackRoll: number
+  weaponKind: HtbahUniversalWeaponKind
+  armorKind: HtbahUniversalArmorKind
+}): { damage: number; combinedMod: number } {
+  const t = input.talentValue
+  const r = input.attackRoll
+  if (r > t) return { damage: 0, combinedMod: 0 }
+  const wMod = HTBAH_UNIVERSAL_WEAPON_MOD[input.weaponKind]
+  const aMod = HTBAH_UNIVERSAL_ARMOR_MOD[input.armorKind]
+  const combinedMod = Math.min(HTBAH_UNIVERSAL_MAX_MOD, wMod + aMod)
+  const safeMod = Math.max(1, combinedMod) // Division durch 0 abfangen
+  const raw = Math.floor((t - r) / safeMod)
+  // Min 10 bei Treffer (§3.2).
+  return { damage: Math.max(10, raw), combinedMod }
+}
+
+/**
+ * Universalkampf — Konterprobe (§3.1):
+ *   Differenz_Verteidiger = Talentwert(V) − Wuerfelaugen(V)
+ *   Wurf des Aggressors wird um diese Differenz erleichtert/erschwert.
+ *
+ * Liefert die Differenz; positiv = Aggressor wird erschwert (Verteidiger gut),
+ * negativ = Aggressor wird erleichtert (Verteidiger schlecht).
+ */
+export function htbahUniversalKonterdifferenz(defenderTalentValue: number, defenderRoll: number): number {
+  return defenderTalentValue - defenderRoll
+}
+
+/**
+ * Universalkampf — Flaechenschaden (§3.2):
+ *   Schaden(1m Radius) = 100 − Wuerfelaugen
+ *   Pro weiterem Meter: −10 Schaden.
+ */
+export function htbahUniversalAreaDamage(input: {
+  roll: number
+  distanceMeters: number
+  basePower?: number // Default 100; SL kann anpassen
+}): number {
+  const base = input.basePower ?? 100
+  const d = Math.max(0, Math.floor(input.distanceMeters || 0))
+  const beyond = Math.max(0, d - 1)
+  return Math.max(0, base - input.roll - beyond * 10)
+}
+
+/**
+ * Welches Magie-Modul der Charakter benutzt. Modul "frei" deaktiviert
+ * jede strukturierte Mechanik — der Spieler pflegt das Magie-Freitext-Feld.
+ */
+export const HTBAH_MAGIC_MODULES = [
+  'zauberei',
+  'fuenfstufen',
+  'sonnen',
+  'seelensplitter',
+  'frei',
+] as const
+export type HtbahMagicModuleId = (typeof HTBAH_MAGIC_MODULES)[number]
+export const HTBAH_MAGIC_MODULE_LABELS: Record<HtbahMagicModuleId, string> = {
+  zauberei: 'Zauberei (§8 — Standardmodul)',
+  fuenfstufen: 'Fünfstufenmagie (§8.13.1)',
+  sonnen: 'Sonnen-Magie (§8.13.2)',
+  seelensplitter: 'Seelensplittermagie (§8.13.3)',
+  frei: 'Frei (kein Modul aktiv)',
+}
+
 export interface HtbahMagicState {
   /** Modul aktiv? Wenn false oder undefined, wird Mana/Arkanum nicht angezeigt. */
   active?: boolean
-  /** Aktueller Mana-Vorrat. */
+  /**
+   * Welches Magie-Modul ist aktiv? Default 'zauberei' (rueckwaerts-kompatibel
+   * mit fruehen Zaubereien). Wechsel ist verlustfrei — die anderen Felder
+   * (mana/arkanum/...) bleiben unberuehrt, werden im UI nur nicht angezeigt.
+   */
+  module?: HtbahMagicModuleId
+  /** Aktueller Mana-Vorrat (Zauberei + Sonnen — gemeinsamer Pool). */
   mana: number
   /** Anzahl bekannter Zauber (max 5). Bestimmt manaMax + Komplexitaetswurf-Bonus. */
   arkanum: number
@@ -589,10 +877,125 @@ export interface HtbahMagicState {
    * Spieler immer noch freihaendig zaubern (Spruchname-Eingabe).
    */
   knownSpellKeys?: string[]
+
+  /* ----- Fuenfstufenmagie (§8.13.1) ----- */
+  /**
+   * Magie-Punkte (in Wissen investiert). Kontingent = magiePunkte / 5.
+   * Z.B. 50 Magie-Punkte → 10 Kontingent-Slots.
+   */
+  fsMagiePunkte?: number
+  /**
+   * Vorbereitete Sprueche pro Stufe (1-5). Belegt Plaetze = Stufe.
+   * Format: { spellName, stufe, charges } — `charges` reduziert sich beim Wirken.
+   */
+  fsVorbereitet?: Array<{ name: string; stufe: 1 | 2 | 3 | 4 | 5; charges: number }>
+
+  /* ----- Sonnen-Magie (§8.13.2) ----- */
+  /**
+   * Konzentrations-Anzeige. Startet bei 70; pro Unterbrechung −10. Aufladbar.
+   * Wird vom Spieler gepflegt — kein automatischer Decay.
+   */
+  sonnenKonzentration?: number
+
+  /* ----- Seelensplittermagie (§8.13.3) ----- */
+  /**
+   * Prozent der eigenen Seele, die bereits gespalten/verbraucht wurde.
+   * Steigert die Chance auf Schreckens-/Todesvisionen (W100 ≤ Prozent).
+   * Bei > 99% gilt der Charakter als (vermutet) tot.
+   */
+  seeleVerbraucht?: number
 }
 
 export function createBlankMagicState(): HtbahMagicState {
-  return { active: false, mana: 0, arkanum: 0, lehren: [], knownSpellKeys: [] }
+  return {
+    active: false,
+    module: 'zauberei',
+    mana: 0,
+    arkanum: 0,
+    lehren: [],
+    knownSpellKeys: [],
+  }
+}
+
+/* ==================================================================== */
+/*  Fuenfstufenmagie (§8.13.1)                                           */
+/* ==================================================================== */
+
+/**
+ * Kontingent (= Slots) = Magie-Punkte / 5.
+ * Beispiel: 50 Magie-Punkte → 10 Slots.
+ */
+export function htbahFsKontingent(magiePunkte: number): number {
+  return Math.max(0, Math.floor((magiePunkte || 0) / 5))
+}
+
+/** Bereits belegte Slots = Σ stufe × charges aller vorbereiteten Sprueche. */
+export function htbahFsUsedSlots(
+  vorbereitet: Array<{ stufe: number; charges: number }>,
+): number {
+  return vorbereitet.reduce(
+    (sum, v) => sum + Math.max(0, v.stufe) * Math.max(0, v.charges),
+    0,
+  )
+}
+
+/* ==================================================================== */
+/*  Sonnen-Magie (§8.13.2)                                               */
+/* ==================================================================== */
+
+/**
+ * Aufladerunden = Zauberstufe ÷ 2 + 1.
+ * Stufe 1 → 2 Runden, Stufe 2 → 2 Runden, Stufe 3 → 2 Runden, Stufe 15 → 8 Runden.
+ */
+export function htbahSonnenChargeRounds(zauberstufe: number): number {
+  return Math.floor((zauberstufe || 0) / 2) + 1
+}
+
+/**
+ * Strahlenbündel-Schaden: lvl 3 = 3W10 + 1W5, lvl 15 = 15W10 + 5W5.
+ * Generelle Formel: lvl × W10 + floor(lvl / 3) × W5.
+ * Liefert den Wuerfel-String fuer den freien Schadenswurf.
+ */
+export function htbahSonnenStrahlenbuendel(lvl: number): string {
+  const l = Math.max(1, Math.floor(lvl || 1))
+  const w10 = l
+  const w5 = Math.floor(l / 3)
+  if (w5 <= 0) return `${w10}d10`
+  return `${w10}d10 + ${w5}d5`
+}
+
+/**
+ * Sphaeren-Radius: lvl 1 = 3 m, lvl 5 = 50 m. Linear interpoliert.
+ */
+export function htbahSonnenSphaerenRadius(lvl: number): number {
+  const l = Math.max(1, Math.min(5, Math.floor(lvl || 1)))
+  const map = [0, 3, 10, 20, 35, 50]
+  return map[l] ?? 3
+}
+
+/* ==================================================================== */
+/*  Seelensplittermagie (§8.13.3)                                        */
+/* ==================================================================== */
+
+/**
+ * Mindestens 1 % der Seele wird pro Zauber verbraucht. Spieler kann freiwillig
+ * mehr opfern fuer staerkere Effekte (SL-Entscheidung).
+ */
+export const HTBAH_SEELE_MIN_PRO_ZAUBER = 1
+
+/**
+ * Schreckens-/Todesvisions-Wurf: W100, Wurf ≤ verbraucht% → Vision tritt ein.
+ * Liefert true wenn Vision/Todesvision ausgeloest, false sonst.
+ *
+ * Bei > 99 % gilt der Charakter als vermutet tot (Special State).
+ */
+export function htbahSeeleVisionTrigger(roll: number, verbrauchtPercent: number): boolean {
+  return roll <= Math.min(99, Math.max(0, verbrauchtPercent))
+}
+
+/** Charakter gilt als "praktisch tot" wenn Seelen-Verbrauch > 99%. */
+export function htbahSeelePresumedDead(verbrauchtPercent: number): boolean {
+  return verbrauchtPercent > 99
 }
 
 /**

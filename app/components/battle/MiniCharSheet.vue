@@ -15,12 +15,17 @@ import {
   HTBAH_TALENT_LABELS,
   HTBAH_DC_PRESETS,
   HTBAH_SPELL_MANA_COST,
+  HTBAH_RDD_SCALES,
+  HTBAH_RDD_SCALE_LABELS,
+  HTBAH_UNIVERSAL_WEAPON_MOD,
+  HTBAH_UNIVERSAL_ARMOR_MOD,
   htbahSkillTotal,
   htbahTalentValue,
   htbahTotalArmor,
   htbahArmorParadeBonus,
   htbahWeaponAttackBonus,
   htbahManaMax,
+  htbahUniversalDamage,
   normalizeHtbahPurse,
   type HtbahCharacterData,
   type HtbahSkill,
@@ -29,6 +34,8 @@ import {
   type HtbahSpellEntry,
   type HtbahSpellLevel,
   type HtbahUsableItem,
+  type HtbahUniversalWeaponKind,
+  type HtbahUniversalArmorKind,
 } from '~~/shared/engines/htbah'
 import { HTBAH_SPELL_BY_KEY } from '~~/shared/engines/htbah-spell-catalog'
 import {
@@ -554,6 +561,24 @@ const activeArmor = computed(() => {
   return htbahTotalArmor(htbahData.value)
 })
 
+// --- Universalkampfsystem-Schadensrechner (§3.2) ---
+// Wenn isUniversalCombat aktiv ist und der Spieler den Modus waehlt,
+// wird die Schadensformel `(Talent − Wurf) / (WaffenMod + RuestungsMod)` statt
+// des klassischen NdM±X-Wurfs angewandt. Min 10 LP bei Treffer.
+const universalOpen = ref(false)
+const uniTalentValue = ref<number>(0)
+const uniAttackRoll = ref<number>(50)
+const uniWeaponKind = ref<HtbahUniversalWeaponKind>('handwaffe')
+const uniArmorKind = ref<HtbahUniversalArmorKind>('keine')
+const universalResult = computed(() =>
+  htbahUniversalDamage({
+    talentValue: uniTalentValue.value || 0,
+    attackRoll: uniAttackRoll.value || 0,
+    weaponKind: uniWeaponKind.value,
+    armorKind: uniArmorKind.value,
+  }),
+)
+
 // --- Schaden-Wuerfler (freier NdM+X-Wurf, fuer Charakter- und NPC-Tokens) ---
 const damageFormula = ref<string>('')
 const damageLabel = ref<string>('Schaden')
@@ -986,9 +1011,22 @@ const applyManeuver = (m: Maneuver) => {
 const hasMagic = computed(
   () => isHtbah.value && !!htbahData.value?.magicState?.active,
 )
+const magicModule = computed(() => htbahData.value?.magicState?.module ?? 'zauberei')
 const mana = computed(() => htbahData.value?.magicState?.mana ?? 0)
 const arkanum = computed(() => htbahData.value?.magicState?.arkanum ?? 0)
 const manaMax = computed(() => htbahManaMax(arkanum.value))
+const sonnenKonzentration = computed(
+  () => htbahData.value?.magicState?.sonnenKonzentration ?? 70,
+)
+const seeleVerbraucht = computed(
+  () => htbahData.value?.magicState?.seeleVerbraucht ?? 0,
+)
+// Regel der Drei + Universalkampf-Flags
+const isRdd = computed(() => isHtbah.value && !!htbahData.value?.rdd?.active)
+const rddState = computed(() => htbahData.value?.rdd ?? null)
+const isUniversalCombat = computed(
+  () => isHtbah.value && htbahData.value?.combatModule === 'universal',
+)
 const castOpen = ref(false)
 const castSpellName = ref('')
 const castSpellLevel = ref<1 | 2 | 3 | 4 | 5>(1)
@@ -1643,13 +1681,37 @@ const onImageError = (tokenId: number) => {
             </span>
           </div>
           <div
-            v-if="activeToken.hpMax"
+            v-if="activeToken.hpMax && !isRdd"
             class="mt-1 h-2 rounded bg-black/15 overflow-hidden"
           >
             <div
               class="h-full transition-all"
               :style="{ width: hpPercent + '%', background: hpColor }"
             />
+          </div>
+          <!-- Regel-der-Drei-Skalen statt LP-Bar -->
+          <div v-if="isRdd && rddState" class="mt-1 space-y-0.5">
+            <div
+              v-for="scale in HTBAH_RDD_SCALES"
+              :key="scale"
+              class="flex items-center gap-2 text-[10px]"
+            >
+              <span class="w-24 truncate font-semibold">{{ HTBAH_RDD_SCALE_LABELS[scale] }}</span>
+              <span class="font-mono">{{ rddState.current[scale] }}/{{ rddState.max[scale] }}</span>
+              <div class="flex-1 h-1.5 rounded bg-black/15 overflow-hidden">
+                <div
+                  class="h-full transition-all"
+                  :style="{
+                    width: rddState.max[scale] > 0
+                      ? Math.min(100, Math.round((rddState.current[scale] / rddState.max[scale]) * 100)) + '%'
+                      : '0%',
+                    background: scale === 'lebenspunkte' ? '#dc2626'
+                      : scale === 'geistigeGesundheit' ? '#7c3aed'
+                      : '#0284c7',
+                  }"
+                />
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1752,8 +1814,46 @@ const onImageError = (tokenId: number) => {
         class="p-2 rounded border border-purple-300 bg-purple-50 space-y-2"
       >
         <div class="text-[10px] uppercase tracking-widest text-purple-700 mb-1 flex items-center justify-between">
-          <span>Zauber wirken — Komplexitätswurf (§8.5)</span>
-          <span class="font-mono normal-case tracking-normal">Arkanum {{ arkanum }} · Mana {{ mana }}/{{ manaMax }}</span>
+          <span>
+            <template v-if="magicModule === 'zauberei'">Zauber wirken — Komplexitätswurf (§8.5)</template>
+            <template v-else-if="magicModule === 'sonnen'">Sonnen-Magie (§8.13.2)</template>
+            <template v-else-if="magicModule === 'fuenfstufen'">Fünfstufenmagie (§8.13.1)</template>
+            <template v-else-if="magicModule === 'seelensplitter'">Seelensplittermagie (§8.13.3)</template>
+            <template v-else>Magie</template>
+          </span>
+          <span class="font-mono normal-case tracking-normal">
+            <template v-if="magicModule === 'sonnen' || magicModule === 'zauberei'">
+              Arkanum {{ arkanum }} · Mana {{ mana }}/{{ manaMax }}
+            </template>
+            <template v-else-if="magicModule === 'fuenfstufen'">
+              Magie-Punkte
+            </template>
+            <template v-else-if="magicModule === 'seelensplitter'">
+              Seele {{ seeleVerbraucht }}%
+            </template>
+          </span>
+        </div>
+        <!-- Modulspezifischer Hinweis-Block -->
+        <div
+          v-if="magicModule === 'sonnen'"
+          class="text-[10px] p-1.5 rounded bg-amber-100 border border-amber-300 text-amber-900"
+        >
+          ☀ Konzentration: <strong>{{ sonnenKonzentration }}/100</strong> ·
+          Aufladerunden = Stufe ÷ 2 + 1 · pro Unterbrechung −10 Konzentration
+        </div>
+        <div
+          v-else-if="magicModule === 'fuenfstufen'"
+          class="text-[10px] p-1.5 rounded bg-purple-100 border border-purple-300 text-purple-900"
+        >
+          📜 Sprüche werden aus dem Kontingent verbraucht (Vorbereiten beim Rasten, 1 h/Spruch).
+          Pflege den Kontingent-Stand im Charakterbogen.
+        </div>
+        <div
+          v-else-if="magicModule === 'seelensplitter'"
+          class="text-[10px] p-1.5 rounded bg-red-100 border border-red-300 text-red-900"
+        >
+          💀 Vor JEDER Probe: W100 ≤ {{ seeleVerbraucht }}% = Schreckens-/Todesvision.
+          Mind. 1 % Seele pro Zauber. Charakter ab &gt; 99 % vermutet tot.
         </div>
         <!-- Wenn der Spieler Sprueche aus dem Katalog gelernt hat: Dropdown.
              Andernfalls: freie Eingabe. -->
@@ -2105,6 +2205,81 @@ const onImageError = (tokenId: number) => {
            Ziel-Token. Wenn ein Ziel gewaehlt ist, wird das Ergebnis direkt von
            seinen HP abgezogen (Schaden) oder addiert (Heilung). -->
       <div class="space-y-2 border-t border-parchment-700/30 pt-3">
+        <!-- Universalkampf-Toggle (§3): nur fuer HtbaH-Charaktere mit aktivem Modul -->
+        <div v-if="isUniversalCombat" class="flex items-center justify-between gap-2">
+          <div class="text-[10px] uppercase tracking-widest text-ink-300">
+            Universalkampf (§3)
+          </div>
+          <UButton
+            size="xs"
+            :variant="universalOpen ? 'solid' : 'outline'"
+            :color="universalOpen ? 'primary' : 'neutral'"
+            icon="i-lucide-calculator"
+            title="Universalkampf-Schadensrechner ein/ausblenden"
+            @click="universalOpen = !universalOpen"
+          >
+            Schaden = (T − W) / Mod
+          </UButton>
+        </div>
+        <!-- Universalkampf-Rechner: Talent + Wurf + Waffe + Ruestung → Schaden -->
+        <div
+          v-if="isUniversalCombat && universalOpen"
+          class="p-2 rounded border border-amber-300 bg-amber-50/60 space-y-2"
+        >
+          <div class="text-[10px] text-amber-900">
+            Formel: <code class="font-mono">(Talent − Wurf) / (WaffenMod + RüstungsMod)</code> ·
+            Min 10 LP bei Treffer · Max kombinierter Mod 4
+          </div>
+          <div class="grid grid-cols-4 gap-2">
+            <UFormField label="Talent">
+              <UInput v-model.number="uniTalentValue" type="number" size="xs" />
+            </UFormField>
+            <UFormField label="Wurf">
+              <UInput v-model.number="uniAttackRoll" type="number" size="xs" />
+            </UFormField>
+            <UFormField label="Waffe">
+              <USelect
+                v-model="uniWeaponKind"
+                :items="[
+                  { label: 'Schusswaffe (1)', value: 'schusswaffe' },
+                  { label: 'Handwaffe (2)', value: 'handwaffe' },
+                  { label: 'Waffenlos (3)', value: 'waffenlos' },
+                ]"
+                value-key="value"
+                size="xs"
+              />
+            </UFormField>
+            <UFormField label="Rüstung">
+              <USelect
+                v-model="uniArmorKind"
+                :items="[
+                  { label: 'Keine (0)', value: 'keine' },
+                  { label: 'Leicht (1)', value: 'leicht' },
+                  { label: 'Schwer (2)', value: 'schwer' },
+                ]"
+                value-key="value"
+                size="xs"
+              />
+            </UFormField>
+          </div>
+          <div
+            class="text-center p-2 rounded font-mono text-base"
+            :class="universalResult.damage > 0
+              ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+              : 'bg-amber-100 text-amber-900 border border-amber-300'"
+          >
+            <template v-if="universalResult.damage > 0">
+              Schaden: <strong>{{ universalResult.damage }}</strong>
+              <span class="text-[10px] opacity-75 ml-2">
+                Mod {{ universalResult.combinedMod }}
+              </span>
+            </template>
+            <template v-else>
+              Kein Treffer (Wurf {{ uniAttackRoll }} &gt; Talent {{ uniTalentValue }})
+            </template>
+          </div>
+        </div>
+
         <div class="flex items-baseline justify-between gap-2">
           <div class="text-[10px] uppercase tracking-widest text-ink-300">
             {{ damageMode === 'heal' ? 'Heilung' : 'Schaden' }} würfeln
