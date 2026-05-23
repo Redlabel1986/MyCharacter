@@ -32,6 +32,12 @@ import { pushGroupChanged } from '~~/server/utils/pusher'
 
 const bodySchema = z.object({
   characterId: z.number().int().positive(),
+  /**
+   * Stangenwaffen-Sonderregel (§5.2.1): +10 auf Initiative, wenn beim Wurf
+   * eine entsprechende Waffe ausgeruestet ist. Client schickt das Flag,
+   * Server addiert es transparent (Bonus erscheint in der Chat-Message).
+   */
+  stangenwaffe: z.boolean().optional(),
 })
 
 export default defineEventHandler(async (event) => {
@@ -86,11 +92,14 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  // Server wuerfelt 1W10 + Handeln-Begabungswert (Regelwerk §2.2).
+  // Server wuerfelt 1W10 + Handeln-Begabungswert (− Ruestungs-Init-Malus,
+  // bereits in htbahInitiativeBonus eingerechnet, Regelwerk §2.2 + §6.2.3).
+  // Stangenwaffen-Bonus (+10) kommt obendrauf, wenn der Client das Flag setzt.
   const data = char.data as HtbahCharacterData
   const handelnBonus = htbahInitiativeBonus(data)
+  const stangenwaffeBonus = body.stangenwaffe ? 10 : 0
   const die = Math.floor(Math.random() * 10) + 1
-  const total = die + handelnBonus
+  const total = die + handelnBonus + stangenwaffeBonus
 
   // Snapshot des Token-Bilds (wenn der Spieler ein Token auf einer der Karten
   // dieser Gruppe hat) — rein kosmetisch fuer den SL-Tracker.
@@ -124,26 +133,40 @@ export default defineEventHandler(async (event) => {
   }
   await db.update(groups).set({ initiativeState: nextState }).where(eq(groups.id, groupId))
 
-  // Roll-Message in den Chat — damit der Wurf transparent ist.
+  // Roll-Message in den Chat — damit der Wurf transparent ist. Stangenwaffe-
+  // Bonus wandert auf den sichtbaren Modifier obendrauf.
+  const totalMod = handelnBonus + stangenwaffeBonus
+  const noteSuffix = stangenwaffeBonus
+    ? `Stangenwaffe +${stangenwaffeBonus}`
+    : undefined
   const payload: RollPayload = {
     system: 'htbah',
     label: `Initiative — ${char.name}`,
     characterId: char.id,
     characterName: char.name,
     target: total,
-    modifier: handelnBonus || undefined,
+    modifier: totalMod || undefined,
     dice: [die],
     success: true,
     freeRoll: true,
+    note: noteSuffix,
   }
   await db.insert(messages).values({
     groupId,
     userId: user.id,
     type: 'roll',
-    content: `Initiative ${char.name}: ${die}${handelnBonus ? ` + ${handelnBonus}` : ''} = ${total}`,
+    content: `Initiative ${char.name}: ${die}${totalMod ? ` + ${totalMod}` : ''} = ${total}${
+      stangenwaffeBonus ? ` (inkl. Stangenwaffe +${stangenwaffeBonus})` : ''
+    }`,
     payload,
   })
 
   await pushGroupChanged(groupId, 'initiative')
-  return { initiativeState: nextState, rolled: total, die, handelnBonus }
+  return {
+    initiativeState: nextState,
+    rolled: total,
+    die,
+    handelnBonus,
+    stangenwaffeBonus: stangenwaffeBonus || undefined,
+  }
 })

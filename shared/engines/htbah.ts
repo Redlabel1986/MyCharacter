@@ -268,12 +268,40 @@ export const HTBAH_WEAPON_CATEGORY_LABELS: Record<HtbahWeaponCategory, string> =
  *                        (−1 RW dauerhaft an einem Slot).
  *  - `huntingThreshold`: Jagdwaffe — +15 auf den Trefferwurf gegen Gegner
  *                        mit Gesamt-RW ≤ huntingThreshold (default 15).
+ *  - `flink`           : +X auf Trefferwurf (Nahkampf).
+ *  - `grob`            : −X auf Trefferwurf (Nahkampf, gespeichert als
+ *                        positive Zahl, im Code wird abgezogen).
+ *  - `genau`           : +X auf Trefferwurf (Fernkampf).
+ *  - `schwer`          : −X auf Trefferwurf (Fernkampf, positiv gespeichert).
+ *  - `schwert`         : +5 auf Paradewurf — wenn diese Waffe ausgewaehlt ist.
+ *  - `stangenwaffe`    : +10 auf Initiative-Wurf — wenn die Waffe gewaehlt ist.
  */
 export interface HtbahWeaponProperties {
   schlagwaffe?: boolean
   armorBreak?: number
   aufspiessen?: boolean
   huntingThreshold?: number
+  flink?: number
+  grob?: number
+  genau?: number
+  schwer?: number
+  schwert?: boolean
+  stangenwaffe?: boolean
+}
+
+/**
+ * Summe aller Trefferwurf-Modifikatoren aus einer Waffe: Flink + Genau −
+ * Grob − Schwer. Wird im MiniCharSheet beim htbahSkill-Wurf (Trefferprobe)
+ * automatisch zum Modifier addiert.
+ */
+export function htbahWeaponAttackBonus(weapon: HtbahWeaponEntry | null): number {
+  if (!weapon || !weapon.properties) return 0
+  const p = weapon.properties
+  const flink = Math.max(0, Math.floor(p.flink || 0))
+  const grob = Math.max(0, Math.floor(p.grob || 0))
+  const genau = Math.max(0, Math.floor(p.genau || 0))
+  const schwer = Math.max(0, Math.floor(p.schwer || 0))
+  return flink - grob + genau - schwer
 }
 
 /**
@@ -380,6 +408,27 @@ export function htbahEffectiveArmor(
   armorBreak: number = 0,
 ): number {
   return Math.max(0, htbahTotalArmor(data) - Math.max(0, Math.floor(armorBreak || 0)))
+}
+
+/**
+ * Nebenwirkungen der erweiterten Ruestung (Regelwerk §6.2.3).
+ * - Paradewurf: erleichtert um RW (positive Zahl)
+ * - Initiative: erschwert um 10 % von RW (negative Zahl, kaufm. gerundet)
+ * - Ausdauer/Athletik: erschwert um RW / 2 (negative Zahl, abgerundet)
+ *
+ * Beispiel RW 34: Parade +34, Init −3, Athletik −17.
+ *
+ * Die Werte sind so signiert, dass sie direkt zu Wurf-Modifikatoren addiert
+ * werden koennen (positiv = leichter, negativ = schwerer).
+ */
+export function htbahArmorParadeBonus(data: HtbahCharacterData): number {
+  return htbahTotalArmor(data)
+}
+export function htbahArmorInitPenalty(data: HtbahCharacterData): number {
+  return -htbahRoundCommercial(htbahTotalArmor(data) / 10)
+}
+export function htbahArmorAthleticsPenalty(data: HtbahCharacterData): number {
+  return -Math.floor(htbahTotalArmor(data) / 2)
 }
 
 /**
@@ -545,9 +594,17 @@ export function htbahPointsRemaining(data: HtbahCharacterData): number {
   return htbahPoolTotal(data) - htbahCalcSpentPoints(data)
 }
 
-/** Initiative = 1W10 + Handeln-Begabungswert. Hier nur der Bonus. */
+/**
+ * Initiative = 1W10 + Handeln-Begabungswert − Ruestungs-Init-Malus
+ * (Regelwerk §2.2 + §6.2.3 erweitertes Ruestungsmodul: 10 % von RW).
+ * Hier nur der Bonus-Wert; der Wurf-Endpoint addiert 1W10.
+ *
+ * Anmerkung: Wenn ein Charakter Stangenwaffen-Sonderregel "+10 Init" hat,
+ * wird das im MiniCharSheet als zusaetzlicher Modifier mitgegeben — kein
+ * automatischer Bonus hier, weil der Charakter mehrere Waffen haben kann.
+ */
 export function htbahInitiativeBonus(data: HtbahCharacterData): number {
-  return htbahTalentValue(data, 'handeln')
+  return htbahTalentValue(data, 'handeln') + htbahArmorInitPenalty(data)
 }
 
 /** Status anhand der Lebenspunkte (Regelwerk 3.2). */

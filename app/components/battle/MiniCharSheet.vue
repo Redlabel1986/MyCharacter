@@ -17,6 +17,8 @@ import {
   htbahSkillTotal,
   htbahTalentValue,
   htbahTotalArmor,
+  htbahArmorParadeBonus,
+  htbahWeaponAttackBonus,
   normalizeHtbahPurse,
   type HtbahCharacterData,
   type HtbahSkill,
@@ -889,11 +891,21 @@ const rollInitiative = async () => {
   initRolling.value = true
   initError.value = null
   try {
+    // Stangenwaffe (+10 Initiative, §5.2.1): nur wenn der Spieler aktuell eine
+    // Stangenwaffe als „ausgeruestet" markiert hat.
+    const stangenwaffe = !!selectedWeapon.value?.properties?.stangenwaffe
     const res = (await $fetch(`/api/groups/${props.groupId}/initiative/roll`, {
       method: 'POST',
-      body: { characterId: character.value.id },
-    })) as { rolled: number; die: number; handelnBonus: number }
-    initLastResult.value = { total: res.rolled, die: res.die, bonus: res.handelnBonus }
+      body: {
+        characterId: character.value.id,
+        stangenwaffe: stangenwaffe || undefined,
+      },
+    })) as { rolled: number; die: number; handelnBonus: number; stangenwaffeBonus?: number }
+    initLastResult.value = {
+      total: res.rolled,
+      die: res.die,
+      bonus: res.handelnBonus + (res.stangenwaffeBonus ?? 0),
+    }
   } catch (e: unknown) {
     initError.value =
       (e as { statusMessage?: string }).statusMessage ?? 'Initiative-Wurf fehlgeschlagen.'
@@ -935,19 +947,31 @@ const paradeRoll = async (id: string, kind: 'talent' | 'skill') => {
   paradeRolling.value = true
   paradeError.value = null
   try {
+    // Mod-Komponenten:
+    //  - Rüstungs-Parade-Bonus (§6.2.3): +RW
+    //  - Schwert-Sonderregel (§5.2.1): +5 wenn gerade eine Schwert-Waffe gewählt ist
+    const armorBonus = htbahData.value ? htbahArmorParadeBonus(htbahData.value) : 0
+    const schwertBonus = selectedWeapon.value?.properties?.schwert ? 5 : 0
+    const totalMod = armorBonus + schwertBonus
+    const noteParts = ['Parade/Ausweichen']
+    if (armorBonus) noteParts.push(`Rüstung +${armorBonus}`)
+    if (schwertBonus) noteParts.push(`Schwert +5`)
+    const finalNote = noteParts.join(' · ')
     const body =
       kind === 'talent'
         ? {
             kind: 'htbahTalent' as const,
             characterId: character.value.id,
             talent: id as HtbahTalent,
-            note: 'Parade/Ausweichen',
+            modifier: totalMod || undefined,
+            note: finalNote,
           }
         : {
             kind: 'htbahSkill' as const,
             characterId: character.value.id,
             skillId: id,
-            note: 'Parade/Ausweichen',
+            modifier: totalMod || undefined,
+            note: finalNote,
           }
     await $fetch(`/api/groups/${props.groupId}/rolls`, { method: 'POST', body })
     paradeOpen.value = false
@@ -1025,12 +1049,21 @@ const rollIt = async () => {
         // Damage-Ziel gepflegt ist (Server berechnet RW-Schwelle).
         const w = selectedWeapon.value
         const wp = w?.properties ?? {}
+        // Trefferwurf-Modifikator aus der Waffe (Flink/Genau − Grob/Schwer).
+        // Wird HIER addiert, weil der Server das nicht aus der weaponId allein
+        // rekonstruieren koennte (Properties leben am Char-Daten-JSON).
+        const weaponAttack = htbahWeaponAttackBonus(w)
+        const combinedModWithWeapon =
+          (modifier ?? 0) + weaponAttack
+        const noteWithWeapon = weaponAttack
+          ? `${note ? note + ' · ' : ''}Waffe ${weaponAttack > 0 ? '+' : ''}${weaponAttack}`
+          : note
         body = {
           kind: 'htbahSkill',
           characterId,
           skillId: opt.id,
-          modifier,
-          note,
+          modifier: combinedModWithWeapon || undefined,
+          note: noteWithWeapon,
           aufspiessen: wp.aufspiessen || undefined,
           huntingThreshold: wp.huntingThreshold || undefined,
           targetTokenId: damageTargetId.value || undefined,

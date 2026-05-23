@@ -26,6 +26,9 @@ import {
   normalizeHtbahPurse,
   createBlankHtbah,
   htbahTotalArmor,
+  htbahArmorParadeBonus,
+  htbahArmorInitPenalty,
+  htbahArmorAthleticsPenalty,
   type HtbahCharacterData,
   type HtbahTalent,
   type HtbahSkill,
@@ -670,7 +673,11 @@ const postRollToGroup = async () => {
     <SheetSection title="Status">
       <div class="grid grid-cols-2 gap-2">
         <StatBlock label="LP" :value="`${sheet.hp.current}/${sheet.hp.max}`" />
-        <StatBlock label="Initiative" :value="`+${htbahInitiativeBonus(sheet)}`" sublabel="W10 + Handeln" />
+        <StatBlock
+          label="Initiative"
+          :value="`${htbahInitiativeBonus(sheet) >= 0 ? '+' : ''}${htbahInitiativeBonus(sheet)}`"
+          sublabel="W10 + Handeln − RW/10"
+        />
       </div>
       <div
         class="mt-2 text-center text-xs uppercase tracking-widest font-semibold py-1 rounded"
@@ -692,6 +699,30 @@ const postRollToGroup = async () => {
       <p class="text-[10px] text-ink-300 mt-1">
         &lt; 10 LP = bewusstlos · 0 LP = tot · &gt; 60 Schaden in einem Treffer = sofort bewusstlos
       </p>
+
+      <!-- Ruestungs-Nebenwirkungen (Regelwerk §6.2.3 — erweitertes Modul):
+           Parade +RW, Init −RW/10, Athletik −RW/2. Wird nur eingeblendet, wenn
+           der Charakter überhaupt Rüstung trägt. -->
+      <div v-if="totalArmor > 0" class="mt-3 p-2 rounded bg-blue-50 border border-blue-200 text-[11px] text-blue-900 space-y-0.5">
+        <div class="font-semibold uppercase tracking-widest text-[10px]">
+          🛡 Rüstungs-Effekte (Σ RW {{ totalArmor }})
+        </div>
+        <div class="flex justify-between">
+          <span>Parade:</span>
+          <span class="font-mono">+{{ htbahArmorParadeBonus(sheet) }}</span>
+        </div>
+        <div class="flex justify-between">
+          <span>Initiative:</span>
+          <span class="font-mono">{{ htbahArmorInitPenalty(sheet) }}</span>
+        </div>
+        <div class="flex justify-between">
+          <span>Athletik / Bewegung:</span>
+          <span class="font-mono">{{ htbahArmorAthleticsPenalty(sheet) }}</span>
+        </div>
+        <p class="text-[9px] opacity-75 pt-0.5">
+          Init wird automatisch verrechnet. Parade/Athletik manuell als Mod beim Wurf eintragen.
+        </p>
+      </div>
 
       <div class="accent-rule my-3" />
       <div class="text-xs uppercase tracking-widest text-ink-300 mb-1">Punkte-Pool</div>
@@ -1333,7 +1364,79 @@ const postRollToGroup = async () => {
                 />
               </div>
             </div>
-            <!-- Zeile 4: Notiz -->
+            <!-- Zeile 4: Trefferwurf-Modifikatoren (Flink/Grob/Genau/Schwer) -->
+            <div class="grid grid-cols-12 gap-2 items-center">
+              <div class="col-span-3 flex items-center gap-1">
+                <span class="text-[10px] text-ink-300 whitespace-nowrap" title="Flink +X — Bonus auf Trefferwurf (Nahkampf)">Flink +</span>
+                <UInput
+                  size="xs"
+                  type="number"
+                  min="0"
+                  max="50"
+                  :model-value="w.properties?.flink ?? 0"
+                  placeholder="0"
+                  title="Flink +X auf Trefferwurf (z.B. Bauernwehr +20, Knüppel +20, Langschwert +10)"
+                  @update:model-value="updateWeaponProps(idx, { flink: Math.max(0, Math.floor(Number($event) || 0)) })"
+                />
+              </div>
+              <div class="col-span-3 flex items-center gap-1">
+                <span class="text-[10px] text-ink-300 whitespace-nowrap" title="Grob −X — Malus auf Trefferwurf (Nahkampf, 2H-Waffen)">Grob −</span>
+                <UInput
+                  size="xs"
+                  type="number"
+                  min="0"
+                  max="50"
+                  :model-value="w.properties?.grob ?? 0"
+                  placeholder="0"
+                  title="Grob −X auf Trefferwurf (z.B. Zweihänder −15, Streitaxt −10)"
+                  @update:model-value="updateWeaponProps(idx, { grob: Math.max(0, Math.floor(Number($event) || 0)) })"
+                />
+              </div>
+              <div class="col-span-3 flex items-center gap-1">
+                <span class="text-[10px] text-ink-300 whitespace-nowrap" title="Genau +X — Bonus auf Trefferwurf (Fernkampf)">Genau +</span>
+                <UInput
+                  size="xs"
+                  type="number"
+                  min="0"
+                  max="50"
+                  :model-value="w.properties?.genau ?? 0"
+                  placeholder="0"
+                  title="Genau +X auf Trefferwurf (z.B. Jagdbogen +20, Reiterbogen +10)"
+                  @update:model-value="updateWeaponProps(idx, { genau: Math.max(0, Math.floor(Number($event) || 0)) })"
+                />
+              </div>
+              <div class="col-span-3 flex items-center gap-1">
+                <span class="text-[10px] text-ink-300 whitespace-nowrap" title="Schwer −X — Malus auf Trefferwurf (Fernkampf)">Schwer −</span>
+                <UInput
+                  size="xs"
+                  type="number"
+                  min="0"
+                  max="50"
+                  :model-value="w.properties?.schwer ?? 0"
+                  placeholder="0"
+                  title="Schwer −X auf Trefferwurf (z.B. Kriegsbogen −10, Kriegsarmbrust −10)"
+                  @update:model-value="updateWeaponProps(idx, { schwer: Math.max(0, Math.floor(Number($event) || 0)) })"
+                />
+              </div>
+            </div>
+            <!-- Zeile 5: Kontext-Boni (Schwert / Stangenwaffe) -->
+            <div class="grid grid-cols-12 gap-2 items-center">
+              <UCheckbox
+                class="col-span-6"
+                :model-value="!!w.properties?.schwert"
+                label="Schwert (+5 Paradewurf, wenn ausgerüstet)"
+                title="Klassisches Schwert-Profil — gibt +5 auf den Paradewurf, solange diese Waffe ausgewählt ist"
+                @update:model-value="updateWeaponProps(idx, { schwert: !!$event })"
+              />
+              <UCheckbox
+                class="col-span-6"
+                :model-value="!!w.properties?.stangenwaffe"
+                label="Stangenwaffe (+10 Initiative, wenn ausgerüstet)"
+                title="Spear/Hellebarde/etc. — +10 auf den Initiative-Wurf, wenn beim Wurf gewählt"
+                @update:model-value="updateWeaponProps(idx, { stangenwaffe: !!$event })"
+              />
+            </div>
+            <!-- Zeile 6: Notiz -->
             <UInput
               :model-value="w.note ?? ''"
               placeholder="Notiz (z.B. Zweihänder, +2 Hand frei nicht möglich)"
