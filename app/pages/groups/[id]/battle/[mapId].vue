@@ -5031,7 +5031,7 @@ const endResize = () => {
           :name="sheetSheetOpen ? 'i-lucide-x' : 'i-lucide-user-round'"
           class="size-5"
         />
-        <span class="hidden sm:inline">{{ sheetSheetOpen ? 'Schliessen' : 'Mein Sheet' }}</span>
+        <span class="hidden sm:inline">{{ sheetSheetOpen ? 'Schliessen' : 'Mein Character' }}</span>
       </button>
 
       <!-- Bottom-Sheet (Slide-up Drawer) -->
