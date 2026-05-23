@@ -132,6 +132,12 @@ export interface HtbahCharacterData {
    * der Spieler/SL pflegt Zauberlisten, Foki, Mana o.aE. selbst.
    */
   magic: string
+  /**
+   * Strukturierter Magie-State (Modul "Zauberei", §8). Optional aktivierbar.
+   * Wenn `active: true`, zeigt der Bogen Mana-Pool, Arkanum und Lehren an
+   * und das MiniCharSheet bietet Komplexitaetswuerfe ueber die Zauber-Stufen.
+   */
+  magicState?: HtbahMagicState
   notes: string
 }
 
@@ -169,6 +175,7 @@ export function createBlankHtbah(name: string): HtbahCharacterData {
     usableItems: [],
     purse: { copper: 0, silver: 0, gold: 0 },
     magic: '',
+    magicState: undefined,
     notes: '',
   }
 }
@@ -493,6 +500,129 @@ export const HTBAH_DC_PRESETS = [
   { id: 'extreme', label: 'Extrem', modifier: -45 },
 ] as const
 export type HtbahDcPresetId = (typeof HTBAH_DC_PRESETS)[number]['id']
+
+/* ==================================================================== */
+/*  Magie-Modul "Zauberei" (Regelwerk §8)                                */
+/* ==================================================================== */
+
+/**
+ * Die 12 Lehren der Zauberei. Jeder Spieler darf max. 3 Lehren lernen.
+ * Auswahl bestimmt, welche Zauber aus dem Katalog ueberhaupt lernbar sind.
+ */
+export const HTBAH_SPELL_LEHREN = [
+  { id: 'schutz', label: 'Schutz', hint: 'Reduziert eingehenden Schaden' },
+  { id: 'genesung', label: 'Genesung', hint: 'Heilung, LP wiederherstellen' },
+  { id: 'segen', label: 'Segen', hint: 'Verbessert Probenchancen' },
+  { id: 'tiergestalt', label: 'Tiergestalt', hint: 'Verwandlung in Ratte/Katze/Eule/Bär/Wer' },
+  { id: 'erdmagie', label: 'Erdmagie', hint: 'Verändert das Schlachtfeld' },
+  { id: 'trugbild', label: 'Trugbild', hint: 'Illusionen' },
+  { id: 'verfall', label: 'Verfall', hint: 'Zerstört Gegenstände, schwächt Gegner' },
+  { id: 'boeser-blick', label: 'Böser Blick', hint: 'Direkter Schaden' },
+  { id: 'fluch', label: 'Fluch', hint: 'Erschwert Proben des Ziels' },
+  { id: 'beherrschung', label: 'Beherrschung', hint: 'Beeinflusst andere Charaktere' },
+  { id: 'sturm', label: 'Sturm', hint: 'Wetter, Wind, Blitz' },
+  { id: 'beschwoerung', label: 'Beschwörung', hint: 'Beschwört magische Verbündete' },
+] as const
+export type HtbahSpellLehreId = (typeof HTBAH_SPELL_LEHREN)[number]['id']
+export const HTBAH_SPELL_LEHRE_LABELS: Record<string, string> =
+  HTBAH_SPELL_LEHREN.reduce((acc, l) => ({ ...acc, [l.id]: l.label }), {})
+
+/**
+ * Komplexitaetswurf-Schwellen pro Spruch-Stufe (Regelwerk §8.2).
+ * Komplexitaetswurf = 3W10 + Arkanum >= Schwelle.
+ */
+export const HTBAH_SPELL_COMPLEXITY: Record<1 | 2 | 3 | 4 | 5, number> = {
+  1: 14,
+  2: 16,
+  3: 18,
+  4: 20,
+  5: 22,
+}
+
+/** Manakosten pro Spruchstufe (Regelwerk §8.2). */
+export const HTBAH_SPELL_MANA_COST: Record<1 | 2 | 3 | 4 | 5, number> = {
+  1: 1,
+  2: 2,
+  3: 3,
+  4: 4,
+  5: 5,
+}
+
+/** Maximalwert fuer Arkanum (Anzahl bekannter Zauber). */
+export const HTBAH_ARKANUM_MAX = 5
+
+/**
+ * Mana-Maximum = Arkanum × 2 (Regelwerk §8.3).
+ */
+export function htbahManaMax(arkanum: number): number {
+  return Math.max(0, Math.min(HTBAH_ARKANUM_MAX, Math.floor(arkanum || 0))) * 2
+}
+
+/**
+ * Magie-State eines Charakters (Modul "Zauberei").
+ * Wird im HtbahCharacterData.magicState gespeichert. Optional — Charaktere
+ * ohne Magie-Modul haben keinen magicState.
+ */
+export interface HtbahMagicState {
+  /** Modul aktiv? Wenn false oder undefined, wird Mana/Arkanum nicht angezeigt. */
+  active?: boolean
+  /** Aktueller Mana-Vorrat. */
+  mana: number
+  /** Anzahl bekannter Zauber (max 5). Bestimmt manaMax + Komplexitaetswurf-Bonus. */
+  arkanum: number
+  /** Gelernte Lehren-IDs (max 3). */
+  lehren: HtbahSpellLehreId[]
+}
+
+export function createBlankMagicState(): HtbahMagicState {
+  return { active: false, mana: 0, arkanum: 0, lehren: [] }
+}
+
+/**
+ * Komplexitaetswurf-Auswertung (Regelwerk §8.5).
+ *   3W10 + Arkanum >= Schwelle = Erfolg.
+ *   2+ Einser  = kritischer Misserfolg (Mana verbraucht, KEIN Effekt).
+ *   2+ Zehner  = kritischer Erfolg (kein Mana verbraucht, Effekt tritt ein).
+ */
+export interface HtbahKomplexitaetsResult {
+  rolls: [number, number, number]
+  arkanum: number
+  sum: number
+  threshold: number
+  success: boolean
+  critSuccess: boolean
+  critFumble: boolean
+  /** Mana, der nach dem Wurf abgezogen werden soll (0 bei krit-Erfolg). */
+  manaCost: number
+}
+
+export function htbahKomplexitaetswurf(input: {
+  rolls: [number, number, number]
+  arkanum: number
+  spellLevel: 1 | 2 | 3 | 4 | 5
+}): HtbahKomplexitaetsResult {
+  const sum = input.rolls.reduce((a, b) => a + b, 0) + input.arkanum
+  const threshold = HTBAH_SPELL_COMPLEXITY[input.spellLevel]
+  const ones = input.rolls.filter((r) => r === 1).length
+  const tens = input.rolls.filter((r) => r === 10).length
+  const critFumble = ones >= 2
+  const critSuccess = tens >= 2
+  // Krit-Erfolg ueberschreibt Misserfolg: 2 Einser + 2 Zehner ist nicht moeglich
+  // (max 3 Wuerfel), aber sicher ist sicher.
+  const success = critSuccess || (!critFumble && sum >= threshold)
+  const baseCost = HTBAH_SPELL_MANA_COST[input.spellLevel]
+  const manaCost = critSuccess ? 0 : baseCost
+  return {
+    rolls: input.rolls,
+    arkanum: input.arkanum,
+    sum,
+    threshold,
+    success,
+    critSuccess,
+    critFumble,
+    manaCost,
+  }
+}
 
 /**
  * Geldbeutel: 100 Kupfer = 1 Silber, 100 Silber = 1 Gold.

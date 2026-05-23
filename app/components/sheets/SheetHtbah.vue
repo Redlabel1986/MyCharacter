@@ -10,6 +10,9 @@ import {
   HTBAH_WEAPON_CATEGORIES,
   HTBAH_WEAPON_CATEGORY_LABELS,
   HTBAH_DC_PRESETS,
+  HTBAH_SPELL_LEHREN,
+  HTBAH_ARKANUM_MAX,
+  htbahManaMax,
   htbahSkillTotal,
   htbahTalentValue,
   htbahInsightMax,
@@ -32,6 +35,8 @@ import {
   type HtbahCharacterData,
   type HtbahTalent,
   type HtbahSkill,
+  type HtbahMagicState,
+  type HtbahSpellLehreId,
   type HtbahPerk,
   type HtbahPurse,
   type HtbahArmorPiece,
@@ -137,6 +142,19 @@ const sheet = computed<HtbahCharacterData>(() => {
       gold: Number(incoming.purse?.gold ?? 0),
     },
     magic: incoming.magic ?? '',
+    magicState: incoming.magicState
+      ? {
+          active: !!incoming.magicState.active,
+          mana: Math.max(0, Math.floor(Number(incoming.magicState.mana ?? 0))),
+          arkanum: Math.max(
+            0,
+            Math.min(HTBAH_ARKANUM_MAX, Math.floor(Number(incoming.magicState.arkanum ?? 0))),
+          ),
+          lehren: Array.isArray(incoming.magicState.lehren)
+            ? (incoming.magicState.lehren as HtbahSpellLehreId[])
+            : [],
+        }
+      : undefined,
     notes: incoming.notes ?? '',
   }
 })
@@ -424,6 +442,58 @@ const removeSpellLevel = (spellIdx: number, levelIdx: number) => {
   if (!spell || !spell.levels) return
   spell.levels.splice(levelIdx, 1)
   n.spells = list
+  update(n)
+}
+
+// --- Magie-Modul ("Zauberei", §8) ---
+// Auto-Default + Mutationen. Wenn der Spieler das Modul deaktiviert lassen
+// will, bleibt `magicState` undefined und die UI zeigt nur einen Aktivieren-
+// Button.
+const ensureMagicState = (n: HtbahCharacterData): HtbahMagicState => {
+  if (!n.magicState) {
+    n.magicState = { active: true, mana: 0, arkanum: 0, lehren: [] }
+  }
+  return n.magicState
+}
+const toggleMagicModule = () => {
+  const n = clone()
+  if (!n.magicState) {
+    n.magicState = { active: true, mana: 0, arkanum: 0, lehren: [] }
+  } else {
+    n.magicState.active = !n.magicState.active
+  }
+  update(n)
+}
+const setMagicArkanum = (v: number) => {
+  const n = clone()
+  const ms = ensureMagicState(n)
+  ms.arkanum = Math.max(0, Math.min(HTBAH_ARKANUM_MAX, Math.floor(v || 0)))
+  // Mana auf neuen Max-Wert clampen.
+  ms.mana = Math.min(ms.mana, htbahManaMax(ms.arkanum))
+  update(n)
+}
+const setMagicMana = (v: number) => {
+  const n = clone()
+  const ms = ensureMagicState(n)
+  ms.mana = Math.max(0, Math.min(htbahManaMax(ms.arkanum), Math.floor(v || 0)))
+  update(n)
+}
+const toggleMagicLehre = (id: HtbahSpellLehreId) => {
+  const n = clone()
+  const ms = ensureMagicState(n)
+  const idx = ms.lehren.indexOf(id)
+  if (idx >= 0) {
+    ms.lehren.splice(idx, 1)
+  } else if (ms.lehren.length < 3) {
+    // Regelwerk: max 3 Lehren
+    ms.lehren.push(id)
+  }
+  update(n)
+}
+const restoreMagicMana = () => {
+  const n = clone()
+  const ms = ensureMagicState(n)
+  ms.mana = htbahManaMax(ms.arkanum)
   update(n)
 }
 
@@ -1744,13 +1814,103 @@ const postRollToGroup = async () => {
     </SheetSection>
 
     <SheetSection title="Magie" class="lg:col-span-2">
+      <!-- Magie-Modul "Zauberei" (§8) — strukturierter Tracker. Optional aktivierbar. -->
+      <div class="border border-parchment-700/30 rounded p-3 bg-white/30 space-y-3 mb-4">
+        <div class="flex items-baseline justify-between gap-2 flex-wrap">
+          <div>
+            <div class="font-serif text-base">Zauberei-Modul (§8)</div>
+            <p class="text-[10px] text-ink-300">
+              Arkanum-Tracker, Mana-Pool, Lehren-Auswahl. Optional — Charaktere ohne Magie lassen es deaktiviert.
+            </p>
+          </div>
+          <UButton
+            size="xs"
+            :variant="sheet.magicState?.active ? 'solid' : 'outline'"
+            :color="sheet.magicState?.active ? 'primary' : 'neutral'"
+            :icon="sheet.magicState?.active ? 'i-lucide-toggle-right' : 'i-lucide-toggle-left'"
+            @click="toggleMagicModule"
+          >
+            {{ sheet.magicState?.active ? 'Aktiv' : 'Aktivieren' }}
+          </UButton>
+        </div>
+
+        <div v-if="sheet.magicState?.active" class="space-y-3">
+          <!-- Arkanum + Mana -->
+          <div class="grid grid-cols-3 gap-2">
+            <UFormField label="Arkanum (0–5)">
+              <UInput
+                type="number"
+                min="0"
+                :max="HTBAH_ARKANUM_MAX"
+                :model-value="sheet.magicState.arkanum"
+                @update:model-value="setMagicArkanum(Number($event))"
+              />
+            </UFormField>
+            <UFormField label="Mana aktuell">
+              <UInput
+                type="number"
+                min="0"
+                :max="htbahManaMax(sheet.magicState.arkanum)"
+                :model-value="sheet.magicState.mana"
+                @update:model-value="setMagicMana(Number($event))"
+              />
+            </UFormField>
+            <UFormField :label="`Mana max (= ${htbahManaMax(sheet.magicState.arkanum)})`">
+              <UButton
+                block
+                size="sm"
+                variant="outline"
+                icon="i-lucide-refresh-cw"
+                title="Manavorrat auf Maximum auffüllen (z.B. nach Rast)"
+                @click="restoreMagicMana"
+              >
+                Auffüllen
+              </UButton>
+            </UFormField>
+          </div>
+          <p class="text-[10px] text-ink-300">
+            Mana max = Arkanum × 2 · Regeneration: +1 / Stunde Rast · Manatränke: leicht 2, mittel 4, stark 6
+          </p>
+
+          <!-- Lehren-Auswahl (max 3) -->
+          <div>
+            <div class="text-xs uppercase tracking-widest text-ink-300 mb-1">
+              Lehren (max 3 — aktuell {{ sheet.magicState.lehren.length }}/3)
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-1">
+              <UButton
+                v-for="l in HTBAH_SPELL_LEHREN"
+                :key="l.id"
+                size="xs"
+                :variant="sheet.magicState.lehren.includes(l.id) ? 'solid' : 'outline'"
+                :color="sheet.magicState.lehren.includes(l.id) ? 'primary' : 'neutral'"
+                :disabled="!sheet.magicState.lehren.includes(l.id) && sheet.magicState.lehren.length >= 3"
+                :title="l.hint"
+                @click="toggleMagicLehre(l.id)"
+              >
+                {{ l.label }}
+              </UButton>
+            </div>
+          </div>
+
+          <!-- Komplexitäts-Schwellen-Cheat-Sheet -->
+          <div class="text-[10px] text-ink-300 grid grid-cols-5 gap-1 mt-1">
+            <div class="text-center"><strong>I</strong>: 14+ (1 Mana)</div>
+            <div class="text-center"><strong>II</strong>: 16+ (2 Mana)</div>
+            <div class="text-center"><strong>III</strong>: 18+ (3 Mana)</div>
+            <div class="text-center"><strong>IV</strong>: 20+ (4 Mana)</div>
+            <div class="text-center"><strong>V</strong>: 22+ (5 Mana)</div>
+          </div>
+        </div>
+      </div>
+
       <UFormField
-        label="Zauber, Foki, Mana, Sprüche"
-        help="HtbaH hat keine festen Magie-Regeln — pflege Zauberlisten, magische Gegenstände und ggf. einen eigenen Mana-Pool hier frei."
+        label="Zauber, Foki, Sprüche (Freitext)"
+        help="Zusätzlich zu den strukturierten Zaubern oben — für freie Notizen, Spruchrollen, magische Gegenstände."
       >
         <UTextarea
           rows="6"
-          placeholder="z.B. Lichtball (1 Mana, Reichweite 10 m), Feuerstrahl (3 Mana, 2W10 Schaden) …"
+          placeholder="z.B. Spruchrolle Heilende Hände (1×), Amulett der Manaregeneration (+1/h) …"
           :model-value="sheet.magic"
           class="w-full"
           @update:model-value="setText('magic', String($event))"

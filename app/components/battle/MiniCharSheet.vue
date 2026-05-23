@@ -14,11 +14,13 @@ import {
   HTBAH_TALENTS,
   HTBAH_TALENT_LABELS,
   HTBAH_DC_PRESETS,
+  HTBAH_SPELL_MANA_COST,
   htbahSkillTotal,
   htbahTalentValue,
   htbahTotalArmor,
   htbahArmorParadeBonus,
   htbahWeaponAttackBonus,
+  htbahManaMax,
   normalizeHtbahPurse,
   type HtbahCharacterData,
   type HtbahSkill,
@@ -60,6 +62,8 @@ interface Token {
   description: string
   system: 'htbah' | 'dnd' | 'dsa5' | null
   npcAbilities: NpcAbility[]
+  /** CSV der Conditions am Token (z.B. "prone,frightened") + Frei-Text-Reste. */
+  statusText: string
 }
 
 interface CharacterFull {
@@ -976,6 +980,85 @@ const applyManeuver = (m: Maneuver) => {
   rollNote.value = m.note
   maneuverOpen.value = false
 }
+
+// --- Magie-Modul (§8) — Komplexitaetswurf-Quick-Cast ---
+const hasMagic = computed(
+  () => isHtbah.value && !!htbahData.value?.magicState?.active,
+)
+const mana = computed(() => htbahData.value?.magicState?.mana ?? 0)
+const arkanum = computed(() => htbahData.value?.magicState?.arkanum ?? 0)
+const manaMax = computed(() => htbahManaMax(arkanum.value))
+const castOpen = ref(false)
+const castSpellName = ref('')
+const castSpellLevel = ref<1 | 2 | 3 | 4 | 5>(1)
+const castLehre = ref('')
+const castSending = ref(false)
+const castError = ref<string | null>(null)
+const castLastResult = ref<{
+  rolls: [number, number, number]
+  sum: number
+  threshold: number
+  success: boolean
+  critSuccess: boolean
+  critFumble: boolean
+  manaCost: number
+  manaAfter: number
+} | null>(null)
+
+const castSpell = async () => {
+  if (!character.value || !hasMagic.value) return
+  if (!castSpellName.value.trim()) {
+    castError.value = 'Spruchname fehlt.'
+    return
+  }
+  castSending.value = true
+  castError.value = null
+  try {
+    const res = (await $fetch(`/api/groups/${props.groupId}/magic/cast`, {
+      method: 'POST',
+      body: {
+        characterId: character.value.id,
+        spellName: castSpellName.value.trim(),
+        spellLevel: castSpellLevel.value,
+        lehre: castLehre.value.trim() || undefined,
+      },
+    })) as {
+      result: {
+        rolls: [number, number, number]
+        sum: number
+        threshold: number
+        success: boolean
+        critSuccess: boolean
+        critFumble: boolean
+        manaCost: number
+      }
+      mana: number
+      manaMax: number
+    }
+    castLastResult.value = {
+      rolls: res.result.rolls,
+      sum: res.result.sum,
+      threshold: res.result.threshold,
+      success: res.result.success,
+      critSuccess: res.result.critSuccess,
+      critFumble: res.result.critFumble,
+      manaCost: res.result.manaCost,
+      manaAfter: res.mana,
+    }
+    // Charakter neu laden, damit der angezeigte Mana-Wert direkt aktualisiert.
+    if (character.value) {
+      const updated = await $fetch<{ character: CharacterFull }>(
+        `/api/characters/${character.value.id}`,
+      )
+      character.value = updated.character
+    }
+  } catch (e: unknown) {
+    castError.value =
+      (e as { statusMessage?: string }).statusMessage ?? 'Zauberwurf fehlgeschlagen.'
+  } finally {
+    castSending.value = false
+  }
+}
 const paradeRoll = async (id: string, kind: 'talent' | 'skill') => {
   if (!character.value || !isHtbah.value) return
   paradeRolling.value = true
@@ -1542,6 +1625,20 @@ const onImageError = (tokenId: number) => {
         >
           Manöver
         </UButton>
+        <UButton
+          v-if="hasMagic"
+          color="primary"
+          variant="soft"
+          icon="i-lucide-sparkles"
+          size="sm"
+          :title="`Zauberei (§8) — Komplexitätswurf · Mana ${mana}/${manaMax}`"
+          @click="castOpen = !castOpen"
+        >
+          Zaubern
+          <span class="ml-1 font-mono text-[10px] opacity-80">
+            {{ mana }}/{{ manaMax }}
+          </span>
+        </UButton>
         <div
           v-if="initLastResult"
           class="text-xs px-2 py-1 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 self-center"
@@ -1579,6 +1676,97 @@ const onImageError = (tokenId: number) => {
         <p v-if="paradeError" class="text-xs text-red-700">{{ paradeError }}</p>
         <p class="text-[10px] text-ink-300/80">
           Erfolg = kein Schaden. Krit. Angriffe und Schusswaffen sind nicht parierbar.
+        </p>
+      </div>
+
+      <!-- Magie-Quick-Cast-Popup: Spruchname + Stufe → Komplexitaetswurf
+           (server wuerfelt 3W10 + Arkanum, prueft gegen Stufen-Schwelle,
+           zieht Mana ab). -->
+      <div
+        v-if="castOpen && hasMagic"
+        class="p-2 rounded border border-purple-300 bg-purple-50 space-y-2"
+      >
+        <div class="text-[10px] uppercase tracking-widest text-purple-700 mb-1 flex items-center justify-between">
+          <span>Zauber wirken — Komplexitätswurf (§8.5)</span>
+          <span class="font-mono normal-case tracking-normal">Arkanum {{ arkanum }} · Mana {{ mana }}/{{ manaMax }}</span>
+        </div>
+        <UFormField label="Spruchname">
+          <UInput
+            v-model="castSpellName"
+            placeholder="z.B. Heilende Hände, Kochendes Blut, Erdwall"
+            size="sm"
+            :maxlength="60"
+          />
+        </UFormField>
+        <div class="grid grid-cols-2 gap-2">
+          <UFormField label="Stufe">
+            <USelect
+              v-model="castSpellLevel"
+              :items="[
+                { label: 'I (Schwelle 14, 1 Mana)', value: 1 },
+                { label: 'II (16, 2 Mana)', value: 2 },
+                { label: 'III (18, 3 Mana)', value: 3 },
+                { label: 'IV (20, 4 Mana)', value: 4 },
+                { label: 'V (22, 5 Mana)', value: 5 },
+              ]"
+              value-key="value"
+              size="sm"
+            />
+          </UFormField>
+          <UFormField label="Lehre (optional)">
+            <UInput
+              v-model="castLehre"
+              placeholder="z.B. Genesung, Sturm"
+              size="sm"
+              :maxlength="40"
+            />
+          </UFormField>
+        </div>
+        <UButton
+          block
+          color="primary"
+          icon="i-lucide-dices"
+          :loading="castSending"
+          :disabled="!castSpellName.trim() || mana < HTBAH_SPELL_MANA_COST[castSpellLevel]"
+          @click="castSpell"
+        >
+          Wirken (3W10 + {{ arkanum }})
+        </UButton>
+        <div
+          v-if="mana < HTBAH_SPELL_MANA_COST[castSpellLevel]"
+          class="text-xs text-amber-700"
+        >
+          ⚠ Nicht genug Mana ({{ mana }}/{{ HTBAH_SPELL_MANA_COST[castSpellLevel] }} benötigt).
+        </div>
+        <div
+          v-if="castLastResult"
+          class="text-xs p-2 rounded"
+          :class="castLastResult.critSuccess
+            ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+            : castLastResult.critFumble
+              ? 'bg-red-100 text-red-900 border border-red-300'
+              : castLastResult.success
+                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                : 'bg-amber-50 text-amber-800 border border-amber-200'"
+        >
+          <div class="font-semibold">
+            <template v-if="castLastResult.critSuccess">⚡ Krit. Erfolg — Mana gespart!</template>
+            <template v-else-if="castLastResult.critFumble">💥 Krit. Misserfolg — Mana weg, kein Effekt</template>
+            <template v-else-if="castLastResult.success">✓ Erfolg</template>
+            <template v-else>✗ Misserfolg</template>
+          </div>
+          <div class="font-mono mt-1">
+            {{ castLastResult.rolls.join(' + ') }} + {{ arkanum }} = {{ castLastResult.sum }}
+            (Schwelle {{ castLastResult.threshold }})
+          </div>
+          <div class="mt-1 opacity-80">
+            Mana: <strong>{{ castLastResult.manaAfter }}/{{ manaMax }}</strong>
+            <template v-if="castLastResult.manaCost > 0"> (−{{ castLastResult.manaCost }})</template>
+          </div>
+        </div>
+        <p v-if="castError" class="text-xs text-red-700">{{ castError }}</p>
+        <p class="text-[10px] text-ink-300/80">
+          2+ Einser = krit. Misserfolg · 2+ Zehner = krit. Erfolg (kein Mana)
         </p>
       </div>
 
