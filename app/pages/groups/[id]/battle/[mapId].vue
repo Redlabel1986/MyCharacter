@@ -1999,7 +1999,15 @@ const initNextTurn = async () => {
   const currentSortedIdx = sorted.findIndex((e) => e.id === initCurrentEntryId.value)
   const nextIdx = currentSortedIdx + 1
   if (nextIdx >= sorted.length) {
-    // Neue Runde
+    // Neue Runde — vor dem Save: Blutungs-Tick auf alle bleedenden Token
+    // anwenden (§4.2 kumulativ: Runde 1 −1, Runde 2 −2, ...).
+    try {
+      await $fetch(`/api/groups/${groupId}/maps/${mapId}/tick-bleed`, {
+        method: 'POST',
+      })
+    } catch {
+      // Tick-Bleed-Fehler sollen den Runden-Wechsel nicht blockieren.
+    }
     const entries = s.entries.map((e) => ({ ...e, hasActed: false }))
     await saveInitiative({
       ...s,
@@ -2007,6 +2015,7 @@ const initNextTurn = async () => {
       round: s.round + 1,
       currentIndex: 0,
     })
+    await fetchMap()
   } else {
     // Markiere aktuellen als hasActed
     const entries = s.entries.map((e) =>

@@ -49,6 +49,7 @@ import {
   type HtbahSpellLevel,
   type HtbahUsableItem,
 } from '~~/shared/engines/htbah'
+import { htbahSpellsByLehre } from '~~/shared/engines/htbah-spell-catalog'
 import type { GameSystem } from '~~/shared/systems'
 import SheetSection from '~/components/ui/SheetSection.vue'
 import StatBlock from '~/components/ui/StatBlock.vue'
@@ -152,6 +153,9 @@ const sheet = computed<HtbahCharacterData>(() => {
           ),
           lehren: Array.isArray(incoming.magicState.lehren)
             ? (incoming.magicState.lehren as HtbahSpellLehreId[])
+            : [],
+          knownSpellKeys: Array.isArray(incoming.magicState.knownSpellKeys)
+            ? incoming.magicState.knownSpellKeys.filter((k): k is string => typeof k === 'string')
             : [],
         }
       : undefined,
@@ -451,9 +455,27 @@ const removeSpellLevel = (spellIdx: number, levelIdx: number) => {
 // Button.
 const ensureMagicState = (n: HtbahCharacterData): HtbahMagicState => {
   if (!n.magicState) {
-    n.magicState = { active: true, mana: 0, arkanum: 0, lehren: [] }
+    n.magicState = { active: true, mana: 0, arkanum: 0, lehren: [], knownSpellKeys: [] }
   }
+  if (!n.magicState.knownSpellKeys) n.magicState.knownSpellKeys = []
   return n.magicState
+}
+const toggleKnownSpell = (spellKey: string) => {
+  const n = clone()
+  const ms = ensureMagicState(n)
+  const list = ms.knownSpellKeys ?? []
+  const idx = list.indexOf(spellKey)
+  if (idx >= 0) {
+    list.splice(idx, 1)
+  } else if (list.length < HTBAH_ARKANUM_MAX) {
+    list.push(spellKey)
+  }
+  ms.knownSpellKeys = list
+  // Arkanum auto-sync = Anzahl gelernter Spruechen, max 5.
+  ms.arkanum = Math.min(HTBAH_ARKANUM_MAX, list.length)
+  // Mana max auf neuen Wert clampen.
+  ms.mana = Math.min(ms.mana, htbahManaMax(ms.arkanum))
+  update(n)
 }
 const toggleMagicModule = () => {
   const n = clone()
@@ -1506,6 +1528,35 @@ const postRollToGroup = async () => {
                 @update:model-value="updateWeaponProps(idx, { stangenwaffe: !!$event })"
               />
             </div>
+            <!-- Zeile 5b: Schusswaffen-Distanz-Falloff (Schrotflinte etc.) -->
+            <div class="grid grid-cols-12 gap-2 items-center">
+              <div class="col-span-6 flex items-center gap-1">
+                <span class="text-[10px] text-ink-300 whitespace-nowrap" title="Distanz-Falloff: Vollschaden bis X Meter">Vollschaden bis (m)</span>
+                <UInput
+                  size="xs"
+                  type="number"
+                  min="0"
+                  max="500"
+                  :model-value="w.properties?.falloffStart ?? 0"
+                  placeholder="0"
+                  title="Bis zu dieser Distanz wirkt voller Schaden (Schusswaffen)"
+                  @update:model-value="updateWeaponProps(idx, { falloffStart: Math.max(0, Math.floor(Number($event) || 0)) })"
+                />
+              </div>
+              <div class="col-span-6 flex items-center gap-1">
+                <span class="text-[10px] text-ink-300 whitespace-nowrap" title="Pro Meter über Vollschaden-Distanz: dieser Wert vom Schaden abziehen">Schaden −/Meter</span>
+                <UInput
+                  size="xs"
+                  type="number"
+                  min="0"
+                  max="50"
+                  :model-value="w.properties?.falloffPerMeter ?? 0"
+                  placeholder="0"
+                  title="Schaden-Abzug pro Meter über Vollschaden-Distanz (Schrotflinte ≈ 5)"
+                  @update:model-value="updateWeaponProps(idx, { falloffPerMeter: Math.max(0, Math.floor(Number($event) || 0)) })"
+                />
+              </div>
+            </div>
             <!-- Zeile 6: Notiz -->
             <UInput
               :model-value="w.note ?? ''"
@@ -1901,6 +1952,66 @@ const postRollToGroup = async () => {
             <div class="text-center"><strong>IV</strong>: 20+ (4 Mana)</div>
             <div class="text-center"><strong>V</strong>: 22+ (5 Mana)</div>
           </div>
+
+          <!-- Spruch-Katalog: pro aktivierter Lehre alle 5 Stufen als
+               Toggle-Button. Max 5 Sprüche insgesamt (= Arkanum). -->
+          <details
+            v-if="sheet.magicState.lehren.length"
+            class="border border-parchment-700/30 rounded p-2 bg-white/40"
+            :open="!(sheet.magicState.knownSpellKeys?.length)"
+          >
+            <summary class="cursor-pointer text-xs uppercase tracking-widest text-ink-300 flex items-center justify-between">
+              <span>Sprüche aus Katalog ({{ sheet.magicState.knownSpellKeys?.length ?? 0 }}/{{ HTBAH_ARKANUM_MAX }})</span>
+              <span class="text-[10px] normal-case tracking-normal opacity-70">
+                Klick auf Spruch = lernen / verlernen
+              </span>
+            </summary>
+            <div class="mt-2 space-y-2">
+              <div
+                v-for="lehreId in sheet.magicState.lehren"
+                :key="lehreId"
+                class="border border-parchment-700/20 rounded p-2 bg-white/40"
+              >
+                <div class="font-serif text-sm mb-1">
+                  {{ HTBAH_SPELL_LEHREN.find((l) => l.id === lehreId)?.label ?? lehreId }}
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                  <button
+                    v-for="spell in htbahSpellsByLehre(lehreId)"
+                    :key="spell.key"
+                    type="button"
+                    class="text-left text-[11px] px-2 py-1.5 rounded border transition flex items-start gap-2"
+                    :class="(sheet.magicState.knownSpellKeys ?? []).includes(spell.key)
+                      ? 'bg-[var(--color-accent)]/15 border-[var(--color-accent)] text-ink-700'
+                      : 'bg-white/40 border-parchment-700/30 hover:bg-white/70 text-ink-500'"
+                    :disabled="
+                      !(sheet.magicState.knownSpellKeys ?? []).includes(spell.key)
+                      && (sheet.magicState.knownSpellKeys?.length ?? 0) >= HTBAH_ARKANUM_MAX
+                    "
+                    :title="`${spell.range} · ${spell.manaCost} Mana — ${spell.effect}`"
+                    @click="toggleKnownSpell(spell.key)"
+                  >
+                    <span class="font-mono text-[10px] opacity-70 mt-0.5 shrink-0">
+                      {{ ['I','II','III','IV','V'][spell.stufe - 1] }}
+                    </span>
+                    <span class="flex-1 min-w-0">
+                      <span class="font-semibold block">{{ spell.name }}</span>
+                      <span class="text-[10px] opacity-75 block truncate">{{ spell.effect }}</span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <p class="text-[10px] text-ink-300 mt-2">
+              Maximum 5 Sprüche (Arkanum). Bei vollem Pool gelernte Sprüche zuerst verlernen.
+            </p>
+          </details>
+          <p
+            v-else
+            class="text-[10px] text-ink-300/80 italic"
+          >
+            Wähle oben mindestens eine Lehre, um Sprüche aus dem Katalog lernen zu können.
+          </p>
         </div>
       </div>
 

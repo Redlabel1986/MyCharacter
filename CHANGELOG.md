@@ -21,6 +21,9 @@ HtbaH-Wiki, Mai 2026).
 | `9627313` | Zustände als Auto-Modifikatoren (§4.2)                                    |
 | `53618df` | Kampfmanöver-Buttons (§4.1)                                               |
 | `5147f0d` | Zauberei-Modul (§8): Arkanum, Mana, Komplexitätswurf, 12 Lehren           |
+| `5725bce` | Changelog-Doku                                                            |
+| `662e215` | Changelog im UI sichtbar (für alle)                                       |
+| *(folgt)* | Spell-Katalog + Magie bannen/erkennen + Auto-Blutung + Schuss-Falloff + Impressum/Datenschutz |
 
 ---
 
@@ -402,11 +405,125 @@ gesetzt:
 
 ---
 
-## 10. Was noch nicht drin ist
+## 11. Spell-Katalog (§8.12) — alle 60 Sprüche als One-Click-Lern-Liste
 
-- Pre-built Zauber-Katalog (alle 60 Sprüche aus §8.12 als One-Click-Add).
-- "Regel der Drei"-LP-System (§7.2) und Universalkampfsystem (§3) als Alternativen.
-- Magie-bannen-Workflow (§8.7) und Magie-erkennen-Wurf (§8.8) als dedizierte Buttons.
-- Alternative Magiemodule (Fünfstufenmagie, Sonnen-Magie, Seelensplitter — §8.13).
-- Schusswaffen-Distanz-Falloff bei Schrotflinten (§5.1 Hinweis).
-- Automatisches Blut-Tick (Blutend n LP / Runde, kumulativ — §4.2) — aktuell als Sticker, ohne Auto-Decrement.
+`shared/engines/htbah-spell-catalog.ts` enthält den kompletten Katalog —
+12 Lehren × 5 Stufen = 60 Sprüche mit Name, Reichweite, Mana-Kosten,
+Effekt-Beschreibung und Aufladbar-Flag.
+
+**Datenmodell-Erweiterung**:
+
+```ts
+HtbahMagicState.knownSpellKeys?: string[]   // <lehre>:<stufe>:<slug>
+```
+
+**Im Charakterbogen** (Magie-Sektion → Sprüche aus Katalog):
+
+- Pro aktivierter Lehre erscheinen alle 5 Stufen als Toggle-Buttons.
+- Klick = lernen / verlernen. Max 5 gelernte Sprüche (= Arkanum).
+- Arkanum wird automatisch auf `knownSpellKeys.length` gesetzt.
+- Mana max = Arkanum × 2 wird neu berechnet, Mana current entsprechend
+  geclampt.
+- Gelernte Sprüche werden visuell mit Akzent-Farbe hervorgehoben.
+
+**Im Mini-CharSheet Quick-Cast**:
+
+- Wenn der Spieler Sprüche gelernt hat, erscheint ein zusätzliches
+  Dropdown „Gelernter Spruch" vor dem freien Spruchnamen-Feld.
+- Auswahl pre-füllt automatisch Spruchname + Stufe + Lehre.
+- Sentinel `__free__` lässt freie Eingabe zu.
+
+---
+
+## 12. Magie bannen (§8.7) + Magie erkennen (§8.8)
+
+**Magie erkennen** (`POST /api/groups/:id/magic/detect`):
+
+```
+1W10 + Arkanum >= 7  →  Magie erkannt (kein Mana-Verbrauch)
+```
+
+- Eigener Button im Magie-Quick-Cast-Popup unten.
+- Kostet **kein Mana** (anders als reguläre Sprüche).
+- Postet Roll-Message im Chat.
+
+**Magie bannen** (`POST /api/groups/:id/magic/dispel`):
+
+```
+Wirker: 1W10 + Arkanum (kostet 1 Mana)
+Ziel:   1W10 + Arkanum (kostet 1 Mana, wenn Ziel-Charakter mit aktivem Magie-Modul)
+Wirker >= Ziel  →  Magie gebannt
+```
+
+- Eigener Button im Magie-Quick-Cast-Popup.
+- Wirker zahlt **immer 1 Mana**, unabhängig vom Ergebnis (Regelwerk).
+- Bei aktivem Ziel-Charakter: Ziel zahlt ebenfalls 1 Mana (Server zieht das
+  automatisch ab).
+- Ties gehen an den Wirker (pragmatische Auslegung).
+
+---
+
+## 13. Auto-Blutung-Tick (§4.2)
+
+Vor dem Übergang in eine neue Initiative-Runde ruft der SL-Tracker
+automatisch `POST /api/groups/:id/maps/:mapId/tick-bleed` auf:
+
+1. Server sucht alle Token auf der Karte mit `bleeding`-Condition im
+   `statusText`.
+2. Liest pro Token den Counter `bleed:N` aus den Custom-Labels des
+   statusText (Default 1, wenn nicht vorhanden).
+3. Subtrahiert **N LP** vom Token (Charakter-HP oder NPC-HP).
+   Rüstung wirkt **nicht** — die Wunde blutet von innen.
+4. Inkrementiert den Counter auf `bleed:(N+1)` und schreibt ihn zurück.
+
+→ Erste Blutungsrunde: −1 LP. Zweite: −2 LP. Dritte: −3 LP. (Kumulativ
+laut Regelwerk.)
+
+Soll die Blutung enden, muss der SL die `bleeding`-Condition vom Token
+entfernen (z.B. nach erfolgreichem Erste-Hilfe-Wurf).
+
+---
+
+## 14. Schusswaffen-Distanz-Falloff (§5.1 Hinweis)
+
+Zwei neue Waffeneigenschaften im Datenmodell:
+
+```ts
+HtbahWeaponProperties.falloffStart      // Vollschaden bis X Meter
+HtbahWeaponProperties.falloffPerMeter   // Schaden-Abzug pro Meter darüber
+```
+
+**Beispiel** Schrotflinte: `{ falloffStart: 5, falloffPerMeter: 5 }` —
+bis 5 m Vollschaden, danach −5 Schaden pro Meter.
+
+Im Charakterbogen als zwei zusätzliche Number-Inputs im Waffen-Editor.
+Die Verrechnung beim Schadenswurf bleibt aktuell SL-seitig — der
+Spieler trägt die Distanz selbst als Modifier ein (siehe Notizfeld
+beim Wurf).
+
+---
+
+## 15. Impressum + Datenschutz
+
+Zwei neue Doku-Seiten — sichtbar im Footer beider Layouts (default + wide),
+auch für nicht-eingeloggte Besucher:
+
+- `/impressum` — privater, nicht-kommerzieller Verantwortlichen-Hinweis
+  (§5 DDG). Lizenz-Hinweise für HtbaH, D&D-SRD, DSA.
+- `/datenschutz` — DSGVO-konforme Datenschutzerklärung. Schlank
+  gehalten: nur Account/Session-Cookies/Spieldaten, keine Tracker,
+  keine Analytics. Drittanbieter-Hinweise zu Vercel, Pusher, Anthropic.
+
+Die `changelog-prose`-Styles wurden aus `pages/changelog.vue` in
+`assets/css/main.css` extrahiert und sind jetzt global verfügbar — alle
+drei Doku-Seiten teilen sich dasselbe Markdown-/Prosa-Styling.
+
+---
+
+## 16. Was noch nicht drin ist
+
+- "Regel der Drei"-LP-System (§7.2) und Universalkampfsystem (§3)
+  als alternative Module — sind eigenständige Subsysteme mit Modul-
+  Switching, das wäre eine größere Sache.
+- Alternative Magiemodule (Fünfstufenmagie, Sonnen-Magie,
+  Seelensplitter — §8.13).

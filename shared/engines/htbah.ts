@@ -294,6 +294,17 @@ export interface HtbahWeaponProperties {
   schwer?: number
   schwert?: boolean
   stangenwaffe?: boolean
+  /**
+   * Schusswaffen-Distanz-Falloff (Regelwerk §5.1 Hinweis zu Schrotflinten).
+   * Vollschaden bis `falloffStart` Meter, danach pro weiterem Meter `falloffPerMeter`
+   * Schaden weniger. Wird beim Schadenswurf clientseitig vom Modifier abgezogen,
+   * wenn der Spieler die Distanz mit angibt. Default beide 0 = kein Falloff.
+   *
+   * Beispiel Schrotflinte: { falloffStart: 5, falloffPerMeter: 5 } — bis 5 m
+   * Vollschaden, danach −5 Schaden pro Meter darueber.
+   */
+  falloffStart?: number
+  falloffPerMeter?: number
 }
 
 /**
@@ -572,10 +583,16 @@ export interface HtbahMagicState {
   arkanum: number
   /** Gelernte Lehren-IDs (max 3). */
   lehren: HtbahSpellLehreId[]
+  /**
+   * Spell-Keys (`lehre:stufe:slug`) aus dem Katalog (siehe htbah-spell-catalog.ts).
+   * Anzahl = Arkanum (bei aktivem Katalog-Modus). Optional — wenn leer, kann der
+   * Spieler immer noch freihaendig zaubern (Spruchname-Eingabe).
+   */
+  knownSpellKeys?: string[]
 }
 
 export function createBlankMagicState(): HtbahMagicState {
-  return { active: false, mana: 0, arkanum: 0, lehren: [] }
+  return { active: false, mana: 0, arkanum: 0, lehren: [], knownSpellKeys: [] }
 }
 
 /**

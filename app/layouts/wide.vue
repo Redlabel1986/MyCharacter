@@ -135,8 +135,17 @@ const returnToAdminView = async () => {
       <slot />
     </main>
 
-    <footer class="no-print py-3 text-center text-xs text-ink-300">
-      Selbst gehostet · DSA-Inhalte © Ulisses Spiele · D&D-SRD CC-BY 4.0 Wizards of the Coast · HtbaH © Sebastian Wenzel
+    <footer class="no-print py-3 text-center text-xs text-ink-300 space-y-1">
+      <div>
+        Selbst gehostet · DSA-Inhalte © Ulisses Spiele · D&D-SRD CC-BY 4.0 Wizards of the Coast · HtbaH © Sebastian Wenzel
+      </div>
+      <div class="flex justify-center gap-3 flex-wrap">
+        <NuxtLink to="/impressum" class="hover:text-[var(--color-accent)]">Impressum</NuxtLink>
+        <span>·</span>
+        <NuxtLink to="/datenschutz" class="hover:text-[var(--color-accent)]">Datenschutz</NuxtLink>
+        <span>·</span>
+        <NuxtLink to="/changelog" class="hover:text-[var(--color-accent)]">Changelog</NuxtLink>
+      </div>
     </footer>
   </div>
 </template>

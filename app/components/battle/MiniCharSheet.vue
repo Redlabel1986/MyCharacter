@@ -30,6 +30,7 @@ import {
   type HtbahSpellLevel,
   type HtbahUsableItem,
 } from '~~/shared/engines/htbah'
+import { HTBAH_SPELL_BY_KEY } from '~~/shared/engines/htbah-spell-catalog'
 import {
   DND_ABILITIES,
   DND_SKILLS,
@@ -992,6 +993,25 @@ const castOpen = ref(false)
 const castSpellName = ref('')
 const castSpellLevel = ref<1 | 2 | 3 | 4 | 5>(1)
 const castLehre = ref('')
+// Gelernte Spruechen (aus magicState.knownSpellKeys) als Auswahloptionen
+// fuer den Quick-Cast. Wenn keine Sprueche gelernt sind, faellt das Popup
+// auf den freien Eingabemodus zurueck (castSpellName).
+type HtbahCatalogEntry = (typeof HTBAH_SPELL_BY_KEY)[string]
+const knownSpellOptions = computed<HtbahCatalogEntry[]>(() => {
+  const keys = htbahData.value?.magicState?.knownSpellKeys ?? []
+  return keys
+    .map((k: string) => HTBAH_SPELL_BY_KEY[k])
+    .filter((s: HtbahCatalogEntry | undefined): s is HtbahCatalogEntry => !!s)
+})
+const selectedKnownKey = ref<string>('')
+watch(selectedKnownKey, (key: string) => {
+  if (!key) return
+  const spell = HTBAH_SPELL_BY_KEY[key]
+  if (!spell) return
+  castSpellName.value = spell.name
+  castSpellLevel.value = spell.stufe
+  castLehre.value = spell.lehre
+})
 const castSending = ref(false)
 const castError = ref<string | null>(null)
 const castLastResult = ref<{
@@ -1004,6 +1024,51 @@ const castLastResult = ref<{
   manaCost: number
   manaAfter: number
 } | null>(null)
+
+const detectMagicSending = ref(false)
+const detectMagic = async () => {
+  if (!character.value || !hasMagic.value) return
+  detectMagicSending.value = true
+  try {
+    await $fetch(`/api/groups/${props.groupId}/magic/detect`, {
+      method: 'POST',
+      body: { characterId: character.value.id },
+    })
+  } catch (e: unknown) {
+    castError.value =
+      (e as { statusMessage?: string }).statusMessage ?? 'Magie-Erkennen fehlgeschlagen.'
+  } finally {
+    detectMagicSending.value = false
+  }
+}
+
+const dispelMagicSending = ref(false)
+const dispelMagic = async () => {
+  if (!character.value || !hasMagic.value) return
+  if (mana.value < 1) {
+    castError.value = 'Nicht genug Mana (1 benötigt).'
+    return
+  }
+  dispelMagicSending.value = true
+  try {
+    await $fetch(`/api/groups/${props.groupId}/magic/dispel`, {
+      method: 'POST',
+      body: { characterId: character.value.id },
+    })
+    // Char neu laden — Mana wurde abgezogen.
+    if (character.value) {
+      const updated = await $fetch<{ character: CharacterFull }>(
+        `/api/characters/${character.value.id}`,
+      )
+      character.value = updated.character
+    }
+  } catch (e: unknown) {
+    castError.value =
+      (e as { statusMessage?: string }).statusMessage ?? 'Magie-Bannen fehlgeschlagen.'
+  } finally {
+    dispelMagicSending.value = false
+  }
+}
 
 const castSpell = async () => {
   if (!character.value || !hasMagic.value) return
@@ -1690,6 +1755,25 @@ const onImageError = (tokenId: number) => {
           <span>Zauber wirken — Komplexitätswurf (§8.5)</span>
           <span class="font-mono normal-case tracking-normal">Arkanum {{ arkanum }} · Mana {{ mana }}/{{ manaMax }}</span>
         </div>
+        <!-- Wenn der Spieler Sprueche aus dem Katalog gelernt hat: Dropdown.
+             Andernfalls: freie Eingabe. -->
+        <UFormField
+          v-if="knownSpellOptions.length"
+          label="Gelernter Spruch"
+        >
+          <USelect
+            v-model="selectedKnownKey"
+            :items="[
+              { label: '— freie Eingabe —', value: '__free__' },
+              ...knownSpellOptions.map((s) => ({
+                label: `${['I','II','III','IV','V'][s.stufe - 1]} · ${s.name} (${s.manaCost} Mana)`,
+                value: s.key,
+              })),
+            ]"
+            value-key="value"
+            size="sm"
+          />
+        </UFormField>
         <UFormField label="Spruchname">
           <UInput
             v-model="castSpellName"
@@ -1768,6 +1852,33 @@ const onImageError = (tokenId: number) => {
         <p class="text-[10px] text-ink-300/80">
           2+ Einser = krit. Misserfolg · 2+ Zehner = krit. Erfolg (kein Mana)
         </p>
+
+        <!-- Magie erkennen + Magie bannen — separate Quick-Wuerfe (§8.7/§8.8) -->
+        <div class="grid grid-cols-2 gap-2 pt-2 border-t border-parchment-700/30">
+          <UButton
+            size="xs"
+            variant="outline"
+            color="primary"
+            icon="i-lucide-search"
+            :loading="detectMagicSending"
+            title="Magie erkennen (1W10 + Arkanum ≥ 7, kostet kein Mana)"
+            @click="detectMagic"
+          >
+            Magie erkennen
+          </UButton>
+          <UButton
+            size="xs"
+            variant="outline"
+            color="primary"
+            icon="i-lucide-shield-off"
+            :loading="dispelMagicSending"
+            :disabled="mana < 1"
+            title="Magie bannen (1W10 + Arkanum gegen Ziel-Wurf, kostet 1 Mana)"
+            @click="dispelMagic"
+          >
+            Magie bannen (1 Mana)
+          </UButton>
+        </div>
       </div>
 
       <!-- Kampfmanoever-Popup: setzt Modifier + Notiz vor, Spieler klickt dann

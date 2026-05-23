@@ -387,6 +387,133 @@ html.app-mode-active .battle-stage-wrap {
   to { opacity: 1; }
 }
 
+/* ============================================================
+   Doku-Prose (Changelog, Impressum, Datenschutz)
+   Globale Variante, damit alle Doku-Seiten dasselbe Look haben,
+   ohne dass jede Page das CSS dupliziert.
+   ============================================================ */
+.changelog-prose h1,
+.changelog-prose :deep(h1) {
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: 2rem;
+  line-height: 1.2;
+  margin: 0 0 0.75rem;
+  color: var(--color-ink-700);
+  border-bottom: 2px solid color-mix(in srgb, var(--color-accent) 60%, transparent);
+  padding-bottom: 0.5rem;
+}
+.changelog-prose h2,
+.changelog-prose :deep(h2) {
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: 1.5rem;
+  line-height: 1.25;
+  margin: 1.75rem 0 0.5rem;
+  color: var(--color-ink-700);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-parchment-700) 35%, transparent);
+  padding-bottom: 0.25rem;
+}
+.changelog-prose h3,
+.changelog-prose :deep(h3) {
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: 1.2rem;
+  line-height: 1.3;
+  margin: 1.25rem 0 0.4rem;
+  color: var(--color-ink-500);
+}
+.changelog-prose p,
+.changelog-prose :deep(p) {
+  margin: 0 0 0.85rem;
+  line-height: 1.55;
+}
+.changelog-prose ul,
+.changelog-prose ol,
+.changelog-prose :deep(ul),
+.changelog-prose :deep(ol) {
+  margin: 0 0 0.85rem;
+  padding-left: 1.5rem;
+}
+.changelog-prose ul,
+.changelog-prose :deep(ul) { list-style: disc; }
+.changelog-prose ol,
+.changelog-prose :deep(ol) { list-style: decimal; }
+.changelog-prose li,
+.changelog-prose :deep(li) { margin: 0.2rem 0; line-height: 1.5; }
+.changelog-prose strong,
+.changelog-prose :deep(strong) { color: var(--color-ink-700); }
+.changelog-prose em,
+.changelog-prose :deep(em) { font-style: italic; color: var(--color-ink-500); }
+.changelog-prose a,
+.changelog-prose :deep(a) { color: var(--color-accent); text-decoration: underline; }
+.changelog-prose a:hover,
+.changelog-prose :deep(a:hover) { text-decoration: none; }
+.changelog-prose code,
+.changelog-prose :deep(code) {
+  font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: color-mix(in srgb, var(--color-parchment-700) 18%, transparent);
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.25rem;
+  color: var(--color-ink-700);
+}
+.changelog-prose pre,
+.changelog-prose :deep(pre) {
+  background: rgba(0, 0, 0, 0.04);
+  border: 1px solid color-mix(in srgb, var(--color-parchment-700) 30%, transparent);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+  margin: 0 0 1rem;
+  font-size: 0.85em;
+  line-height: 1.5;
+}
+.changelog-prose pre code,
+.changelog-prose :deep(pre code) { background: transparent; padding: 0; border-radius: 0; }
+.changelog-prose table,
+.changelog-prose :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 1rem;
+  font-size: 0.92rem;
+}
+.changelog-prose th,
+.changelog-prose td,
+.changelog-prose :deep(th),
+.changelog-prose :deep(td) {
+  border: 1px solid color-mix(in srgb, var(--color-parchment-700) 35%, transparent);
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+.changelog-prose th,
+.changelog-prose :deep(th) {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  font-weight: 600;
+}
+.changelog-prose tr:nth-child(even) td,
+.changelog-prose :deep(tr:nth-child(even) td) { background: rgba(0, 0, 0, 0.018); }
+.changelog-prose hr,
+.changelog-prose :deep(hr) {
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--color-parchment-700) 35%, transparent);
+  margin: 1.5rem 0;
+}
+.changelog-prose blockquote,
+.changelog-prose :deep(blockquote) {
+  border-left: 3px solid var(--color-accent);
+  margin: 0 0 1rem;
+  padding: 0.25rem 0 0.25rem 0.85rem;
+  color: var(--color-ink-500);
+  font-style: italic;
+}
+@media (max-width: 640px) {
+  .changelog-prose h1,
+  .changelog-prose :deep(h1) { font-size: 1.5rem; }
+  .changelog-prose h2,
+  .changelog-prose :deep(h2) { font-size: 1.25rem; }
+  .changelog-prose table,
+  .changelog-prose :deep(table) { display: block; overflow-x: auto; }
+}
+
 /* Mobile-Touch-Polish: größere Tap-Targets, weniger horizontales Padding,
    Buttons werden auf kleinen Bildschirmen mit etwas mehr Höhe gerendert. */
 @media (max-width: 640px) {
