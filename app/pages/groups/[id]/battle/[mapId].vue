@@ -4519,7 +4519,7 @@ const endResize = () => {
           </UFormField>
           <UFormField
             label="Bewegungsfeld (Felder pro Zug)"
-            help="Wie viele Felder darf der Token pro Bewegung weit ziehen? Default 8. 0 = frei (kein Limit)."
+            help="Wie viele Felder darf der Token pro Bewegung ziehen? Default 8. 0 = frei (kein Limit)."
           >
             <UInput v-model.number="editing.moveRange" type="number" min="0" max="200" />
           </UFormField>

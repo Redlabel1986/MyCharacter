@@ -183,6 +183,40 @@ export interface RollPayload {
    * Trefferanzeige (Ruestung/finalDamage) einzublenden.
    */
   freeRoll?: boolean
+  /**
+   * HtbaH-Waffen-Sonderregel "Schlagwaffe": jeder 1er des Schadens-Wurfs
+   * wird einmal neu gewuerfelt. Hier landen die Reroll-Eintraege fuer die
+   * Chat-Anzeige ("Wuerfel #2: 1 → 7"). Leer/undefined wenn keine Reroll-
+   * Eigenschaft aktiv war.
+   */
+  schlagwaffeRerolls?: Array<{ index: number; from: number; to: number }>
+  /**
+   * HtbaH-Waffen-Sonderregel "Ruestungsbrechend X": Wert der durch die Waffe
+   * negierten RW-Punkte. RollCard zeigt das als "Ruestungsbrechend −X" im
+   * Chat an. Der eigentliche Abzug ist bereits in `finalDamage`/`targetArmor`
+   * eingerechnet.
+   */
+  armorBreak?: number
+  /**
+   * HtbaH-Waffen-Kategorie (stumpf/hieb/stich/fernkampf/wurf/sonstige). Dient
+   * der reinen Chat-Darstellung — die Mechanik laeuft ueber armorBreak,
+   * schlagwaffeRerolls und das Aufspießen-Flag in der Probe.
+   */
+  weaponCategory?: 'stumpf' | 'hieb' | 'stich' | 'fernkampf' | 'wurf' | 'sonstige'
+  /**
+   * HtbaH-Waffen-Sonderregel "Aufspießen": gesetzt, wenn die Probe mit dieser
+   * Eigenschaft gewuerfelt wurde. RollCard zeigt das im Chat als Hinweis und
+   * weist auf den verbreiterten Krit-Bereich hin. Beim Krit-Erfolg darf der SL
+   * der Ziel-Ruestung dauerhaft −1 RW an einem Slot eintragen (manuell).
+   */
+  aufspiessen?: boolean
+  /**
+   * HtbaH-Waffen-Sonderregel "Jagdwaffe": +15 auf den Trefferwurf gegen Ziele
+   * mit niedrigem RW. Hier wird der tatsaechlich angewandte Bonus festgehalten
+   * (0, wenn das Ziel den Schwellwert ueberschritten hat oder kein Ziel
+   * gepflegt war).
+   */
+  huntingBonus?: number
 }
 
 export type MessagePayload = CharacterSharePayload | RollPayload | null

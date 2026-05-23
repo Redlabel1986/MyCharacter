@@ -30,6 +30,16 @@ interface RollPayload {
   damageKind?: 'damage' | 'heal'
   /** Marker fuer freie NdM±X-Wuerfe (Schaden/Heilung/Misc). */
   freeRoll?: boolean
+  /** Stumpfwaffen-Reroll (Server-seitig): jeder 1er einmal neu gewuerfelt. */
+  schlagwaffeRerolls?: Array<{ index: number; from: number; to: number }>
+  /** Ruestungsbrechend X — Reduktion der Ziel-RW. */
+  armorBreak?: number
+  /** Anzeige der Waffen-Kategorie ("stumpf"/"hieb"/"stich"/…). */
+  weaponCategory?: 'stumpf' | 'hieb' | 'stich' | 'fernkampf' | 'wurf' | 'sonstige'
+  /** Probe wurde mit "Aufspießen"-Eigenschaft gewuerfelt (Krit-Bereich x2). */
+  aufspiessen?: boolean
+  /** Jagdwaffen-Bonus +15 auf den Trefferwurf (bereits in target eingerechnet). */
+  huntingBonus?: number
 }
 
 const props = defineProps<{ payload: RollPayload; mine: boolean }>()
@@ -178,12 +188,44 @@ const hasHealBreakdown = computed(
         <span class="font-mono">{{ payload.target }}</span>
         <template v-if="(payload.targetArmor ?? 0) > 0">
           − Rüstung <span class="font-mono">{{ payload.targetArmor }}</span>
+          <template v-if="(payload.armorBreak ?? 0) > 0">
+            (Rüstungsbrechend −{{ payload.armorBreak }})
+          </template>
           = <span class="font-mono">{{ payload.finalDamage }}</span> Schaden
+        </template>
+        <template v-else-if="(payload.armorBreak ?? 0) > 0">
+          (Rüstungsbrechend −{{ payload.armorBreak }} negiert die RW komplett) Schaden
         </template>
         <template v-else>
           Schaden (Ziel ohne Rüstung)
         </template>
         <template v-if="payload.targetName"> an {{ payload.targetName }}</template>
+      </div>
+      <!-- Stumpfwaffen-Reroll (1er → neuer Wert) — transparent dargestellt -->
+      <div
+        v-if="payload.schlagwaffeRerolls && payload.schlagwaffeRerolls.length"
+        class="text-[10px] opacity-80"
+      >
+        🔨 Schlagwaffe-Reroll:
+        <template
+          v-for="(r, i) in payload.schlagwaffeRerolls"
+          :key="i"
+        >
+          <span class="font-mono">{{ r.from }}→{{ r.to }}</span><template v-if="i < payload.schlagwaffeRerolls.length - 1">, </template>
+        </template>
+      </div>
+      <!-- Jagdwaffen-Bonus / Aufspießen-Hinweis im Probenwurf -->
+      <div
+        v-if="payload.huntingBonus && payload.huntingBonus > 0"
+        class="text-[10px] font-semibold opacity-80"
+      >
+        🎯 Jagdwaffe +{{ payload.huntingBonus }} (Ziel hat niedrige Rüstung)
+      </div>
+      <div
+        v-if="payload.aufspiessen"
+        class="text-[10px] font-semibold opacity-80"
+      >
+        🗡 Aufspießen — Krit-Bereich verdoppelt (Krit beschädigt Rüstung um −1 RW dauerhaft)
       </div>
       <!-- Heilung gegen Ziel: voller Wurf wird zugefuehrt. -->
       <div v-if="hasHealBreakdown" class="font-semibold">

@@ -22,6 +22,7 @@ import {
   type CharSystem,
 } from '~~/shared/character-hp'
 import {
+  htbahEffectiveArmor,
   htbahTotalArmor,
   type HtbahCharacterData,
 } from '~~/shared/engines/htbah'
@@ -29,6 +30,18 @@ import {
 const bodySchema = z.object({
   amount: z.number().int().min(0).max(100000),
   kind: z.enum(['damage', 'heal']),
+  /**
+   * HtbaH-Waffen-Sonderregel "Ruestungsbrechend X": reduziert den RW des Ziels
+   * um X (max 50). Wird bei Schaden angewandt; bei Heilung ignoriert.
+   */
+  armorBreak: z.number().int().min(0).max(50).optional(),
+  /**
+   * HtbaH-Stichwaffen-Sonderregel "Aufspießen" + Krit-Treffer: zieht
+   * zusaetzlich −1 RW dauerhaft von einem (zufaellig gewaehlten) Ruestungs-
+   * Teil ab. Wird nur gesetzt, wenn der Trefferwurf KRIT war UND die Waffe
+   * "Aufspießen" trug.
+   */
+  aufspiessenCrit: z.boolean().optional(),
 })
 
 export default defineEventHandler(async (event) => {
@@ -95,11 +108,34 @@ export default defineEventHandler(async (event) => {
   // ihre eigene Logik hier ergaenzen.
   let absorbed = 0
   let applied = body.amount
+  let armorBreakUsed = 0
+  let aufspiessenArmorLoss: { slot: string | null; pieceId: string | null } | null = null
   if (body.kind === 'damage' && charSystem === 'htbah' && charData) {
-    const armor = htbahTotalArmor(charData as HtbahCharacterData)
-    if (armor > 0) {
-      absorbed = Math.min(armor, body.amount)
-      applied = Math.max(0, body.amount - armor)
+    // Ruestungsbrechend X: reduziert RW vor dem Abzug. Wenn die Ruestungs-
+    // Reduktion komplett aufgeht (RW → 0), bleibt absorbed = 0.
+    const breakX = Math.max(0, Math.floor(body.armorBreak ?? 0))
+    const effectiveArmor = htbahEffectiveArmor(charData as HtbahCharacterData, breakX)
+    armorBreakUsed = breakX > 0 ? Math.min(breakX, htbahTotalArmor(charData as HtbahCharacterData)) : 0
+    if (effectiveArmor > 0) {
+      absorbed = Math.min(effectiveArmor, body.amount)
+      applied = Math.max(0, body.amount - effectiveArmor)
+    }
+
+    // Aufspießen + Krit: dauerhafter −1 RW an einem Slot. Wir picken das erste
+    // Teil mit value > 0 (deterministisch, fuer Reproduzierbarkeit). Wenn
+    // alle Teile bei 0 sind, passiert nichts.
+    if (body.aufspiessenCrit) {
+      const cd = charData as HtbahCharacterData
+      const pieces = cd.armor ?? []
+      const idx = pieces.findIndex((p) => (p.value || 0) > 0)
+      if (idx >= 0) {
+        const piece = pieces[idx]!
+        const before = piece.value
+        const after = Math.max(0, before - 1)
+        pieces[idx] = { ...piece, value: after }
+        cd.armor = pieces
+        aufspiessenArmorLoss = { slot: piece.slot ?? null, pieceId: piece.id }
+      }
     }
   }
 
@@ -133,5 +169,7 @@ export default defineEventHandler(async (event) => {
     hpMax: maxHp,
     absorbed,
     applied,
+    armorBreakUsed,
+    aufspiessenArmorLoss,
   }
 })

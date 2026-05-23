@@ -3,6 +3,13 @@ import {
   HTBAH_TALENTS,
   HTBAH_TALENT_LABELS,
   HTBAH_SKILL_CAP,
+  HTBAH_ARMOR_SLOTS,
+  HTBAH_ARMOR_SLOT_LABELS,
+  HTBAH_ARMOR_TAGS,
+  HTBAH_ARMOR_TAG_LABELS,
+  HTBAH_WEAPON_CATEGORIES,
+  HTBAH_WEAPON_CATEGORY_LABELS,
+  HTBAH_DC_PRESETS,
   htbahSkillTotal,
   htbahTalentValue,
   htbahInsightMax,
@@ -13,6 +20,7 @@ import {
   htbahStatus,
   htbahRollProbe,
   htbahCritThreshold,
+  htbahCritThresholdAufspiessen,
   htbahFumbleThreshold,
   htbahQualityLabel,
   normalizeHtbahPurse,
@@ -24,7 +32,11 @@ import {
   type HtbahPerk,
   type HtbahPurse,
   type HtbahArmorPiece,
+  type HtbahArmorSlot,
+  type HtbahArmorTag,
   type HtbahWeaponEntry,
+  type HtbahWeaponCategory,
+  type HtbahWeaponProperties,
   type HtbahSpellEntry,
   type HtbahSpellLevel,
   type HtbahUsableItem,
@@ -183,10 +195,34 @@ const applyPurseNormalize = () => {
 // Wird beim Schadenswurf vom eingehenden Schaden abgezogen. Summe siehe
 // htbahTotalArmor(); im Bogen pflegt der Spieler beliebig viele Teile.
 const totalArmor = computed(() => htbahTotalArmor(sheet.value))
+const armorSlotOptions = [
+  { label: '— Slot —', value: '' },
+  ...HTBAH_ARMOR_SLOTS.map((s) => ({ label: HTBAH_ARMOR_SLOT_LABELS[s], value: s })),
+]
+const armorTagOptions = [
+  { label: '— Klasse —', value: '' },
+  ...HTBAH_ARMOR_TAGS.map((t) => ({ label: HTBAH_ARMOR_TAG_LABELS[t], value: t })),
+]
+const weaponCategoryOptions = [
+  { label: '— Kategorie —', value: '' },
+  ...HTBAH_WEAPON_CATEGORIES.map((c) => ({
+    label: HTBAH_WEAPON_CATEGORY_LABELS[c],
+    value: c,
+  })),
+]
+const attackSkillOptions = computed(() => [
+  { label: '— Trefferwurf-Skill (optional) —', value: '' },
+  ...sheet.value.skills
+    .filter((s: HtbahSkill) => s.name?.trim())
+    .map((s: HtbahSkill) => ({
+      label: `${s.name} (${HTBAH_TALENT_LABELS[s.talent]} · FW ${htbahSkillTotal(sheet.value, s)})`,
+      value: s.id,
+    })),
+])
 const addArmor = () => {
   const n = clone()
   if (!n.armor) n.armor = []
-  n.armor.push({ id: crypto.randomUUID(), name: '', value: 0 })
+  n.armor.push({ id: crypto.randomUUID(), name: '', value: 0, slot: 'other' })
   update(n)
 }
 const updateArmor = (idx: number, patch: Partial<HtbahArmorPiece>) => {
@@ -205,12 +241,45 @@ const removeArmor = (idx: number) => {
   n.armor = list
   update(n)
 }
+// Vue-Template kann TS-Casts nicht — daher diese duennen Wrapper im Script,
+// die die Slot/Tag-Werte typsicher zuruecksetzen.
+const setArmorSlot = (idx: number, raw: unknown) => {
+  const v = String(raw)
+  const slot = (HTBAH_ARMOR_SLOTS as readonly string[]).includes(v)
+    ? (v as HtbahArmorSlot)
+    : 'other'
+  updateArmor(idx, { slot })
+}
+const setArmorTag = (idx: number, raw: unknown) => {
+  const v = String(raw)
+  const tag = (HTBAH_ARMOR_TAGS as readonly string[]).includes(v)
+    ? (v as HtbahArmorTag)
+    : undefined
+  updateArmor(idx, { tag })
+}
+const setWeaponCategory = (idx: number, raw: unknown) => {
+  const v = String(raw)
+  const category = (HTBAH_WEAPON_CATEGORIES as readonly string[]).includes(v)
+    ? (v as HtbahWeaponCategory)
+    : 'sonstige'
+  updateWeapon(idx, { category })
+}
+const setWeaponAttackSkill = (idx: number, raw: unknown) => {
+  const v = String(raw ?? '')
+  updateWeapon(idx, { attackSkillId: v ? v : undefined })
+}
 
 // --- Waffen ---
 const addWeapon = () => {
   const n = clone()
   if (!n.weapons) n.weapons = []
-  n.weapons.push({ id: crypto.randomUUID(), name: '', damageFormula: '' })
+  n.weapons.push({
+    id: crypto.randomUUID(),
+    name: '',
+    damageFormula: '',
+    category: 'sonstige',
+    properties: {},
+  })
   update(n)
 }
 const updateWeapon = (idx: number, patch: Partial<HtbahWeaponEntry>) => {
@@ -219,6 +288,18 @@ const updateWeapon = (idx: number, patch: Partial<HtbahWeaponEntry>) => {
   const current = list[idx]
   if (!current) return
   list[idx] = { ...current, ...patch }
+  n.weapons = list
+  update(n)
+}
+const updateWeaponProps = (idx: number, patch: Partial<HtbahWeaponProperties>) => {
+  const n = clone()
+  const list = n.weapons ?? []
+  const current = list[idx]
+  if (!current) return
+  list[idx] = {
+    ...current,
+    properties: { ...(current.properties ?? {}), ...patch },
+  }
   n.weapons = list
   update(n)
 }
@@ -1004,131 +1085,256 @@ const postRollToGroup = async () => {
       </p>
     </SheetSection>
 
-    <SheetSection title="Ruestung & Waffen" class="lg:col-span-2">
-      <!-- Ruestung: Summe wird beim Schadenswurf vom eingehenden Schaden abgezogen. -->
-      <div class="space-y-2">
-        <div class="flex items-baseline justify-between gap-2">
-          <div class="text-xs uppercase tracking-widest text-ink-300">
-            Ruestung
-            <span class="text-[10px] normal-case tracking-normal text-ink-300/70">
-              · Summe wird beim Schadenswurf abgezogen
-            </span>
+    <SheetSection title="Kampfbogen — Rüstung & Waffen" class="lg:col-span-3">
+      <!-- Regel-Spickzettel (klappbar). Bewusst kompakt: Spieler/SL haben die
+           wichtigsten Sonderregeln direkt griffbereit, ohne den Bogen zu
+           sprengen. -->
+      <details class="mb-3 border border-parchment-700/30 rounded p-2 bg-white/30">
+        <summary class="cursor-pointer text-xs uppercase tracking-widest text-ink-300">
+          📖 Regeln: Waffen vs. Rüstung
+        </summary>
+        <div class="text-xs text-ink-300 mt-2 space-y-2 leading-relaxed">
+          <p>
+            <strong>Rüstung (RW)</strong>: Summe aller Schutzwerte wird beim
+            Schadenswurf vom Schaden abgezogen (erweitertes Modul, 0–50).
+            Mehrere Teile pro Slot sind erlaubt — der RW summiert sich.
+          </p>
+          <p>
+            <strong>Stumpfwaffen</strong> (Hammer, Keule, Streitkolben):
+            „Schlagwaffe" — jeder 1er beim Schadenswurf darf einmal neu
+            gewürfelt werden. Schwere Stumpfwaffen haben oft zusätzlich
+            <em>Rüstungsbrechend</em> (Streitkolben −30, Morgenstern −30).
+          </p>
+          <p>
+            <strong>Hiebwaffen</strong> (Schwert, Axt, Säbel): Allrounder,
+            meist ohne Sonderregel. Untertyp <em>Jagdwaffe</em>: +15 auf den
+            Trefferwurf gegen Gegner mit RW ≤ Schwelle (typ. ≤ 15).
+          </p>
+          <p>
+            <strong>Stichwaffen</strong> (Speer, Degen, Rapier, Stechschwert):
+            <em>Rüstungsbrechend</em> (Stechschwert −15, Panzerstecher −30)
+            ODER <em>Aufspießen</em> (Krit-Bereich ≤ 20 % statt 10 % des FW;
+            Krit beschädigt die Rüstung dauerhaft um −1 RW).
+          </p>
+          <p class="text-ink-300/70">
+            Beispiele: Streitkolben 3d10+10 (Schlag, RB-30) · Stechschwert
+            4d10+3 (RB-15) · Degen 4d10 (Aufspießen) · Falchion 3d10+10
+            (Jagdwaffe ≤ RW 15) · Langschwert 3d10+8 (Hieb, keine SR).
+          </p>
+        </div>
+      </details>
+
+      <div class="grid lg:grid-cols-2 gap-5">
+        <!-- ===================== RÜSTUNG ===================== -->
+        <div class="space-y-2">
+          <div class="flex items-baseline justify-between gap-2">
+            <div class="text-xs uppercase tracking-widest text-ink-300">
+              Rüstung
+              <span class="text-[10px] normal-case tracking-normal text-ink-300/70">
+                · Summe wird vom Schaden abgezogen
+              </span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span
+                class="text-xs px-2 py-0.5 rounded font-mono font-semibold"
+                :style="{
+                  background: totalArmor > 0 ? '#1e3a8a22' : 'transparent',
+                  color: totalArmor > 0 ? '#1e3a8a' : 'var(--color-ink-300)',
+                  border: totalArmor > 0 ? '1px solid #1e3a8a' : 'none',
+                }"
+                :title="'Gesamt-Rüstung: ' + totalArmor + ' HP'"
+              >
+                Σ RW {{ totalArmor }}
+              </span>
+              <UButton size="xs" variant="soft" icon="i-lucide-plus" @click="addArmor">
+                Teil
+              </UButton>
+            </div>
           </div>
-          <div class="flex items-center gap-2">
-            <span
-              class="text-xs px-2 py-0.5 rounded font-mono font-semibold"
-              :style="{
-                background: totalArmor > 0 ? '#1e3a8a22' : 'transparent',
-                color: totalArmor > 0 ? '#1e3a8a' : 'var(--color-ink-300)',
-                border: totalArmor > 0 ? '1px solid #1e3a8a' : 'none',
-              }"
-              :title="'Gesamt-Ruestung: ' + totalArmor + ' HP'"
-            >
-              Σ {{ totalArmor }}
-            </span>
-            <UButton size="xs" variant="soft" icon="i-lucide-plus" @click="addArmor">
-              Hinzufuegen
+          <p
+            v-if="!(sheet.armor && sheet.armor.length)"
+            class="text-xs text-ink-300 italic"
+          >
+            Noch keine Rüstung eingetragen.
+          </p>
+          <div
+            v-for="(piece, idx) in (sheet.armor ?? [])"
+            :key="piece.id"
+            class="border border-parchment-700/20 rounded p-2 bg-white/30 space-y-1"
+          >
+            <div class="grid grid-cols-12 gap-2 items-center">
+              <UInput
+                class="col-span-6"
+                :model-value="piece.name"
+                placeholder="z.B. Plattenharnisch, Helm, Schild"
+                :maxlength="60"
+                @update:model-value="updateArmor(idx, { name: String($event) })"
+              />
+              <UInput
+                class="col-span-2"
+                type="number"
+                min="0"
+                :model-value="piece.value"
+                placeholder="RW"
+                title="Schutzwert in RW-Punkten (0–50 fürs erweiterte Modul)"
+                @update:model-value="updateArmor(idx, { value: Number($event) })"
+              />
+              <UInput
+                class="col-span-3"
+                :model-value="piece.note ?? ''"
+                placeholder="Notiz"
+                :maxlength="80"
+                @update:model-value="updateArmor(idx, { note: String($event) })"
+              />
+              <UButton
+                class="col-span-1"
+                size="xs"
+                variant="ghost"
+                color="error"
+                icon="i-lucide-x"
+                @click="removeArmor(idx)"
+              />
+            </div>
+            <div class="grid grid-cols-12 gap-2 items-center">
+              <USelect
+                class="col-span-6"
+                :model-value="piece.slot ?? 'other'"
+                :items="armorSlotOptions"
+                value-key="value"
+                size="sm"
+                @update:model-value="setArmorSlot(idx, $event)"
+              />
+              <USelect
+                class="col-span-6"
+                :model-value="piece.tag ?? ''"
+                :items="armorTagOptions"
+                value-key="value"
+                size="sm"
+                @update:model-value="setArmorTag(idx, $event)"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- ===================== WAFFEN ===================== -->
+        <div class="space-y-2">
+          <div class="flex items-baseline justify-between gap-2">
+            <div class="text-xs uppercase tracking-widest text-ink-300">
+              Waffen
+              <span class="text-[10px] normal-case tracking-normal text-ink-300/70">
+                · NdM±X (z.B. 4d10, 1d10+3)
+              </span>
+            </div>
+            <UButton size="xs" variant="soft" icon="i-lucide-plus" @click="addWeapon">
+              Waffe
             </UButton>
           </div>
-        </div>
-        <p
-          v-if="!(sheet.armor && sheet.armor.length)"
-          class="text-xs text-ink-300 italic"
-        >
-          Noch keine Ruestung eingetragen.
-        </p>
-        <div
-          v-for="(piece, idx) in (sheet.armor ?? [])"
-          :key="piece.id"
-          class="grid grid-cols-12 gap-2 items-center"
-        >
-          <UInput
-            class="col-span-6"
-            :model-value="piece.name"
-            placeholder="z.B. Helm, Lederruestung, Schild"
-            :maxlength="60"
-            @update:model-value="updateArmor(idx, { name: String($event) })"
-          />
-          <UInput
-            class="col-span-3"
-            type="number"
-            min="0"
-            :model-value="piece.value"
-            placeholder="Schutz"
-            @update:model-value="updateArmor(idx, { value: Number($event) })"
-          />
-          <UInput
-            class="col-span-2"
-            :model-value="piece.note ?? ''"
-            placeholder="Notiz"
-            :maxlength="80"
-            @update:model-value="updateArmor(idx, { note: String($event) })"
-          />
-          <UButton
-            class="col-span-1"
-            size="xs"
-            variant="ghost"
-            color="error"
-            icon="i-lucide-x"
-            @click="removeArmor(idx)"
-          />
-        </div>
-      </div>
-
-      <!-- Waffen: Name + Schadensformel (NdM±X). Werden im Mini-Charsheet
-           direkt als Auswahl angeboten und fuellen den Schadenswurf. -->
-      <div class="space-y-2 mt-4">
-        <div class="flex items-baseline justify-between gap-2">
-          <div class="text-xs uppercase tracking-widest text-ink-300">
-            Waffen
-            <span class="text-[10px] normal-case tracking-normal text-ink-300/70">
-              · NdM±X (z.B. 4d10, 1d10+3)
-            </span>
+          <p
+            v-if="!(sheet.weapons && sheet.weapons.length)"
+            class="text-xs text-ink-300 italic"
+          >
+            Noch keine Waffe eingetragen.
+          </p>
+          <div
+            v-for="(w, idx) in (sheet.weapons ?? [])"
+            :key="w.id"
+            class="border border-parchment-700/20 rounded p-2 bg-white/30 space-y-1"
+          >
+            <!-- Zeile 1: Name + Schadensformel + Löschen -->
+            <div class="grid grid-cols-12 gap-2 items-center">
+              <UInput
+                class="col-span-7"
+                :model-value="w.name"
+                placeholder="z.B. Stechschwert, Streitkolben, Langbogen"
+                :maxlength="60"
+                @update:model-value="updateWeapon(idx, { name: String($event) })"
+              />
+              <UInput
+                class="col-span-4"
+                :model-value="w.damageFormula"
+                placeholder="4d10+3"
+                :maxlength="20"
+                @update:model-value="updateWeapon(idx, { damageFormula: String($event) })"
+              />
+              <UButton
+                class="col-span-1"
+                size="xs"
+                variant="ghost"
+                color="error"
+                icon="i-lucide-x"
+                @click="removeWeapon(idx)"
+              />
+            </div>
+            <!-- Zeile 2: Kategorie + Trefferskill -->
+            <div class="grid grid-cols-12 gap-2 items-center">
+              <USelect
+                class="col-span-6"
+                :model-value="w.category ?? 'sonstige'"
+                :items="weaponCategoryOptions"
+                value-key="value"
+                size="sm"
+                @update:model-value="setWeaponCategory(idx, $event)"
+              />
+              <USelect
+                class="col-span-6"
+                :model-value="w.attackSkillId ?? ''"
+                :items="attackSkillOptions"
+                value-key="value"
+                size="sm"
+                @update:model-value="setWeaponAttackSkill(idx, $event)"
+              />
+            </div>
+            <!-- Zeile 3: Sonderregeln -->
+            <div class="grid grid-cols-12 gap-2 items-center">
+              <UCheckbox
+                class="col-span-3"
+                :model-value="!!w.properties?.schlagwaffe"
+                label="Schlagwaffe"
+                title="Schadenswurf-1er werden einmal neu gewürfelt"
+                @update:model-value="updateWeaponProps(idx, { schlagwaffe: !!$event })"
+              />
+              <div class="col-span-3 flex items-center gap-1">
+                <span class="text-[10px] text-ink-300 whitespace-nowrap" title="Rüstungsbrechend X — reduziert RW um X">RB</span>
+                <UInput
+                  size="xs"
+                  type="number"
+                  min="0"
+                  max="50"
+                  :model-value="w.properties?.armorBreak ?? 0"
+                  placeholder="0"
+                  title="Rüstungsbrechend X (Stechschwert 15, Streitkolben 30)"
+                  @update:model-value="updateWeaponProps(idx, { armorBreak: Math.max(0, Math.floor(Number($event) || 0)) })"
+                />
+              </div>
+              <UCheckbox
+                class="col-span-3"
+                :model-value="!!w.properties?.aufspiessen"
+                label="Aufspießen"
+                title="Krit-Bereich ≤ 20 % statt 10 % des FW; Krit beschädigt Rüstung dauerhaft"
+                @update:model-value="updateWeaponProps(idx, { aufspiessen: !!$event })"
+              />
+              <div class="col-span-3 flex items-center gap-1">
+                <span class="text-[10px] text-ink-300 whitespace-nowrap" title="Jagdwaffe: +15 Trefferwurf vs. RW ≤ Schwelle">Jagd ≤</span>
+                <UInput
+                  size="xs"
+                  type="number"
+                  min="0"
+                  max="50"
+                  :model-value="w.properties?.huntingThreshold ?? 0"
+                  placeholder="0"
+                  title="Jagdwaffe: +15 auf Trefferwurf gegen Gegner mit RW ≤ diesem Wert (typ. 15)"
+                  @update:model-value="updateWeaponProps(idx, { huntingThreshold: Math.max(0, Math.floor(Number($event) || 0)) })"
+                />
+              </div>
+            </div>
+            <!-- Zeile 4: Notiz -->
+            <UInput
+              :model-value="w.note ?? ''"
+              placeholder="Notiz (z.B. Zweihänder, +2 Hand frei nicht möglich)"
+              :maxlength="120"
+              @update:model-value="updateWeapon(idx, { note: String($event) })"
+            />
           </div>
-          <UButton size="xs" variant="soft" icon="i-lucide-plus" @click="addWeapon">
-            Hinzufuegen
-          </UButton>
-        </div>
-        <p
-          v-if="!(sheet.weapons && sheet.weapons.length)"
-          class="text-xs text-ink-300 italic"
-        >
-          Noch keine Waffe eingetragen.
-        </p>
-        <div
-          v-for="(w, idx) in (sheet.weapons ?? [])"
-          :key="w.id"
-          class="grid grid-cols-12 gap-2 items-center"
-        >
-          <UInput
-            class="col-span-5"
-            :model-value="w.name"
-            placeholder="z.B. Kurzschwert"
-            :maxlength="60"
-            @update:model-value="updateWeapon(idx, { name: String($event) })"
-          />
-          <UInput
-            class="col-span-3"
-            :model-value="w.damageFormula"
-            placeholder="4d10"
-            :maxlength="20"
-            @update:model-value="updateWeapon(idx, { damageFormula: String($event) })"
-          />
-          <UInput
-            class="col-span-3"
-            :model-value="w.note ?? ''"
-            placeholder="Notiz"
-            :maxlength="80"
-            @update:model-value="updateWeapon(idx, { note: String($event) })"
-          />
-          <UButton
-            class="col-span-1"
-            size="xs"
-            variant="ghost"
-            color="error"
-            icon="i-lucide-x"
-            @click="removeWeapon(idx)"
-          />
         </div>
       </div>
     </SheetSection>

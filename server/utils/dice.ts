@@ -11,10 +11,12 @@
 import {
   HTBAH_TALENT_LABELS,
   htbahRollProbe,
+  htbahSchlagwaffeReroll,
   htbahSkillTotal,
   htbahTalentValue,
   type HtbahCharacterData,
   type HtbahTalent,
+  type HtbahWeaponCategory,
 } from '~~/shared/engines/htbah'
 import {
   DND_ABILITIES,
@@ -56,6 +58,12 @@ export interface HtbahSkillRollInput {
   skillId: string
   modifier?: number
   note?: string
+  /**
+   * Stichwaffen-Sonderregel: erweitert den Krit-Bereich von 10% auf 20% des FW.
+   * Wird im Payload als `aufspiessen: true` markiert, damit die RollCard die
+   * verschobene Krit-Schwelle erklaeren kann.
+   */
+  aufspiessen?: boolean
 }
 
 export interface HtbahTalentRollInput {
@@ -78,7 +86,12 @@ export function rollHtbahSkill(input: HtbahSkillRollInput): RollPayload {
   const mod = input.modifier ?? 0
   const target = baseTarget + mod
   const roll = rand1to100()
-  const probe = htbahRollProbe({ roll, target, isTalentOnly: false })
+  const probe = htbahRollProbe({
+    roll,
+    target,
+    isTalentOnly: false,
+    aufspiessen: input.aufspiessen,
+  })
 
   return {
     system: 'htbah',
@@ -92,6 +105,7 @@ export function rollHtbahSkill(input: HtbahSkillRollInput): RollPayload {
     critical: probe.critical || undefined,
     fumble: probe.fumble || undefined,
     qualityStep: probe.qualityStep,
+    aufspiessen: input.aufspiessen || undefined,
     note: input.note?.trim() || undefined,
   }
 }
@@ -137,6 +151,13 @@ export interface FreeRollInput {
   note?: string
   characterId?: number
   characterName?: string
+  /**
+   * HtbaH-Stumpfwaffen-Sonderregel: jeder 1er wird einmal neu gewuerfelt.
+   * Reroll-Eintraege landen im Payload zur Anzeige.
+   */
+  schlagwaffe?: boolean
+  /** Waffen-Kategorie nur zur Anzeige im Chat. */
+  weaponCategory?: HtbahWeaponCategory
 }
 
 export function rollFree(input: FreeRollInput): RollPayload {
@@ -144,7 +165,14 @@ export function rollFree(input: FreeRollInput): RollPayload {
   for (let i = 0; i < input.diceCount; i++) {
     dice.push(Math.floor(Math.random() * input.diceSides) + 1)
   }
-  const sum = dice.reduce((a, b) => a + b, 0) + (input.modifier ?? 0)
+  let rerolls: Array<{ index: number; from: number; to: number }> | undefined
+  let finalDice = dice
+  if (input.schlagwaffe && input.diceSides >= 2) {
+    const r = htbahSchlagwaffeReroll(dice, input.diceSides)
+    finalDice = r.dice
+    rerolls = r.rerolls.length ? r.rerolls : undefined
+  }
+  const sum = finalDice.reduce((a, b) => a + b, 0) + (input.modifier ?? 0)
   return {
     system: input.system,
     label: input.label,
@@ -152,10 +180,12 @@ export function rollFree(input: FreeRollInput): RollPayload {
     characterName: input.characterName,
     target: sum, // bei freien Wuerfen verwenden wir target als "Endsumme"
     modifier: input.modifier || undefined,
-    dice,
+    dice: finalDice,
     success: true, // freier Wurf: keine Auswertung
     note: input.note?.trim() || undefined,
     freeRoll: true,
+    schlagwaffeRerolls: rerolls,
+    weaponCategory: input.weaponCategory,
   }
 }
 

@@ -174,6 +174,47 @@ export function createBlankHtbah(name: string): HtbahCharacterData {
 }
 
 /**
+ * Slots fuer Ruestungs-Teile (Modul "Mittelalterliche Waffen und Ruestungen").
+ * Die Auswahl ist rein informativ — der RW summiert sich ueber alle Teile,
+ * unabhaengig davon, ob jeder Slot belegt ist. `other` fuer alte Eintraege
+ * ohne Slot bzw. exotische Schutzgegenstaende (Robe, Magie-Schutzring, …).
+ */
+export const HTBAH_ARMOR_SLOTS = [
+  'head',
+  'torso',
+  'shoulders',
+  'shield',
+  'hands',
+  'legs',
+  'feet',
+  'other',
+] as const
+export type HtbahArmorSlot = (typeof HTBAH_ARMOR_SLOTS)[number]
+export const HTBAH_ARMOR_SLOT_LABELS: Record<HtbahArmorSlot, string> = {
+  head: 'Kopf',
+  torso: 'Oberkörper',
+  shoulders: 'Schultern',
+  shield: 'Schild',
+  hands: 'Hände',
+  legs: 'Beine',
+  feet: 'Füße',
+  other: 'Sonstiges',
+}
+
+/**
+ * Klassifizierung der Ruestung: leicht (Leder, Stoff), mittel (Kette, Brigantine),
+ * schwer (Platte). Nur informativ — bei Stumpfwaffen-Sonderregeln kann der SL
+ * z.B. den 1er-Reroll besonders gegen `leicht` als wirkungsvoll werten.
+ */
+export const HTBAH_ARMOR_TAGS = ['leicht', 'mittel', 'schwer'] as const
+export type HtbahArmorTag = (typeof HTBAH_ARMOR_TAGS)[number]
+export const HTBAH_ARMOR_TAG_LABELS: Record<HtbahArmorTag, string> = {
+  leicht: 'leicht (Leder, Stoff)',
+  mittel: 'mittel (Kette, Brigantine)',
+  schwer: 'schwer (Platte)',
+}
+
+/**
  * Ein Stueck Ruestung mit Schutzwert in HP-Punkten. Mehrere Teile (Helm,
  * Brustpanzer, Schild …) werden bei der Schadensrechnung aufsummiert.
  */
@@ -182,19 +223,77 @@ export interface HtbahArmorPiece {
   name: string
   /** Schutzwert in HP. Negative Werte werden bei der Summe geclampt. */
   value: number
+  /** Koerperregion / Slot. Default 'other' bei alten Eintraegen. */
+  slot?: HtbahArmorSlot
+  /** Klassifizierung — leicht / mittel / schwer. Informativ. */
+  tag?: HtbahArmorTag
   note?: string
+}
+
+/**
+ * Waffen-Kategorie. Bestimmt Default-Eigenschaften und Anzeige im Bogen.
+ * - `stumpf`  : Haemmer, Keulen, Streitkolben → typ. Schlagwaffe + Ruestungsbrechend
+ * - `hieb`    : Schwerter, Aexte, Saebel → Allrounder, meist ohne Sonderregel
+ * - `stich`   : Speere, Degen, Rapier, Stechschwerter → Ruestungsbrechend / Aufspießen
+ * - `fernkampf`: Bogen, Armbrust, Schusswaffen
+ * - `wurf`    : Wurfsterne, Steine, Wurfaexte
+ * - `sonstige`: alles andere
+ */
+export const HTBAH_WEAPON_CATEGORIES = [
+  'stumpf',
+  'hieb',
+  'stich',
+  'fernkampf',
+  'wurf',
+  'sonstige',
+] as const
+export type HtbahWeaponCategory = (typeof HTBAH_WEAPON_CATEGORIES)[number]
+export const HTBAH_WEAPON_CATEGORY_LABELS: Record<HtbahWeaponCategory, string> = {
+  stumpf: 'Stumpf (Hammer, Keule, Streitkolben)',
+  hieb: 'Hieb (Schwert, Axt, Säbel)',
+  stich: 'Stich (Speer, Degen, Rapier)',
+  fernkampf: 'Fernkampf (Bogen, Armbrust, Schusswaffe)',
+  wurf: 'Wurf (Wurfaxt, Stein, Wurfsterne)',
+  sonstige: 'Sonstige / Improvisiert',
+}
+
+/**
+ * Waffen-Sonderregeln. Werden bei den Wuerfen tatsaechlich angewandt:
+ *  - `schlagwaffe`     : jeder 1er beim Schadenswurf wird einmal neu gewuerfelt
+ *                        (Server-Reroll, transparent im Chat dargestellt).
+ *  - `armorBreak`      : Ruestungsbrechend X → reduziert die Ziel-Ruestung um X
+ *                        beim apply-damage und in der Chat-Anzeige.
+ *  - `aufspiessen`     : Krit-Erfolg bereits bei ≤ 20% des Fähigkeitswertes
+ *                        (statt 10%). Krit beschaedigt zusaetzlich Ruestung
+ *                        (−1 RW dauerhaft an einem Slot).
+ *  - `huntingThreshold`: Jagdwaffe — +15 auf den Trefferwurf gegen Gegner
+ *                        mit Gesamt-RW ≤ huntingThreshold (default 15).
+ */
+export interface HtbahWeaponProperties {
+  schlagwaffe?: boolean
+  armorBreak?: number
+  aufspiessen?: boolean
+  huntingThreshold?: number
 }
 
 /**
  * Waffe im Inventar — Name + Schadensformel (z.B. "4d10", "1d10+3").
  * Wird im Mini-Charsheet als Auswahl angeboten und fuellt den Schaden-
- * Wurf direkt aus.
+ * Wurf direkt aus. Optional koennen Kategorie + Sonderregeln gepflegt
+ * werden, die bei den Wuerfen serverseitig wirken.
  */
 export interface HtbahWeaponEntry {
   id: string
   name: string
   /** Beliebige NdM±X-Formel, wird in MiniCharSheet's Schaden-Wuerfler uebernommen. */
   damageFormula: string
+  category?: HtbahWeaponCategory
+  properties?: HtbahWeaponProperties
+  /**
+   * Optional: Skill-ID, gegen die der Trefferwurf laeuft. Wenn gepflegt,
+   * setzt das Mini-Charsheet die Probe automatisch auf diesen Skill.
+   */
+  attackSkillId?: string
   note?: string
 }
 
@@ -270,6 +369,81 @@ export function htbahTotalArmor(data: HtbahCharacterData): number {
   for (const a of list) sum += Math.max(0, Math.floor(a.value || 0))
   return Math.max(0, sum)
 }
+
+/**
+ * Effektive Ruestung nach Anwendung einer "Ruestungsbrechend"-Waffeneigenschaft.
+ * `armorBreak` ist der Reduktionswert der Waffe (Stechschwert 15, Streitkolben
+ * 30, …). Wert clampt nach 0.
+ */
+export function htbahEffectiveArmor(
+  data: HtbahCharacterData,
+  armorBreak: number = 0,
+): number {
+  return Math.max(0, htbahTotalArmor(data) - Math.max(0, Math.floor(armorBreak || 0)))
+}
+
+/**
+ * Schlagwaffen-Reroll: jeder gewuerfelte 1er darf einmal neu gewuerfelt werden.
+ * Liefert das modifizierte Wurf-Array zusammen mit den Reroll-Werten, damit die
+ * UI/Chat sie separat anzeigen kann ("urspruenglich 4d10: 7, 1→8, 5, 3").
+ *
+ * Nur EIN Reroll pro 1er — das ist die Regelwerk-Lesart. Kommt nach dem
+ * Reroll erneut eine 1, bleibt sie stehen.
+ */
+export function htbahSchlagwaffeReroll(
+  dice: number[],
+  sides: number,
+  rng: () => number = Math.random,
+): { dice: number[]; rerolls: Array<{ index: number; from: number; to: number }> } {
+  if (sides < 2) return { dice: [...dice], rerolls: [] }
+  const out = [...dice]
+  const rerolls: Array<{ index: number; from: number; to: number }> = []
+  for (let i = 0; i < out.length; i++) {
+    if (out[i] === 1) {
+      const newRoll = Math.floor(rng() * sides) + 1
+      rerolls.push({ index: i, from: 1, to: newRoll })
+      out[i] = newRoll
+    }
+  }
+  return { dice: out, rerolls }
+}
+
+/**
+ * Krit-Erfolg-Bereich mit Waffe "Aufspießen": ≤ 20% des Fähigkeitswertes.
+ * Doppelt so breit wie der Standard-Krit (10%). Siehe htbahCritThreshold.
+ */
+export function htbahCritThresholdAufspiessen(skillValue: number): number {
+  return Math.max(1, Math.floor(skillValue / 5))
+}
+
+/**
+ * Jagdwaffen-Bonus: +15 auf den Trefferwurf gegen Ziele mit Gesamt-RW
+ * ≤ huntingThreshold (default 15). Liefert 0 wenn die Bedingung nicht
+ * erfuellt ist oder huntingThreshold unbekannt.
+ */
+export function htbahJagdwaffeBonus(
+  targetArmor: number,
+  huntingThreshold?: number,
+): number {
+  const t = huntingThreshold ?? 0
+  if (t <= 0) return 0
+  return targetArmor <= t ? 15 : 0
+}
+
+/**
+ * Schwierigkeits-Modifikatoren fuer Proben (Regelwerk Abschnitt 3.6:
+ * "Erschwernis und Erleichterung"). Werden zum Skill-Wert addiert
+ * (positiv = einfacher, negativ = schwerer).
+ */
+export const HTBAH_DC_PRESETS = [
+  { id: 'easy-very', label: 'Sehr leicht', modifier: 30 },
+  { id: 'easy', label: 'Leicht', modifier: 15 },
+  { id: 'normal', label: 'Normal', modifier: 0 },
+  { id: 'hard', label: 'Schwer', modifier: -15 },
+  { id: 'hard-very', label: 'Sehr schwer', modifier: -30 },
+  { id: 'extreme', label: 'Extrem', modifier: -45 },
+] as const
+export type HtbahDcPresetId = (typeof HTBAH_DC_PRESETS)[number]['id']
 
 /**
  * Geldbeutel: 100 Kupfer = 1 Silber, 100 Silber = 1 Gold.
@@ -408,6 +582,11 @@ export interface HtbahProbeInput {
   target: number // Skill-Total oder Begabungswert
   /** True = Probe auf reine Begabung (kein Skill) → kein Krit-Erfolg möglich. */
   isTalentOnly?: boolean
+  /**
+   * Stichwaffen mit "Aufspießen": Krit-Bereich verdoppelt sich (≤ 20% statt
+   * ≤ 10% des Skill-Werts). Nur wirksam, wenn !isTalentOnly.
+   */
+  aufspiessen?: boolean
 }
 
 export interface HtbahProbeResult {
@@ -439,8 +618,10 @@ export function htbahQualityLabel(step: number): string {
 
 export function htbahRollProbe(input: HtbahProbeInput): HtbahProbeResult {
   const success = input.roll <= input.target
-  const critical =
-    !input.isTalentOnly && success && input.roll <= htbahCritThreshold(input.target)
+  const critBound = input.aufspiessen
+    ? htbahCritThresholdAufspiessen(input.target)
+    : htbahCritThreshold(input.target)
+  const critical = !input.isTalentOnly && success && input.roll <= critBound
   const fumble = input.roll >= htbahFumbleThreshold(input.target)
   const qualityStep = success ? htbahQualityStep(input.target - input.roll) : undefined
   return { success, critical, fumble, qualityStep }

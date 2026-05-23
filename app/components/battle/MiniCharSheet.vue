@@ -13,6 +13,7 @@
 import {
   HTBAH_TALENTS,
   HTBAH_TALENT_LABELS,
+  HTBAH_DC_PRESETS,
   htbahSkillTotal,
   htbahTalentValue,
   htbahTotalArmor,
@@ -412,19 +413,43 @@ const characterWeapons = computed<HtbahWeaponEntry[]>(() => {
 })
 const weaponOptions = computed(() => [
   { label: '— Waffe waehlen —', value: '' },
-  ...characterWeapons.value.map((w: HtbahWeaponEntry) => ({
-    label: `${w.name} (${w.damageFormula})`,
-    value: w.id,
-  })),
+  ...characterWeapons.value.map((w: HtbahWeaponEntry) => {
+    // Sonderregel-Suffix fuer schnellen visuellen Abgleich:
+    // "Streitkolben (3d10+10, Schlag, RB-30)"
+    const p = w.properties ?? {}
+    const tags: string[] = []
+    if (p.schlagwaffe) tags.push('Schlag')
+    if (p.armorBreak) tags.push(`RB-${p.armorBreak}`)
+    if (p.aufspiessen) tags.push('Aufspießen')
+    if (p.huntingThreshold) tags.push(`Jagd≤${p.huntingThreshold}`)
+    const tagStr = tags.length ? `, ${tags.join(', ')}` : ''
+    return {
+      label: `${w.name} (${w.damageFormula}${tagStr})`,
+      value: w.id,
+    }
+  }),
 ])
 const selectedWeaponId = ref<string>('')
-// Wenn der Spieler eine Waffe waehlt, Formel + Label uebernehmen.
+const selectedWeapon = computed<HtbahWeaponEntry | null>(
+  () =>
+    characterWeapons.value.find((w: HtbahWeaponEntry) => w.id === selectedWeaponId.value) ??
+    null,
+)
+// Wenn der Spieler eine Waffe waehlt, Formel + Label uebernehmen. Zusaetzlich
+// die Trefferprobe vorbelegen (attackSkillId), wenn die Waffe einen Trefferskill
+// gepflegt hat — damit der Spieler nicht zwei Mal das Dropdown anfassen muss.
 watch(selectedWeaponId, (id: string) => {
   if (!id) return
   const w = characterWeapons.value.find((x: HtbahWeaponEntry) => x.id === id)
   if (!w) return
   damageFormula.value = w.damageFormula
   damageLabel.value = w.name || 'Schaden'
+  if (w.attackSkillId) {
+    const skillRollId = `htbahSkill:${w.attackSkillId}:`
+    if (rollOptions.value.some((o: RollTarget) => `${o.kind}:${o.id}:${o.source ?? ''}` === skillRollId)) {
+      pickedRollId.value = skillRollId
+    }
+  }
   // Andere Auswahl zuruecksetzen, damit nicht aus Versehen Zauber-Mod + Waffe
   // gleichzeitig wirken.
   selectedSpellId.value = ''
@@ -591,6 +616,12 @@ const rollDamage = async () => {
     // Server den Wunden-Malus aus den Token-HPs berechnen kann.
     const rollerTokenId =
       !character.value && activeToken.value ? activeToken.value.id : undefined
+    // Waffen-Sonderregeln fuer den Schadenswurf:
+    //  - schlagwaffe   → Server rerollt 1er einmal
+    //  - armorBreak    → reduziert RW des Ziels in der Anzeige / im apply-damage
+    //  - weaponCategory→ nur Chat-Anzeige
+    // Nur ziehen, wenn KEIN Heilmodus (sonst macht der Reroll keinen Sinn).
+    const wpForDmg = !isHeal && selectedWeapon.value ? selectedWeapon.value.properties ?? {} : {}
     const res = (await $fetch(`/api/groups/${props.groupId}/rolls`, {
       method: 'POST',
       body: {
@@ -607,6 +638,9 @@ const rollDamage = async () => {
         // tatsaechlichen Trefferschaden anzeigt.
         targetTokenId: target?.id,
         damageKind: isHeal ? 'heal' : 'damage',
+        schlagwaffe: wpForDmg.schlagwaffe || undefined,
+        armorBreak: wpForDmg.armorBreak || undefined,
+        weaponCategory: !isHeal ? selectedWeapon.value?.category : undefined,
       },
     })) as RollMessage
 
@@ -638,23 +672,49 @@ const rollDamage = async () => {
         const amount = Math.max(0, total)
         try {
           // apply-damage rechnet serverseitig Ruestung ab (HtbaH) und
-          // liefert oldHp/hp/hpMax/absorbed/applied zurueck.
+          // liefert oldHp/hp/hpMax/absorbed/applied/armorBreakUsed/aufspiessenArmorLoss
+          // zurueck. Waffen-Sonderregeln werden mitgesendet, damit der
+          // Server R-Brechend wirklich anwendet und Aufspiessen+Krit die
+          // Ruestung dauerhaft beschaedigt.
+          const wpForApply = !isHeal && selectedWeapon.value ? selectedWeapon.value.properties ?? {} : {}
+          // Aufspiessen-Krit nur, wenn die LETZTE Probe (htbahSkill) ein Krit
+          // war UND die Waffe Aufspiessen hat. Wird vom Probenwurf an
+          // probeResultLast getrackt (s.u.).
+          const aufspiessenCrit =
+            !isHeal && !!wpForApply.aufspiessen && probeResultLast.value?.critical === true
           const res = (await $fetch(
             `/api/groups/${props.groupId}/maps/${props.mapId}/tokens/${target.id}/apply-damage`,
-            { method: 'POST', body: { amount, kind: isHeal ? 'heal' : 'damage' } },
+            {
+              method: 'POST',
+              body: {
+                amount,
+                kind: isHeal ? 'heal' : 'damage',
+                armorBreak: wpForApply.armorBreak || undefined,
+                aufspiessenCrit: aufspiessenCrit || undefined,
+              },
+            },
           )) as {
             oldHp: number
             hp: number
             hpMax: number
             absorbed: number
             applied: number
+            armorBreakUsed?: number
+            aufspiessenArmorLoss?: { slot: string | null; pieceId: string | null } | null
           }
           target.hp = res.hp
           const armorPart =
-            res.absorbed > 0 ? ` (Ruestung absorbiert ${res.absorbed})` : ''
+            res.absorbed > 0 ? ` (Rüstung absorbiert ${res.absorbed})` : ''
+          const rbPart =
+            res.armorBreakUsed && res.armorBreakUsed > 0
+              ? ` · Rüstungsbrechend −${res.armorBreakUsed}`
+              : ''
+          const auPart = res.aufspiessenArmorLoss
+            ? ` · Aufspießen: −1 RW dauerhaft`
+            : ''
           damageApplyResult.value = isHeal
             ? `+${res.applied} HP an ${target.name} (${res.oldHp} → ${res.hp}/${res.hpMax}).`
-            : `−${res.applied} HP an ${target.name}${armorPart} (${res.oldHp} → ${res.hp}/${res.hpMax}).`
+            : `−${res.applied} HP an ${target.name}${armorPart}${rbPart}${auPart} (${res.oldHp} → ${res.hp}/${res.hpMax}).`
           emit('token-updated')
         } catch (err: unknown) {
           damageApplyResult.value =
@@ -778,6 +838,15 @@ const useItem = async (item: HtbahUsableItem) => {
 const rollSending = ref(false)
 const rollError = ref<string | null>(null)
 const rollSuccess = ref(false)
+/**
+ * Letztes Probe-Ergebnis (Krit ja/nein) — wird beim htbahSkill-Wurf gesetzt
+ * und vom Schadensanwender ausgewertet, damit "Aufspießen + Krit"
+ * automatisch −1 RW dauerhaft am Ziel anrichtet.
+ */
+const probeResultLast = ref<{ critical: boolean } | null>(null)
+watch(selectedTokenId, () => {
+  probeResultLast.value = null
+})
 
 const pickedRollOption = computed(() =>
   rollOptions.value.find((o) => `${o.kind}:${o.id}:${o.source ?? ''}` === pickedRollId.value)
@@ -828,11 +897,26 @@ const rollIt = async () => {
     const note = (baseNote + todNoteSuffix).trim() || undefined
     const dc = rollDc.value || undefined
     const mode = rollMode.value
-    let body: Record<string, unknown>
+    let body: Record<string, unknown> = {}
     switch (opt.kind) {
-      case 'htbahSkill':
-        body = { kind: 'htbahSkill', characterId, skillId: opt.id, modifier, note }
+      case 'htbahSkill': {
+        // Wenn der Spieler eine Waffe gewaehlt hat: Sonderregeln durchreichen.
+        // Aufspiessen wirkt direkt im Krit-Bereich, Jagdwaffe nur, wenn das
+        // Damage-Ziel gepflegt ist (Server berechnet RW-Schwelle).
+        const w = selectedWeapon.value
+        const wp = w?.properties ?? {}
+        body = {
+          kind: 'htbahSkill',
+          characterId,
+          skillId: opt.id,
+          modifier,
+          note,
+          aufspiessen: wp.aufspiessen || undefined,
+          huntingThreshold: wp.huntingThreshold || undefined,
+          targetTokenId: damageTargetId.value || undefined,
+        }
         break
+      }
       case 'htbahTalent':
         body = { kind: 'htbahTalent', characterId, talent: opt.id as HtbahTalent, modifier, note }
         break
@@ -906,7 +990,16 @@ const rollIt = async () => {
         body = { kind: 'npcDsa5', tokenId, abilityId: opt.id, modifier, note }
         break
     }
-    await $fetch(`/api/groups/${props.groupId}/rolls`, { method: 'POST', body })
+    const res = (await $fetch(`/api/groups/${props.groupId}/rolls`, {
+      method: 'POST',
+      body,
+    })) as { message?: { payload?: { critical?: boolean } | null } }
+    // Probe-Krit tracken — wird vom Schadensanwender ausgewertet, wenn die
+    // Waffe "Aufspießen" hat (dann beschaedigt der Krit die Ziel-Ruestung
+    // dauerhaft um −1 RW).
+    if (opt.kind === 'htbahSkill') {
+      probeResultLast.value = { critical: !!res.message?.payload?.critical }
+    }
     rollSuccess.value = true
     rollNote.value = ''
     setTimeout(() => (rollSuccess.value = false), 2200)
@@ -1324,6 +1417,24 @@ const onImageError = (tokenId: number) => {
           >
             <UInput v-model.number="rollMod" type="number" size="sm" class="w-full" />
           </UFormField>
+        </div>
+        <!-- DC-Presets (nur HtbaH) — setzen rollMod auf den Regelwerk-Wert
+             fuer Erschwernis-Stufen. So muss der Spieler nicht jedes Mal die
+             genaue Zahl raten. -->
+        <div v-if="isHtbah" class="flex flex-wrap gap-1">
+          <span class="text-[10px] uppercase tracking-widest text-ink-300 mr-1 self-center">
+            Schwierigkeit:
+          </span>
+          <UButton
+            v-for="preset in HTBAH_DC_PRESETS"
+            :key="preset.id"
+            size="xs"
+            :variant="rollMod === preset.modifier ? 'solid' : 'outline'"
+            :title="`${preset.label} (Mod ${preset.modifier > 0 ? '+' : ''}${preset.modifier})`"
+            @click="rollMod = preset.modifier"
+          >
+            {{ preset.label }} {{ preset.modifier > 0 ? '+' : '' }}{{ preset.modifier }}
+          </UButton>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
           <UFormField label="Notiz (optional)" class="sm:col-span-7">

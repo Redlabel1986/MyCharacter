@@ -10,7 +10,13 @@ import { and, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
 import { battleMaps, battleTokens, characters, messages, type RollPayload } from '~~/server/database/schema'
-import { htbahTotalArmor, type HtbahCharacterData } from '~~/shared/engines/htbah'
+import {
+  HTBAH_WEAPON_CATEGORIES,
+  htbahEffectiveArmor,
+  htbahJagdwaffeBonus,
+  htbahTotalArmor,
+  type HtbahCharacterData,
+} from '~~/shared/engines/htbah'
 import {
   rollDndAbility,
   rollDndSave,
@@ -47,6 +53,20 @@ const htbahSkillSchema = baseSchema.extend({
   kind: z.literal('htbahSkill'),
   characterId: z.number().int().positive(),
   skillId: z.string().min(1),
+  /**
+   * Stichwaffen-Sonderregel "Aufspießen": erweitert den Krit-Bereich auf 20%.
+   * Wird vom Client gesendet, wenn der Spieler eine entsprechende Waffe
+   * ausgewaehlt hat.
+   */
+  aufspiessen: z.boolean().optional(),
+  /**
+   * Jagdwaffen-Sonderregel: +15 auf den Trefferwurf gegen Ziel-Token mit
+   * Gesamt-RW ≤ huntingThreshold (default 15). Server berechnet den Bonus
+   * eigenstaendig aus der Ziel-Ruestung und addiert ihn zum Modifier.
+   */
+  huntingThreshold: z.number().int().min(0).max(50).optional(),
+  /** Ziel-Token (fuer Jagdwaffen-Bonus). */
+  targetTokenId: z.number().int().positive().optional(),
 })
 
 const htbahTalentSchema = baseSchema.extend({
@@ -117,6 +137,15 @@ const freeSchema = baseSchema.extend({
    */
   targetTokenId: z.number().int().positive().optional(),
   damageKind: z.enum(['damage', 'heal']).optional(),
+  /**
+   * HtbaH-Waffen-Sonderregeln fuer den Schaden:
+   * - schlagwaffe: 1er beim Wurf werden einmal neu gewuerfelt
+   * - armorBreak : Ruestungsbrechend X (reduziert RW des Ziels in der Anzeige)
+   * - weaponCategory: nur fuer die Chat-Anzeige
+   */
+  schlagwaffe: z.boolean().optional(),
+  armorBreak: z.number().int().min(0).max(50).optional(),
+  weaponCategory: z.enum(HTBAH_WEAPON_CATEGORIES).optional(),
 })
 
 const npcHtbahSchema = baseSchema.extend({
@@ -262,12 +291,51 @@ export default defineEventHandler(async (event) => {
   if (body.kind === 'htbahSkill') {
     const char = await loadCharacterOrThrow(db, body.characterId, user.id)
     wounds = woundsFromChar(char)
+    // Jagdwaffen-Bonus: +15 auf den Trefferwurf, wenn das gewaehlte Ziel-Token
+    // RW <= huntingThreshold hat. Wird zum User-Modifier addiert, BEVOR der
+    // Wunden-Malus draufkommt — damit der Bonus auch in der RollCard sauber
+    // als Teil des "Modifikators" sichtbar wird.
+    let huntingBonus = 0
+    if (body.huntingThreshold && body.huntingThreshold > 0 && body.targetTokenId) {
+      const [targetTok] = await db
+        .select({
+          id: battleTokens.id,
+          characterId: battleTokens.characterId,
+          hp: battleTokens.hp,
+          hpMax: battleTokens.hpMax,
+        })
+        .from(battleTokens)
+        .innerJoin(battleMaps, eq(battleMaps.id, battleTokens.mapId))
+        .where(
+          and(
+            eq(battleTokens.id, body.targetTokenId),
+            eq(battleMaps.groupId, groupId),
+          ),
+        )
+        .limit(1)
+      if (targetTok?.characterId) {
+        const [tc] = await db
+          .select({ system: characters.system, data: characters.data })
+          .from(characters)
+          .where(eq(characters.id, targetTok.characterId))
+          .limit(1)
+        if (tc && tc.system === 'htbah') {
+          const ta = htbahTotalArmor(tc.data as HtbahCharacterData)
+          huntingBonus = htbahJagdwaffeBonus(ta, body.huntingThreshold)
+        }
+      }
+    }
+    const userMod = (body.modifier ?? 0) + huntingBonus
     payload = rollHtbahSkill({
       character: char,
       skillId: body.skillId,
-      modifier: combineModifier(body.modifier, wounds),
+      modifier: combineModifier(userMod || undefined, wounds),
       note: body.note,
+      aufspiessen: body.aufspiessen,
     })
+    if (huntingBonus) {
+      payload.huntingBonus = huntingBonus
+    }
   } else if (body.kind === 'htbahTalent') {
     const char = await loadCharacterOrThrow(db, body.characterId, user.id)
     wounds = woundsFromChar(char)
@@ -389,6 +457,11 @@ export default defineEventHandler(async (event) => {
       note: body.note,
       characterId: body.characterId,
       characterName: charName,
+      // Stumpfwaffen-Sonderregel "Schlagwaffe": 1er werden serverseitig einmal
+      // neu gewuerfelt. Nur bei Schadenswuerfen (damageKind != 'heal') aktiv —
+      // beim Heilwurf macht ein Reroll der 1er regeltechnisch keinen Sinn.
+      schlagwaffe: body.schlagwaffe && body.damageKind !== 'heal',
+      weaponCategory: body.weaponCategory,
     })
 
     // Ziel-Token aufloesen — fuer die Anzeige im Chat ("− Ruestung X → Y Schaden
@@ -429,8 +502,16 @@ export default defineEventHandler(async (event) => {
               armor = htbahTotalArmor(c.data as HtbahCharacterData)
             }
           }
-          payload.targetArmor = armor
-          payload.finalDamage = Math.max(0, payload.target - armor)
+          // Ruestungsbrechend X: reduziert die wirksame Ruestung. Wird in der
+          // Chat-Anzeige als "Ruestungsbrechend −X" separat ausgewiesen,
+          // damit klar wird, wieso die Ziel-Ruestung kleiner ist als am Bogen.
+          const armorBreak = Math.max(0, body.armorBreak ?? 0)
+          const effective = Math.max(0, armor - armorBreak)
+          payload.targetArmor = effective
+          payload.finalDamage = Math.max(0, payload.target - effective)
+          if (armorBreak > 0) {
+            payload.armorBreak = armorBreak
+          }
         }
       }
     }
