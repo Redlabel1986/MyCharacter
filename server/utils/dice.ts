@@ -158,6 +158,13 @@ export interface FreeRollInput {
   schlagwaffe?: boolean
   /** Waffen-Kategorie nur zur Anzeige im Chat. */
   weaponCategory?: HtbahWeaponCategory
+  /**
+   * HtbaH-Regelwerk §2.5/§10: Krit. Treffer verdoppelt den Schaden.
+   * Wenn `critical=true`, wird die Endsumme (sum + modifier) verdoppelt.
+   * Original-Wuerfel + Modifier bleiben fuer die Transparenz im Chat sichtbar;
+   * `damageCrit=true` markiert das im Payload, RollCard hebt es hervor.
+   */
+  critical?: boolean
 }
 
 export function rollFree(input: FreeRollInput): RollPayload {
@@ -173,12 +180,16 @@ export function rollFree(input: FreeRollInput): RollPayload {
     rerolls = r.rerolls.length ? r.rerolls : undefined
   }
   const sum = finalDice.reduce((a, b) => a + b, 0) + (input.modifier ?? 0)
+  // Krit. Treffer: Endsumme verdoppeln (Regelwerk §2.5 / §10). NUR bei Schaden
+  // sinnvoll — der Aufrufer (rolls.post.ts) achtet darauf, dass `critical` nicht
+  // bei Heilung gesetzt wird.
+  const total = input.critical ? sum * 2 : sum
   return {
     system: input.system,
     label: input.label,
     characterId: input.characterId,
     characterName: input.characterName,
-    target: sum, // bei freien Wuerfen verwenden wir target als "Endsumme"
+    target: total, // bei freien Wuerfen verwenden wir target als "Endsumme"
     modifier: input.modifier || undefined,
     dice: finalDice,
     success: true, // freier Wurf: keine Auswertung
@@ -186,6 +197,7 @@ export function rollFree(input: FreeRollInput): RollPayload {
     freeRoll: true,
     schlagwaffeRerolls: rerolls,
     weaponCategory: input.weaponCategory,
+    damageCrit: input.critical || undefined,
   }
 }
 

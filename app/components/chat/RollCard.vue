@@ -40,6 +40,8 @@ interface RollPayload {
   aufspiessen?: boolean
   /** Jagdwaffen-Bonus +15 auf den Trefferwurf (bereits in target eingerechnet). */
   huntingBonus?: number
+  /** Kritischer Treffer hat den Schaden verdoppelt (HTBaH §2.5/§10). */
+  damageCrit?: boolean
 }
 
 const props = defineProps<{ payload: RollPayload; mine: boolean }>()
@@ -182,6 +184,14 @@ const hasHealBreakdown = computed(
         gegen
         <span class="font-mono font-semibold">{{ payload.target }}</span>
         <template v-if="payload.characterName"> · {{ payload.characterName }}</template>
+      </div>
+      <!-- Krit-Verdopplung (HTBaH §2.5) — bevor Ruestung abgezogen wird, damit
+           klar wird: der hier gezeigte Schaden ist BEREITS verdoppelt. -->
+      <div
+        v-if="payload.damageCrit"
+        class="text-[10px] font-semibold uppercase tracking-widest opacity-90 text-emerald-700"
+      >
+        ✨ Krit. Treffer — Schaden ×2 (HTBaH §2.5)
       </div>
       <!-- Schadens-Anrechnung gegen Ziel mit Ruestung -->
       <div v-if="hasArmorBreakdown" class="font-semibold">

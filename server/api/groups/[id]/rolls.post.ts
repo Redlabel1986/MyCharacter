@@ -146,6 +146,12 @@ const freeSchema = baseSchema.extend({
   schlagwaffe: z.boolean().optional(),
   armorBreak: z.number().int().min(0).max(50).optional(),
   weaponCategory: z.enum(HTBAH_WEAPON_CATEGORIES).optional(),
+  /**
+   * HtbaH §2.5: Krit-Treffer verdoppelt den Schaden. Wird vom Client gesetzt,
+   * wenn die LETZTE Probe ein Krit war und die Waffe Schaden macht. Ignoriert
+   * bei Heilung (server kontrolliert auch nochmal).
+   */
+  critical: z.boolean().optional(),
 })
 
 const npcHtbahSchema = baseSchema.extend({
@@ -462,6 +468,8 @@ export default defineEventHandler(async (event) => {
       // beim Heilwurf macht ein Reroll der 1er regeltechnisch keinen Sinn.
       schlagwaffe: body.schlagwaffe && body.damageKind !== 'heal',
       weaponCategory: body.weaponCategory,
+      // Krit-Treffer verdoppelt den Schaden (HTBaH §2.5/§10). NUR bei Schaden.
+      critical: body.critical && body.damageKind !== 'heal',
     })
 
     // Ziel-Token aufloesen — fuer die Anzeige im Chat ("− Ruestung X → Y Schaden

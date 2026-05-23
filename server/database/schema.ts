@@ -217,6 +217,12 @@ export interface RollPayload {
    * gepflegt war).
    */
   huntingBonus?: number
+  /**
+   * HtbaH-Regelwerk: Kritischer Treffer verdoppelt den Schaden. Wenn gesetzt,
+   * ist `target` bereits die verdoppelte Endsumme. RollCard zeigt das als
+   * "Krit. Treffer ×2" zusaetzlich zur normalen Wurf-Aufschluesselung.
+   */
+  damageCrit?: boolean
 }
 
 export type MessagePayload = CharacterSharePayload | RollPayload | null

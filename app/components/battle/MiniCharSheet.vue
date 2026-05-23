@@ -635,8 +635,11 @@ const rollDamage = async () => {
     //  - schlagwaffe   → Server rerollt 1er einmal
     //  - armorBreak    → reduziert RW des Ziels in der Anzeige / im apply-damage
     //  - weaponCategory→ nur Chat-Anzeige
+    //  - critical      → verdoppelt den Schaden (HTBaH §2.5/§10), nur wenn die
+    //                    letzte Probe ein Krit war
     // Nur ziehen, wenn KEIN Heilmodus (sonst macht der Reroll keinen Sinn).
     const wpForDmg = !isHeal && selectedWeapon.value ? selectedWeapon.value.properties ?? {} : {}
+    const isCritDamage = !isHeal && probeResultLast.value?.critical === true
     const res = (await $fetch(`/api/groups/${props.groupId}/rolls`, {
       method: 'POST',
       body: {
@@ -656,6 +659,7 @@ const rollDamage = async () => {
         schlagwaffe: wpForDmg.schlagwaffe || undefined,
         armorBreak: wpForDmg.armorBreak || undefined,
         weaponCategory: !isHeal ? selectedWeapon.value?.category : undefined,
+        critical: isCritDamage || undefined,
       },
     })) as RollMessage
 
@@ -744,6 +748,12 @@ const rollDamage = async () => {
     // fuer jeden weiteren Angriff erst wieder die Waffe waehlen oder die
     // Formel tippen. So funktioniert wiederholtes Klicken auf "Wuerfeln"
     // fuer dasselbe Ziel mit derselben Waffe direkt.
+    // Krit-Flag aber AUFRAEUMEN, damit der naechste Schadenswurf nicht aus
+    // Versehen wieder verdoppelt wird (HTBaH: Krit gilt nur fuer den EINEN
+    // Treffer aus der Krit-Probe).
+    if (!isHeal && probeResultLast.value?.critical) {
+      probeResultLast.value = null
+    }
     setTimeout(() => (damageSuccess.value = false), 2200)
   } catch (e: unknown) {
     damageError.value = (e as { statusMessage?: string }).statusMessage ?? 'Wurf fehlgeschlagen.'
@@ -1609,6 +1619,15 @@ const onImageError = (tokenId: number) => {
             </UButton>
           </div>
         </div>
+        <!-- Krit-verdopplungs-Hinweis: zeigt an, dass die letzte Probe ein Krit
+             war und der naechste Schadenswurf entsprechend verdoppelt wird
+             (HTBaH §2.5/§10). Verschwindet bei Heilmodus. -->
+        <p
+          v-if="probeResultLast?.critical && damageMode === 'damage'"
+          class="text-xs font-semibold text-emerald-700"
+        >
+          ✨ Kritischer Treffer aktiv — Schadenswurf wird ×2 verdoppelt.
+        </p>
         <p
           v-if="damageFormula && !damageParsed"
           class="text-xs text-amber-700"
