@@ -238,3 +238,76 @@ export function conditionStyle(c: TokenCondition) {
     borderColor: s.border,
   }
 }
+
+/**
+ * HtbaH-spezifisches Mapping: Zustand → numerische Wurf-Modifikatoren
+ * (Regelwerk §4.2 — Erweitertes Kampfsystem).
+ *
+ *  - `selfAttack`: Bonus/Malus auf den eigenen Trefferwurf (Nahkampf/Fernkampf)
+ *  - `selfMod`   : Bonus/Malus auf ALLE Faehigkeitswuerfe der Figur
+ *  - `targetVsAttack`: Bonus/Malus, den GEGNER auf ihren Trefferwurf gegen
+ *                     diese Figur bekommen (z.B. Liegend +20)
+ *  - `damageReduction`: Schaden, der von ANGRIFFEN dieser Figur abgezogen wird
+ *                     (Veraengstigt −5)
+ *  - `notes`     : Lesbare Liste der wirksamen Zustands-Effekte
+ */
+export interface HtbahConditionMods {
+  selfAttack: number
+  selfMod: number
+  targetVsAttack: number
+  damageReduction: number
+  notes: string[]
+}
+
+const HTBAH_CONDITION_EFFECTS: Record<
+  string,
+  Partial<Omit<HtbahConditionMods, 'notes'>> & { note?: string }
+> = {
+  // §4.2 Liegend: Angriffe gegen ihn +20 (kein eigenes Angriff)
+  prone: { targetVsAttack: 20, note: 'Liegend (+20 vs.)' },
+  // §4.2 Ringen / Festgehalten: Angriffe auf Ausführenden +10, auf Erleidenden +20
+  // Wir behandeln "restrained"/"grappled" als Erleidende (+20 vs.)
+  restrained: { targetVsAttack: 20, note: 'Festgehalten (+20 vs.)' },
+  grappled: { targetVsAttack: 20, note: 'Umklammert (+20 vs.)' },
+  // §4.2 Verwirrt: −20 auf alle Faehigkeitswuerfe (wir mappen "stunned" als Verwirrt)
+  stunned: { selfMod: -20, note: 'Verwirrt/Betaeubt (−20 Wurf)' },
+  // §4.2 Blind: −40 Angriff/Parade
+  blinded: { selfAttack: -40, note: 'Blind (−40 Angriff/Parade)' },
+  // §4.2 Veraengstigt: −40 Angriff, Schaden −5
+  frightened: { selfAttack: -40, damageReduction: 5, note: 'Veraengstigt (−40 Angr., −5 Schaden)' },
+  // §4.2 Hilflos / Bewusstlos: kann nicht angreifen (Spielerseite: −100 als Sperre)
+  unconscious: { selfAttack: -100, selfMod: -100, note: 'Bewusstlos (kein Wurf moeglich)' },
+  // Vergleichbare: paralyzed/petrified — voll handlungsunfaehig
+  paralyzed: { selfAttack: -100, selfMod: -100, note: 'Gelaehmt (kein Wurf moeglich)' },
+  petrified: { selfAttack: -100, selfMod: -100, note: 'Versteinert (kein Wurf moeglich)' },
+}
+
+/**
+ * Aggregiert alle Zustands-Effekte zu einem Modifikator-Bundle.
+ * `conditionIds` sind die `id`-Werte aus TOKEN_CONDITIONS (z.B. ['prone', 'frightened']).
+ */
+export function htbahConditionMods(conditionIds: string[]): HtbahConditionMods {
+  const mods: HtbahConditionMods = {
+    selfAttack: 0,
+    selfMod: 0,
+    targetVsAttack: 0,
+    damageReduction: 0,
+    notes: [],
+  }
+  for (const id of conditionIds) {
+    const eff = HTBAH_CONDITION_EFFECTS[id]
+    if (!eff) continue
+    if (eff.selfAttack) mods.selfAttack += eff.selfAttack
+    if (eff.selfMod) mods.selfMod += eff.selfMod
+    if (eff.targetVsAttack) mods.targetVsAttack += eff.targetVsAttack
+    if (eff.damageReduction) mods.damageReduction += eff.damageReduction
+    if (eff.note) mods.notes.push(eff.note)
+  }
+  return mods
+}
+
+/** Convenience: parsed direkt aus einem statusText-String. */
+export function htbahConditionModsFromStatusText(s: string): HtbahConditionMods {
+  const { conditions } = parseStatusText(s)
+  return htbahConditionMods(conditions.map((c) => c.id))
+}

@@ -45,6 +45,7 @@ import {
 } from '~~/shared/engines/dsa5'
 import type { GameSystem } from '~~/shared/systems'
 import type { NpcAbility } from '~~/shared/npc'
+import { htbahConditionModsFromStatusText } from '~~/shared/conditions'
 import { timeBonusFor, isDayTime, type TimeOfDay } from '~~/shared/time-of-day'
 import { computeDamageLevel, damageLevelColor } from '~~/shared/damage-level'
 
@@ -648,14 +649,24 @@ const rollDamage = async () => {
     // Nur ziehen, wenn KEIN Heilmodus (sonst macht der Reroll keinen Sinn).
     const wpForDmg = !isHeal && selectedWeapon.value ? selectedWeapon.value.properties ?? {} : {}
     const isCritDamage = !isHeal && probeResultLast.value?.critical === true
+    // Zustands-Schadensreduktion: Veraengstigt zieht −5 vom Schaden ab (§4.2).
+    // Nur bei Schadenswuerfen — nicht bei Heilung — und nicht doppelt zaehlen.
+    const dmgConditions = !isHeal && activeToken.value
+      ? htbahConditionModsFromStatusText(activeToken.value.statusText)
+      : null
+    const dmgReduction = dmgConditions?.damageReduction ?? 0
+    // Effektiver Modifier: Wuerfelformel-Mod minus Schadensreduktion (zieht ab).
+    const effectiveMod = (parsed.mod ?? 0) - dmgReduction
     const res = (await $fetch(`/api/groups/${props.groupId}/rolls`, {
       method: 'POST',
       body: {
         kind: 'free',
         diceCount: parsed.count,
         diceSides: parsed.sides,
-        modifier: parsed.mod || undefined,
-        label,
+        modifier: effectiveMod || undefined,
+        label: dmgReduction > 0
+          ? `${label} (Schaden −${dmgReduction} durch Zustand)`
+          : label,
         system: sys,
         characterId: character.value?.id,
         tokenId: rollerTokenId,
@@ -1053,26 +1064,69 @@ const rollIt = async () => {
         // Wird HIER addiert, weil der Server das nicht aus der weaponId allein
         // rekonstruieren koennte (Properties leben am Char-Daten-JSON).
         const weaponAttack = htbahWeaponAttackBonus(w)
+        // Zustands-Modifikatoren (§4.2 — Liegend/Blind/Veraengstigt/Verwirrt …)
+        // werden aus den statusText-IDs des EIGENEN Tokens berechnet (Selbst-
+        // Modifikator wirkt auf den Wurf der Figur) und ggf. aus dem Ziel
+        // (targetVsAttack — Bonus auf Trefferwurf gegen liegendes / festgehaltenes Ziel).
+        const selfMods = activeToken.value
+          ? htbahConditionModsFromStatusText(activeToken.value.statusText)
+          : null
+        // selfAttack wirkt nur, wenn es ein Trefferwurf ist (Waffe ausgewaehlt).
+        // selfMod wirkt auf JEDEN Skill-Wurf.
+        const conditionSelfBonus = (selfMods?.selfMod ?? 0) + (w ? (selfMods?.selfAttack ?? 0) : 0)
+        // Ziel-bezogener Modifikator (z.B. Liegend +20) nur bei Waffen-Trefferwurf
+        // gegen ein gepflegtes Ziel.
+        const targetTok = damageTargetId.value
+          ? damageTargetTokens.value.find((t: Token) => t.id === damageTargetId.value) ?? null
+          : null
+        const targetMods = targetTok && w
+          ? htbahConditionModsFromStatusText(targetTok.statusText)
+          : null
+        const conditionTargetBonus = targetMods?.targetVsAttack ?? 0
         const combinedModWithWeapon =
-          (modifier ?? 0) + weaponAttack
-        const noteWithWeapon = weaponAttack
-          ? `${note ? note + ' · ' : ''}Waffe ${weaponAttack > 0 ? '+' : ''}${weaponAttack}`
-          : note
+          (modifier ?? 0) + weaponAttack + conditionSelfBonus + conditionTargetBonus
+        const noteParts: string[] = []
+        if (note) noteParts.push(note)
+        if (weaponAttack) noteParts.push(`Waffe ${weaponAttack > 0 ? '+' : ''}${weaponAttack}`)
+        if (selfMods?.notes.length && (selfMods.selfMod !== 0 || (w && selfMods.selfAttack !== 0))) {
+          noteParts.push(...selfMods.notes)
+        }
+        if (conditionTargetBonus !== 0 && targetMods) {
+          // Markiere Ziel-Conditions sichtbar im Note-Feld
+          noteParts.push(...targetMods.notes.map((n) => `Ziel: ${n}`))
+        }
+        const noteWithMods = noteParts.length ? noteParts.join(' · ') : undefined
         body = {
           kind: 'htbahSkill',
           characterId,
           skillId: opt.id,
           modifier: combinedModWithWeapon || undefined,
-          note: noteWithWeapon,
+          note: noteWithMods,
           aufspiessen: wp.aufspiessen || undefined,
           huntingThreshold: wp.huntingThreshold || undefined,
           targetTokenId: damageTargetId.value || undefined,
         }
         break
       }
-      case 'htbahTalent':
-        body = { kind: 'htbahTalent', characterId, talent: opt.id as HtbahTalent, modifier, note }
+      case 'htbahTalent': {
+        // Zustands-Modifikator auf JEDEN Wurf (§4.2 Verwirrt/Veraengstigt-Auswirkung).
+        const selfMods = activeToken.value
+          ? htbahConditionModsFromStatusText(activeToken.value.statusText)
+          : null
+        const conditionSelf = selfMods?.selfMod ?? 0
+        const combinedMod = (modifier ?? 0) + conditionSelf
+        const noteParts: string[] = []
+        if (note) noteParts.push(note)
+        if (conditionSelf !== 0 && selfMods?.notes.length) noteParts.push(...selfMods.notes)
+        body = {
+          kind: 'htbahTalent',
+          characterId,
+          talent: opt.id as HtbahTalent,
+          modifier: combinedMod || undefined,
+          note: noteParts.length ? noteParts.join(' · ') : undefined,
+        }
         break
+      }
       case 'dndSkill':
         body = {
           kind: 'dndSkill',
