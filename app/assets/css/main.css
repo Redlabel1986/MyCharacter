@@ -309,13 +309,15 @@ label {
    Wird per JS aktiviert: document.documentElement.classList.add('app-mode-active')
    Versteckt Layout-Header/-Footer komplett, lässt die Battle-Map den ganzen
    Viewport einnehmen, damit Mobile/Tablet wie eine App wirkt.
+
+   WICHTIG: Selektoren zielen explizit auf `header.no-print` und `footer.no-print`
+   (Klasse, die unsere Layout-Header/Footer tragen). Generelle Selektoren wie
+   `body > div > header` wuerden Radix-Vue-Portal-Container in den Sheet-/
+   Chat-Popups erwischen und Dropdowns unklickbar machen.
    ============================================================ */
-html.app-mode-active body > div > header,
-html.app-mode-active body > div > footer {
+html.app-mode-active header.no-print,
+html.app-mode-active footer.no-print {
   display: none !important;
-}
-html.app-mode-active body > div {
-  min-height: 100vh !important;
 }
 html.app-mode-active main {
   padding: 0 !important;

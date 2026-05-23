@@ -96,17 +96,14 @@ onMounted(() => {
   groupSub = subscribeGroup(groupId, (p) => {
     if (p.kind === 'initiative') fetchMap()
   })
-  // App-Modus: Header/Footer aus, voller Viewport.
-  if (typeof document !== 'undefined') {
-    document.documentElement.classList.add('app-mode-active')
-  }
+  // Wichtig: KEIN `app-mode-active` hier setzen — das hide-Selektoren
+  // (body > div > header/footer) erwischen sonst Radix-Portal-Container,
+  // die die Selects/Dropdowns rendern, und die werden unklickbar.
+  // layout: false (siehe definePageMeta) sorgt eh fuer keine Header/Footer.
 })
 onBeforeUnmount(() => {
   mapSub?.unsubscribe()
   groupSub?.unsubscribe()
-  if (typeof document !== 'undefined') {
-    document.documentElement.classList.remove('app-mode-active')
-  }
 })
 
 // Polling-Backup (Mobile/Browser hat manchmal Pusher-Hicks).

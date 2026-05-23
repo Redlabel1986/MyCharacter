@@ -1401,6 +1401,12 @@ const openSheetWindow = () => {
   // 420x900 ist ein guter Smartphone-Hochformat-Aspect — passt nebenher.
   window.open(url, `paperheros-sheet-${mapId}`, 'width=420,height=900,resizable=yes,scrollbars=yes')
 }
+// Chat in neuem Fenster oeffnen (parallel zur Vollbild-Karte verfolgbar).
+const openChatWindow = () => {
+  if (typeof window === 'undefined') return
+  const url = `/groups/${groupId}/chat-popup`
+  window.open(url, `paperheros-chat-${groupId}`, 'width=420,height=720,resizable=yes,scrollbars=yes')
+}
 const settingsDraft = ref({
   name: '',
   gridType: 'square' as 'square' | 'hex',
@@ -2905,6 +2911,15 @@ const endResize = () => {
             @click="openSheetWindow"
           >
             Sheet-Fenster
+          </UButton>
+          <UButton
+            size="xs"
+            variant="outline"
+            icon="i-lucide-message-square"
+            title="Gruppen-Chat in eigenem Fenster (parallel zur Vollbild-Karte)"
+            @click="openChatWindow"
+          >
+            Chat-Fenster
           </UButton>
           <UButton
             v-if="isDm"
