@@ -1,7 +1,7 @@
 # Changelog — HtbaH-Modul + UX-Updates
 
 Dieser Lauf hat das HtbaH-Regelwerk im Charakterbogen + Battle-Map weitgehend
-abgebildet. Stand: 2026-05-23.
+abgebildet. Stand: 2026-05-24.
 
 Quelle der Regeln: `docs/research/HTBaH_Regelreferenz.md` (offizielles
 HtbaH-Wiki, Mai 2026).
@@ -23,7 +23,21 @@ HtbaH-Wiki, Mai 2026).
 | `5147f0d` | Zauberei-Modul (§8): Arkanum, Mana, Komplexitätswurf, 12 Lehren           |
 | `5725bce` | Changelog-Doku                                                            |
 | `662e215` | Changelog im UI sichtbar (für alle)                                       |
-| *(folgt)* | Spell-Katalog + Magie bannen/erkennen + Auto-Blutung + Schuss-Falloff + Impressum/Datenschutz |
+| `851a941` | Spell-Katalog + Magie bannen/erkennen + Auto-Blutung + Schuss-Falloff + Impressum/Datenschutz |
+| `2af0647` | Alternative Module: Regel der Drei, Universalkampf, 3× Magie              |
+| `7d6e0ce` | Sheet-Fenster-Dropdowns + neues Chat-Popup-Fenster                        |
+| `8e97c04` | FAB-Button „Mein Sheet" → „Mein Character"                                |
+| `0b5b63b` | Zauber-Wirken: Mehrfach-Ziele + Auto-Schaden/Heilung                      |
+| `376077e` | Battle-Map: Token wandert statt zu springen                               |
+| `2491e4f` | Entfernung zum Ziel berechnen + Reichweite durchsetzen                    |
+| `27c0bf8` | Mana im Status-Feld + Auffüllen                                           |
+| `a646d36` | Verwendbare Gegenstände können auch Mana spenden                          |
+| `7e7a896` | Token: Mana-Chip + gebogener Name + Heil-Item-Bug-Fix                     |
+| `6a39139` | Token-Name: flacherer Bogen (Zwischenschritt)                             |
+| `e32756b` | Token-Name: gerade über dem Token, ein Wort pro Zeile                     |
+| `19aaf73` | Überlappende Tokens als 1/N-Streifen (vertikal getrennt)                  |
+| `2757c58` | Nacht-Sicht zeigt Spieler-Sichtkreis + Benutzername editierbar            |
+| `1b23e26` | Initiative-Tracker: Bilder werden wieder korrekt geladen                  |
 
 ---
 
@@ -654,6 +668,147 @@ Fortschrittsbalken mit Rot-Gradient.
 Modul mit modul­spezifischer Erinnerungs-Box (Konzentration / Kontingent /
 Seelen-Verbrauch). Komplexitätswurf-Pflicht bleibt für Zauberei + Sonnen;
 für Fünfstufen / Seelensplitter pflegt der Spieler den Spruch frei.
+
+---
+
+## 19. Magie-Targeting + Reichweiten (2026-05-24)
+
+### 19.1 Zauber-Wirken mit Mehrfach-Zielen
+
+Das Komplexitätswurf-Popup (§8.5) hat jetzt einen Block „Ziele & Wirkung":
+
+- `USelectMenu` (multi) auf alle Tokens der Karte
+- Modus Schaden/Heilung + freie NdM±X-Formel
+- Auto-Fill aus dem Katalog: erstes `NW10[±X]`-Muster aus dem Effekt-Text;
+  Heil-Modus automatisch für Lehre *Genesung*
+- Toggle „Pro Ziel separat würfeln" (Default: ein AoE-Wurf für alle)
+- Bei Erfolg → pro Ziel eigene Roll-Card (`Spruch → Ziel`) + `apply-damage`
+  (Rüstung serverseitig); Ergebnis-Zeilen unter dem Popup
+
+Misserfolg oder Krit-Misserfolg → kein Auto-Schaden, nur Mana-Kosten.
+
+### 19.2 Entfernung zum Ziel berechnen + Reichweite durchsetzen
+
+Neuer Helper `shared/distance.ts`:
+
+```ts
+chebyshevTiles(a, b, gridSize) // Felder zwischen zwei Token-Mittelpunkten
+parseHtbahRangeTiles(text)     // "Berührung"=1, "Selbst"=0, "30 m"=30, "Sicht"=∞
+```
+
+Skala: **1 Feld = 1 m** (passt zu HtbaH-Reichweiten in Metern).
+
+Im MiniCharSheet:
+
+- Ziel-Dropdowns zeigen Distanz: `Goblin · 12/14 · 3 Felder` / `· 1 Feld` / `· selbes Feld`
+- **Nahkampf** (Waffenkategorie ≠ fernkampf/wurf): Probe + Schaden geblockt,
+  wenn Ziel > 1 Feld weg
+- **Zauber-Wirken**: Katalog-Reichweite wird geparst; Wirken-Button geblockt,
+  wenn ein gewähltes Ziel außerhalb liegt
+- **DM-Override**: Spielleiter darf trotz Reichweiten-Verstoß würfeln
+  (Storytelling-Edge-Cases); Spieler sehen rote Warnung + deaktivierten Button
+
+`battle/[mapId].vue` + `play/[mapId].vue` reichen `gridSize` + `isDm` als
+neue Props an MiniCharSheet durch.
+
+### 19.3 Mana im Status-Feld + Auffüllen
+
+Im HtbaH-Bogen, sobald das Magie-Modul aktiv ist:
+
+- Mana-StatBlock neben LP/Initiative (`aktuell/max`, Arkanum als Sublabel)
+- Editierbares Mana-Input + read-only Max-Anzeige + **Auffüllen**-Button
+  (sofort auf `htbahManaMax(arkanum)`)
+
+Bei deaktiviertem Magie-Modul unsichtbar — Layout fällt von 3-spaltig auf
+2-spaltig zurück.
+
+### 19.4 Verwendbare Gegenstände können auch Mana spenden
+
+`HtbahUsableItem` bekommt ein optionales `manaAmount`-Feld. Ein Item kann
+HP heilen, Mana spenden — oder beides (z.B. Lebenselixier).
+
+- **Server**: `POST /apply-mana` spiegelt `/apply-damage` (group-member-Auth,
+  server-clamped via `htbahManaMax`). Bei NPC oder ohne Magie → `applied: 0`
+  (kein harter Fehler, HP-Effekt + Anzahl-Reduktion laufen weiter)
+- **Client**: `useItem` ruft pro Item beide Endpoints (jeweils nur wenn > 0),
+  eine gemeinsame Chat-Card mit beiden Werten im Label
+  (`Verwende X · ✚N HP · ✦M Mana`); Ergebnis-Zeile zeigt beide Deltas
+- **Bug-Fix Heil-Self**: der nachgelagerte PUT (quantity−1) hat vorher den
+  Vor-Heilungs-Snapshot von `character.value` zurückgeschrieben und damit
+  die frische HP überschrieben. Jetzt: Charakter vor dem PUT neu laden,
+  wenn das Ziel der eigene Charakter ist
+
+---
+
+## 20. Battle-Map UX-Iteration (2026-05-24)
+
+### 20.1 Token-Bewegung als Walk-Animation
+
+Statt einem harten Sprung sehen Mitspieler jetzt eine 400 ms-Animation von
+alter zu neuer Position (`cubic-bezier(0.4, 0, 0.2, 1)` auf `left` + `top`).
+Eigener Drag bleibt lag-frei via `token-dragging`-Opt-out. Respektiert
+`prefers-reduced-motion`.
+
+### 20.2 Mana/Fokus am Token
+
+Server liefert `mana`/`manaMax` pro Token mit, wenn der gekoppelte HtbaH-
+Charakter Magie aktiv hat. Battle-Map rendert einen kleinen lila
+`✦ N/M`-Chip direkt unter dem HP-Chip. NPCs ohne Magie bekommen keinen
+Chip. `hpVisibleToPlayers=false` versteckt auch Mana (DM-Geheimnis).
+
+### 20.3 Gerader Namen-Stack über dem Token
+
+Der erste Versuch (gebogener SVG-`textPath` als Halbkreis) wickelte den
+Namen um den Token, äußere Buchstaben standen quer. Iteration 2 (flacher
+Bogen, R = 4× Token-Radius) blieb winzig und unlesbar. Finale Lösung:
+gerade gestapelt, jedes Wort eigene Zeile, weiß mit dickem schwarzen
+Outline. *„Waldthane Alvinur Tatzelmoos"* wird damit zu drei lesbaren
+Zeilen direkt über dem Token. Arc-Helper sind komplett raus.
+
+### 20.4 Überlappende Tokens als 1/N-Streifen
+
+Stehen zwei oder mehr Tokens auf demselben Rasterfeld, wird jedes auf einen
+vertikalen `clip-path: inset(...)`-Streifen geclippt:
+
+- 2 Tokens → zwei Halbkreise nebeneinander
+- 3 Tokens → drei Lamellen
+- N Tokens → 1/N
+
+Gruppierung über gesnappte Tile-Koordinaten; im Drag befindliche Tokens
+sind ausgenommen (sonst Pixel-Flackern). DOM restrukturiert: Wrapper hält
+nur Position + Click-Handler, ein innerer Visual-`<div>` trägt
+Border + Bild + Wund-Schleier + Tot-X und bekommt den Clip — Badges, HP-/
+Mana-Chip und Namen-Stack liegen außerhalb und bleiben vollständig
+sichtbar.
+
+### 20.5 Nacht-Sicht zeigt Spieler-Sichtkreis
+
+`visionPolygons` war an `map.fogEnabled` gebunden — bei aktivierter Nacht
+ohne FoW kam die Nacht-Maske ohne Sicht-„Löcher" raus, der Spieler sah
+pitch black. Fix: Polygone werden auch berechnet, wenn die aktuelle
+Tageszeit eine Sicht-Mask braucht (`currentTodOverlay.requiresVisionMask`).
+
+### 20.6 Initiative-Tracker: Bilder wieder geladen
+
+Server-Roll-Handler speicherte den rohen `battleTokens.imageUrl` im
+Initiative-Eintrag — bei Charakter-Tokens oft `null`, sonst ein privater
+Blob-URL, den der Browser nicht direkt laden kann. Fix: URL über den
+authentifizierten `/api/groups/.../tokens/<id>/image`-Endpoint bauen
+(proxyt private Blobs, fällt auf Charakter-Portrait zurück). Ohne Token
+auf einer Karte: Fallback `/api/portrait/<charId>`. Zusätzlich
+Client-`@error`-Handler → neutrales User-Icon statt broken-image-Glyph
+für Alt-Einträge.
+
+---
+
+## 21. Profil
+
+Spieler können ihren Benutzernamen jetzt im Profil ändern. Inline-Editor
+mit Pencil-Button neben dem Namen, Speichern/Abbrechen, kurze
+„✓ gespeichert"-Bestätigung. Server-Endpoint
+`POST /api/profile/change-username` validiert (3–40 Zeichen, unique-Check
+gegen andere User) und aktualisiert die Session, damit Header + Profil
+sofort den neuen Namen zeigen.
 
 ---
 
