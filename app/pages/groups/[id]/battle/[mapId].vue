@@ -1011,6 +1011,50 @@ const showDamageBadge = (t: Token): boolean => {
  *   75–94%           -> heftiger
  *   95–100% (tot)    -> dunkelroter Vollschleier
  */
+// --- Token-Stapel auf gleichem Feld ---
+// Wenn zwei (oder mehr) Tokens auf demselben Raster-Feld stehen, sollen
+// beide sichtbar bleiben: jedes Token wird auf einen vertikalen Streifen
+// von 1/N der Token-Breite geclippt — N Tokens ergeben N Streifen, die
+// zusammen wieder den Token-Umriss aufspannen.
+//
+// Wir gruppieren ueber das gesnappte Zell-Koordinatenpaar; das im Drag
+// befindliche Token ist ausgenommen, sonst flackerte der Streifen
+// pixelweise waehrend des Ziehens.
+const tokenStackInfo = computed(() => {
+  const result = new Map<number, { index: number; total: number }>()
+  if (!map.value) return result
+  const groups = new Map<string, Token[]>()
+  for (const t of tokens.value) {
+    if (draggingTokenId.value === t.id) continue
+    const s = snap(t.x, t.y)
+    const key = `${Math.round(s.x)}:${Math.round(s.y)}`
+    let bucket = groups.get(key)
+    if (!bucket) {
+      bucket = []
+      groups.set(key, bucket)
+    }
+    bucket.push(t)
+  }
+  for (const list of groups.values()) {
+    if (list.length <= 1) continue
+    // Stabile Sortierung nach id, damit dasselbe Token bei jedem Render
+    // denselben Streifen bekommt — sonst „springt" der Inhalt bei Polls.
+    list.sort((a, b) => a.id - b.id)
+    list.forEach((t, i) => result.set(t.id, { index: i, total: list.length }))
+  }
+  return result
+})
+// inset(top right bottom left) — vertikaler Streifen, der dem Token-Slot
+// in der Stapel-Gruppe entspricht. Ohne Stapel: null = kein Clip.
+const tokenSliceClip = (t: Token): string | undefined => {
+  const info = tokenStackInfo.value.get(t.id)
+  if (!info) return undefined
+  const slice = 100 / info.total
+  const left = info.index * slice
+  const right = 100 - (info.index + 1) * slice
+  return `inset(0 ${right.toFixed(3)}% 0 ${left.toFixed(3)}%)`
+}
+
 const tokenDamageOverlay = (t: Token): { opacity: number; intense: boolean } | null => {
   if (t.hp === null || !t.hpMax || t.hpMax <= 0) return null
   const pct = Math.max(0, Math.min(1, 1 - t.hp / t.hpMax))
@@ -1019,6 +1063,16 @@ const tokenDamageOverlay = (t: Token): { opacity: number; intense: boolean } | n
   if (pct >= 0.75) return { opacity: 0.55, intense: true }
   if (pct >= 0.5) return { opacity: 0.4, intense: false }
   return { opacity: 0.22, intense: false }
+}
+// Vorgefertigte CSS-`background`-Property fuer den Wund-Schleier — vermeidet
+// den `!`-Non-Null-Operator in der Vue-Template-Expression (den manche
+// Parser-Versionen als Syntax-Fehler ablehnen).
+const tokenDamageBackground = (t: Token): string | null => {
+  const o = tokenDamageOverlay(t)
+  if (!o) return null
+  return o.intense
+    ? `radial-gradient(circle at 35% 30%, rgba(127,29,29,${o.opacity * 0.9}) 0%, rgba(153,27,27,${o.opacity}) 60%, rgba(69,10,10,${Math.min(1, o.opacity * 1.1)}) 100%)`
+    : `radial-gradient(circle at 30% 30%, rgba(220,38,38,${o.opacity}) 0%, rgba(153,27,27,${o.opacity * 0.9}) 100%)`
 }
 
 
@@ -3552,13 +3606,11 @@ const endResize = () => {
               v-show="isTokenVisibleToViewer(t)"
               :key="t.id"
               :data-token-id="t.id"
-              class="absolute border-2 rounded-full bg-white/80 shadow flex items-center justify-center text-xs font-semibold select-none"
+              class="absolute select-none"
               :class="[
                 toolMode !== 'select'
                   ? 'cursor-default'
                   : canMoveToken(t) ? 'cursor-move' : 'cursor-pointer',
-                t.hidden ? 'opacity-60 border-amber-500' : 'border-[var(--color-accent)]',
-                t.characterId !== null && !t.hidden ? 'token-player-glow' : '',
                 draggingTokenId === t.id ? 'token-dragging' : 'token-walk',
               ]"
               :style="{
@@ -3573,34 +3625,46 @@ const endResize = () => {
               @click="toolMode === 'select' && openInfoFromClick(t)"
               @dblclick="toolMode === 'select' && startEdit(t)"
             >
-              <img
-                v-if="tokenImageSrc(t)"
-                :src="tokenImageSrc(t) ?? ''"
-                :alt="t.name"
-                class="w-full h-full object-cover rounded-full pointer-events-none"
-                draggable="false"
-              >
-              <span v-else class="text-center px-1 leading-tight pointer-events-none">
-                {{ t.name.slice(0, 8) }}
-              </span>
-              <!-- Verwundungs-Schleier (Blut-Overlay je nach HP%) -->
+              <!-- Visueller Kreis: Rand, Bild, Wund-Schleier, Tot-X. Wird per
+                   clip-path auf einen vertikalen Streifen reduziert, wenn das
+                   Token mit anderen auf demselben Feld stapelt — so bleiben
+                   alle Tokens sichtbar, jedes als 1/N-Lamelle. Badges/Namen
+                   liegen ausserhalb dieses Wrappers und werden NICHT geclippt. -->
               <div
-                v-if="tokenDamageOverlay(t)"
-                class="absolute inset-0 rounded-full pointer-events-none"
-                :style="{
-                  background: tokenDamageOverlay(t)!.intense
-                    ? `radial-gradient(circle at 35% 30%, rgba(127,29,29,${tokenDamageOverlay(t)!.opacity * 0.9}) 0%, rgba(153,27,27,${tokenDamageOverlay(t)!.opacity}) 60%, rgba(69,10,10,${Math.min(1, tokenDamageOverlay(t)!.opacity * 1.1)}) 100%)`
-                    : `radial-gradient(circle at 30% 30%, rgba(220,38,38,${tokenDamageOverlay(t)!.opacity}) 0%, rgba(153,27,27,${tokenDamageOverlay(t)!.opacity * 0.9}) 100%)`,
-                  mixBlendMode: 'multiply',
-                }"
-              />
-              <!-- Dunkles Kreuz/X bei tot (HP <= 0) -->
-              <div
-                v-if="t.hp !== null && t.hp <= 0 && t.hpMax"
-                class="absolute inset-0 rounded-full pointer-events-none flex items-center justify-center"
-                :style="{ color: '#fee2e2', textShadow: '0 0 4px rgba(0,0,0,0.8)' }"
+                class="absolute inset-0 border-2 rounded-full bg-white/80 shadow flex items-center justify-center text-xs font-semibold"
+                :class="[
+                  t.hidden ? 'opacity-60 border-amber-500' : 'border-[var(--color-accent)]',
+                  t.characterId !== null && !t.hidden ? 'token-player-glow' : '',
+                ]"
+                :style="{ clipPath: tokenSliceClip(t) }"
               >
-                <UIcon name="i-lucide-x" class="size-1/2 opacity-80" />
+                <img
+                  v-if="tokenImageSrc(t)"
+                  :src="tokenImageSrc(t) ?? ''"
+                  :alt="t.name"
+                  class="w-full h-full object-cover rounded-full pointer-events-none"
+                  draggable="false"
+                >
+                <span v-else class="text-center px-1 leading-tight pointer-events-none">
+                  {{ t.name.slice(0, 8) }}
+                </span>
+                <!-- Verwundungs-Schleier (Blut-Overlay je nach HP%) -->
+                <div
+                  v-if="tokenDamageBackground(t)"
+                  class="absolute inset-0 rounded-full pointer-events-none"
+                  :style="{
+                    background: tokenDamageBackground(t) ?? undefined,
+                    mixBlendMode: 'multiply',
+                  }"
+                />
+                <!-- Dunkles Kreuz/X bei tot (HP <= 0) -->
+                <div
+                  v-if="t.hp !== null && t.hp <= 0 && t.hpMax"
+                  class="absolute inset-0 rounded-full pointer-events-none flex items-center justify-center"
+                  :style="{ color: '#fee2e2', textShadow: '0 0 4px rgba(0,0,0,0.8)' }"
+                >
+                  <UIcon name="i-lucide-x" class="size-1/2 opacity-80" />
+                </div>
               </div>
               <div
                 v-if="t.hp !== null && t.hpMax"
