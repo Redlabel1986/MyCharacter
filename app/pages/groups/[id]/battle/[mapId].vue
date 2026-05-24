@@ -3555,6 +3555,7 @@ const endResize = () => {
                   : canMoveToken(t) ? 'cursor-move' : 'cursor-pointer',
                 t.hidden ? 'opacity-60 border-amber-500' : 'border-[var(--color-accent)]',
                 t.characterId !== null && !t.hidden ? 'token-player-glow' : '',
+                draggingTokenId === t.id ? 'token-dragging' : 'token-walk',
               ]"
               :style="{
                 left: t.x + 'px',
@@ -5064,6 +5065,25 @@ const endResize = () => {
   box-shadow:
     0 0 0 2px var(--color-accent),
     0 0 14px 4px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+/* Sanftes „Wandern" zwischen alter und neuer Position. Gilt fuer alle Tokens,
+   die der lokale User NICHT gerade selbst zieht — die anderen Spieler sehen
+   so eine fluessige Bewegung statt eines Sprungs. Beim Drag selbst wird die
+   Transition deaktiviert (token-dragging), damit das Token dem Cursor 1:1
+   folgt. transform bleibt animationsfrei, weil das nur das −50%/−50%
+   Zentrieren regelt und sich nicht aendert. */
+.token-walk {
+  transition: left 400ms cubic-bezier(0.4, 0.0, 0.2, 1), top 400ms cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+.token-dragging {
+  transition: none;
+}
+/* Wenn die Bewegungs-Animation aktiv ist, blocken wir Pointer-Events nicht —
+   der User kann ein wanderndes Token jederzeit anklicken oder packen.
+   (Falls Performance auf grossen Karten ein Problem wird: per
+   prefers-reduced-motion ausschalten.) */
+@media (prefers-reduced-motion: reduce) {
+  .token-walk { transition: none; }
 }
 /* Schachbrett-Hintergrund: macht transparente Bereiche eines PNG sichtbar,
    damit man im Picker und Edit-Modal sofort sieht, dass das Bild keinen
