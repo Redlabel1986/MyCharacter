@@ -812,6 +812,42 @@ sofort den neuen Namen zeigen.
 
 ---
 
+## 22. Sichtlinie + Restrückstände (2026-05-24)
+
+### 22.1 Fernkampf + Magie brauchen Sichtlinie
+
+Neuer Helper `canSeeTargetForAttack` in `shared/distance.ts`:
+
+- **Tag**: direkte Sichtlinie über `segmentBlockedByWalls` aus `fog.ts` —
+  Mauer dazwischen blockt.
+- **Nacht**: zusätzlich muss das Ziel beleuchtet sein — im eigenen
+  Sichtkreis des Angreifers oder in einer Karten-Lichtquelle (Fackel,
+  Lagerfeuer). Jede Quelle wird per Radius + Mauer-Pruefung getestet.
+
+Battle-Map + Play-Page sammeln Walls + Lichter und reichen die Funktion
+als `canSee`-Prop an MiniCharSheet. Dort wird sie für Fernkampf-
+(Bogen/Schusswaffe/Wurf) und Cast-Ziele ausgewertet:
+
+- Spieler: Würfeln/Wirken-Button geblockt + rote Warnung.
+- DM: nur gelbe Warnung, darf weiter würfeln.
+
+### 22.2 Universalkampf-Schaden direkt anwenden
+
+Der Universalkampf-Rechner (§3.2) zeigt nicht mehr nur das Ergebnis —
+darunter ein Ziel-Dropdown + „Schaden anwenden"-Knopf, der via
+`apply-damage` direkt am Token wirkt (Rüstung serverseitig). Posten
+einer Chat-Card mit der Rechnungsspur (`T − W / Mod`).
+
+### 22.3 Seelensplittermagie: Auto-Vision-Wurf
+
+Beim Komplexwurf in Seelensplitter-Modus wirft die UI jetzt
+automatisch W100 ≤ `seeleVerbraucht`% vor dem eigentlichen Cast. Wenn
+es triggert, postet die UI eine rote Chat-Card („💀 Vision ausgelöst")
+und zeigt im Popup ein dauerhaftes Indikator-Banner. Der Cast läuft
+trotzdem — die narrative Konsequenz trägt der DM.
+
+---
+
 ## 18. Was noch offen ist
 
 Alle MD-Punkte aus dem Regelwerk sind jetzt abgebildet — entweder
@@ -822,9 +858,5 @@ Mögliche Erweiterungen für später:
 
 - Pre-built Zauber-Kataloge auch für Fünfstufen/Sonnen/Seelensplitter
   (analog zum bestehenden Zauberei-Katalog mit allen 60 Sprüchen).
-- Auto-Vision-Trigger-Roll für Seelensplittermagie (aktuell muss der
-  Spieler den W100-Wurf selbst auslösen — könnte vor jeder Probe
-  automatisch passieren).
-- Universalkampf-Schadensanwendung an Ziel-Token direkt aus dem
-  Rechner heraus (aktuell zeigt der Rechner nur das Ergebnis, der
-  Spieler trägt manuell ins Ziel ein).
+  → Bewusst offen gelassen: dafür braucht es die Spruchtexte aus dem
+  Regelwerk; ohne Quelle wäre der Inhalt erfunden.

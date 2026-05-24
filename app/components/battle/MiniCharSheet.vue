@@ -603,6 +603,65 @@ const universalResult = computed(() =>
     armorKind: uniArmorKind.value,
   }),
 )
+// Ziel-Token fuer den Universalkampf-Schaden. 0 = nur rechnen, nicht anwenden.
+// Die normalen Schaden-Wuerfler-Targets (damageTargetTokens) wiederverwenden —
+// dort sind ja sowieso alle Tokens der Karte gelistet.
+const uniTargetId = ref<number>(0)
+const uniApplying = ref(false)
+const uniApplyResult = ref<string | null>(null)
+const uniApplyError = ref<string | null>(null)
+const applyUniversalDamage = async () => {
+  if (!character.value && !activeToken.value) return
+  const amount = universalResult.value.damage
+  if (amount <= 0) {
+    uniApplyError.value = 'Kein Schaden zu verteilen — Wurf ueber Talent oder Mod = 0.'
+    return
+  }
+  const target = damageTargetTokens.value.find((t: Token) => t.id === uniTargetId.value) ?? null
+  if (!target) {
+    uniApplyError.value = 'Bitte ein Ziel waehlen.'
+    return
+  }
+  if (target.hp === null || target.hpMax === null || target.hpMax === undefined) {
+    uniApplyError.value = `${target.name} hat keine HP gepflegt.`
+    return
+  }
+  uniApplying.value = true
+  uniApplyError.value = null
+  uniApplyResult.value = null
+  try {
+    // Chat-Card mit dem Berechnungs-Pfad, damit der DM sieht, was angewandt wurde.
+    await $fetch(`/api/groups/${props.groupId}/rolls`, {
+      method: 'POST',
+      body: {
+        kind: 'free',
+        diceCount: 0,
+        diceSides: 1,
+        modifier: amount,
+        label: `Universalkampf-Schaden → ${target.name} (T ${uniTalentValue.value} − W ${uniAttackRoll.value}) / Mod ${universalResult.value.combinedMod}`,
+        system: 'htbah',
+        characterId: character.value?.id,
+        targetTokenId: target.id,
+        damageKind: 'damage',
+      },
+    })
+    const res = (await $fetch(
+      `/api/groups/${props.groupId}/maps/${props.mapId}/tokens/${target.id}/apply-damage`,
+      { method: 'POST', body: { amount, kind: 'damage' } },
+    )) as { oldHp: number; hp: number; hpMax: number; applied: number; absorbed: number }
+    target.hp = res.hp
+    const armorPart = res.absorbed > 0 ? ` (Ruestung ${res.absorbed})` : ''
+    uniApplyResult.value =
+      `−${res.applied} HP an ${target.name}${armorPart} (${res.oldHp} → ${res.hp}/${res.hpMax}).`
+    emit('token-updated')
+    setTimeout(() => (uniApplyResult.value = null), 3500)
+  } catch (e: unknown) {
+    uniApplyError.value =
+      (e as { statusMessage?: string }).statusMessage ?? 'Schaden konnte nicht angewandt werden.'
+  } finally {
+    uniApplying.value = false
+  }
+}
 
 // --- Schaden-Wuerfler (freier NdM+X-Wurf, fuer Charakter- und NPC-Tokens) ---
 const damageFormula = ref<string>('')
@@ -1306,6 +1365,44 @@ function rollFormula(p: { count: number; sides: number; mod: number }): {
   return { dice, total: Math.max(0, total) }
 }
 
+// Seelensplittermagie (§8.13.3) — Auto-Vision-Wurf vor jedem Cast.
+// Regel: W100 ≤ seeleVerbraucht% = Schreckens-/Todesvision. Wird vor dem
+// Komplexwurf serverlos gewuerfelt; wenn er ausloest, posten wir eine
+// rote Chat-Card und merken das Ergebnis fuer die UI. Der Cast laeuft
+// trotzdem (Spieler entscheidet im nachhinein, ob die Vision den
+// Spielzug abbricht — RAW gibt nur den Trigger vor, nicht die Konsequenz).
+const isSeelensplitter = computed(
+  () => hasMagic.value && magicModule.value === 'seelensplitter',
+)
+const lastVisionResult = ref<{ roll: number; threshold: number; triggered: boolean } | null>(null)
+const rollSeelensplitterVision = async (): Promise<{ triggered: boolean }> => {
+  if (!isSeelensplitter.value || !character.value) return { triggered: false }
+  const threshold = seeleVerbraucht.value
+  const roll = Math.floor(Math.random() * 100) + 1
+  const triggered = roll <= threshold
+  lastVisionResult.value = { roll, threshold, triggered }
+  // Chat-Card: ein freier 1W100 mit explizitem Label, damit der DM sieht,
+  // ob die Vision wirklich ausgeloest hat. modifier=0, kein Schaden.
+  try {
+    await $fetch(`/api/groups/${props.groupId}/rolls`, {
+      method: 'POST',
+      body: {
+        kind: 'free',
+        diceCount: 1,
+        diceSides: 100,
+        label: triggered
+          ? `💀 Seelensplitter-Vision AUSGELÖST (W100=${roll} ≤ ${threshold}%)`
+          : `Seelensplitter-Vision-Check (W100=${roll} > ${threshold}% — bestanden)`,
+        system: 'htbah',
+        characterId: character.value.id,
+      },
+    })
+  } catch {
+    // Chat-Eintrag scheitert nicht-kritisch — der lokale Indikator reicht.
+  }
+  return { triggered }
+}
+
 const detectMagicSending = ref(false)
 const detectMagic = async () => {
   if (!character.value || !hasMagic.value) return
@@ -1361,6 +1458,12 @@ const castSpell = async () => {
   castError.value = null
   castDamageApplyResults.value = []
   try {
+    // Seelensplittermagie: vor dem Komplexwurf den Vision-Check rollen.
+    // Triggert eine Schreckens-/Todesvision (Chat-Card), aber der Cast
+    // laeuft trotzdem — die DM-Konsequenz traegt der Spielleiter manuell ein.
+    if (isSeelensplitter.value) {
+      await rollSeelensplitterVision()
+    }
     const res = (await $fetch(`/api/groups/${props.groupId}/magic/cast`, {
       method: 'POST',
       body: {
@@ -2337,6 +2440,25 @@ const onImageError = (tokenId: number) => {
         >
           ⚠ Nicht genug Mana ({{ mana }}/{{ HTBAH_SPELL_MANA_COST[castSpellLevel] }} benötigt).
         </div>
+        <!-- Seelensplitter-Vision-Indikator: zeigt das Ergebnis des
+             automatisch ausgeloesten W100 ≤ Seele-Wurfs vor dem letzten Cast. -->
+        <div
+          v-if="isSeelensplitter && lastVisionResult"
+          class="text-xs p-2 rounded border"
+          :class="lastVisionResult.triggered
+            ? 'bg-red-100 text-red-900 border-red-400'
+            : 'bg-emerald-50 text-emerald-800 border-emerald-200'"
+        >
+          <template v-if="lastVisionResult.triggered">
+            💀 <strong>Schreckens-/Todesvision ausgelöst!</strong>
+            W100 = {{ lastVisionResult.roll }} ≤ {{ lastVisionResult.threshold }}% Seele
+            — DM beschreibt die Vision.
+          </template>
+          <template v-else>
+            Vision-Check bestanden (W100 = {{ lastVisionResult.roll }}
+            &gt; {{ lastVisionResult.threshold }}%).
+          </template>
+        </div>
         <div
           v-if="castLastResult"
           class="text-xs p-2 rounded"
@@ -2708,6 +2830,34 @@ const onImageError = (tokenId: number) => {
               Kein Treffer (Wurf {{ uniAttackRoll }} &gt; Talent {{ uniTalentValue }})
             </template>
           </div>
+          <!-- Ziel + Anwenden: schreibt die berechneten HP direkt am Token ab,
+               postet einen Chat-Eintrag mit der Berechnung. -->
+          <div class="grid grid-cols-12 gap-2 items-end">
+            <UFormField label="Ziel" class="col-span-7">
+              <USelect
+                v-model="uniTargetId"
+                :items="damageTargetOptions"
+                value-key="value"
+                size="sm"
+                class="w-full"
+              />
+            </UFormField>
+            <UButton
+              class="col-span-5"
+              size="sm"
+              color="error"
+              icon="i-lucide-swords"
+              block
+              :loading="uniApplying"
+              :disabled="universalResult.damage <= 0 || !uniTargetId || uniApplying"
+              title="Berechneten Schaden ans Ziel-Token anwenden"
+              @click="applyUniversalDamage"
+            >
+              Schaden anwenden
+            </UButton>
+          </div>
+          <p v-if="uniApplyError" class="text-xs text-red-700">{{ uniApplyError }}</p>
+          <p v-if="uniApplyResult" class="text-xs text-emerald-700">{{ uniApplyResult }}</p>
         </div>
 
         <div class="flex items-baseline justify-between gap-2">
