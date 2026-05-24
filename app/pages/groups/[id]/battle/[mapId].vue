@@ -1022,25 +1022,42 @@ const tokenDamageOverlay = (t: Token): { opacity: number; intense: boolean } | n
 }
 
 // --- Namens-Bogen ueber dem Token (SVG textPath) ---
-// Halbkreis-Pfad, Radius leicht groesser als der Token-Radius, damit der
-// Schriftzug knapp ueber der Token-Kante sitzt und mitwaechst, wenn der
-// Token (sizeMultiplier) groesser ist.
-const tokenNameArcRadius = (t: Token): number => {
+// Wir wollen die Schrift KLAR ueber der Token-Kante platzieren und nur
+// SANFT bogenfoermig — nicht als enger Halbkreis, sonst kippen die
+// aeusseren Buchstaben quer zum Token. Trick: ein sehr grosser
+// Kreis-Radius, dessen Mittelpunkt deutlich UNTER dem Token liegt; der
+// sichtbare Bogen oberhalb ist dadurch nur leicht gewoelbt.
+const FONT_PX = 11
+const APPROX_CHAR_PX = 6
+
+// Halbbreite des Textes inkl. kleinem Polster (links/rechts).
+function tokenNameHalfTextWidth(t: Token): number {
+  const len = (t.name ?? '').length
   const tokenRadius = ((map.value?.gridSize ?? 50) * (t.sizeMultiplier ?? 1)) / 2
-  return tokenRadius + 8
+  // Mind. so breit wie der Token, damit kurze Namen nicht im Token kleben.
+  return Math.max(tokenRadius * 0.6, (len * APPROX_CHAR_PX) / 2 + 6)
+}
+// Pfad mit grossem Kreis (R = 4 × Token-Radius + Apex-Hoehe), dessen Apex
+// 10 px ueber der Token-Kante sitzt — flach genug, dass die Schrift wie eine
+// leichte Welle ueber dem Token liegt, statt sich um ihn zu wickeln.
+const tokenNameArcPath = (t: Token): string => {
+  const tokenRadius = ((map.value?.gridSize ?? 50) * (t.sizeMultiplier ?? 1)) / 2
+  const apexAbove = tokenRadius + 10
+  const centerBelow = tokenRadius * 4
+  const R = centerBelow + apexAbove
+  const halfW = tokenNameHalfTextWidth(t)
+  const x = Math.min(halfW, R - 1)
+  // y-Koordinate des Endpunkts auf der OBEREN Kreishaelfte
+  // (Kreis-Center bei (0, centerBelow), Radius R).
+  const y = centerBelow - Math.sqrt(Math.max(0, R * R - x * x))
+  // sweep-flag = 0 → Bogen waelbt sich nach OBEN (SVG-y ist invertiert).
+  return `M ${-x} ${y} A ${R} ${R} 0 0 0 ${x} ${y}`
 }
 const tokenNameSvgSize = (t: Token): number => {
-  // SVG-Box muss den Halbkreis + Buchstabenhoehe + Outline-Stroke aufnehmen.
-  // 28 px Polster reichen fuer 11 px Font + 3 px Stroke pro Seite.
-  return tokenNameArcRadius(t) * 2 + 28
-}
-const tokenNameArcPath = (t: Token): string => {
-  const r = tokenNameArcRadius(t)
-  // Halbkreis ueber dem Center: von (−r, 0) nach (+r, 0), sweep-flag=0 →
-  // Boegen bulged in negative y, also visuell nach OBEN (SVG-y ist invertiert).
-  // Text folgt der Pfad-Richtung links→rechts und ist damit beim Schauen
-  // von oben am Token lesbar — wie ein Bogen ueber dem Kopf der Figur.
-  return `M -${r} 0 A ${r} ${r} 0 0 0 ${r} 0`
+  const tokenRadius = ((map.value?.gridSize ?? 50) * (t.sizeMultiplier ?? 1)) / 2
+  const halfW = tokenNameHalfTextWidth(t)
+  // SVG-Box muss Bogenbreite + Font-Hoehe + 3 px Stroke beidseitig fassen.
+  return Math.max(tokenRadius * 3, halfW * 2 + 28)
 }
 
 // --- Token hinzufuegen ---
