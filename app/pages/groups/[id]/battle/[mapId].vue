@@ -4063,6 +4063,8 @@ const endResize = () => {
           :all-tokens="tokens"
           :time-of-day="currentTimeOfDay"
           :awaiting-initiative-for="initiativeState?.awaitingFromCharacters ?? []"
+          :grid-size="map?.gridSize"
+          :is-dm="isDm"
           @token-updated="fetchMap"
         />
       </div>

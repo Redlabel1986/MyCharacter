@@ -63,19 +63,24 @@ const mapName = ref<string>('')
 const tokens = ref<Token[]>([])
 const initiativeState = ref<InitiativeState | null>(null)
 const currentTimeOfDay = ref<TimeOfDay | undefined>(undefined)
+const gridSize = ref<number | undefined>(undefined)
+const isDm = ref<boolean>(false)
 const loadError = ref<string | null>(null)
 
 const fetchMap = async () => {
   try {
     const res = await $fetch<{
-      map: { name: string; timeOfDay?: TimeOfDay }
+      map: { name: string; timeOfDay?: TimeOfDay; gridSize?: number }
       tokens: Token[]
       initiativeState: InitiativeState | null
+      isDm?: boolean
     }>(`/api/groups/${groupId}/maps/${mapId}`)
     mapName.value = res.map.name
     tokens.value = res.tokens
     initiativeState.value = res.initiativeState
     currentTimeOfDay.value = res.map.timeOfDay
+    gridSize.value = res.map.gridSize
+    isDm.value = !!res.isDm
     loadError.value = null
   } catch (e: unknown) {
     loadError.value =
@@ -143,6 +148,8 @@ onBeforeUnmount(() => {
         :all-tokens="tokens"
         :time-of-day="currentTimeOfDay"
         :awaiting-initiative-for="initiativeState?.awaitingFromCharacters ?? []"
+        :grid-size="gridSize"
+        :is-dm="isDm"
         @token-updated="fetchMap"
       />
     </main>

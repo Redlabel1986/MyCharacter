@@ -58,6 +58,7 @@ import type { NpcAbility } from '~~/shared/npc'
 import { htbahConditionModsFromStatusText } from '~~/shared/conditions'
 import { timeBonusFor, isDayTime, type TimeOfDay } from '~~/shared/time-of-day'
 import { computeDamageLevel, damageLevelColor } from '~~/shared/damage-level'
+import { chebyshevTiles, parseHtbahRangeTiles } from '~~/shared/distance'
 
 interface Token {
   id: number
@@ -65,6 +66,9 @@ interface Token {
   characterId: number | null
   name: string
   imageUrl: string | null
+  /** Karten-Position in Pixeln (Mittelpunkt) — fuer Entfernungs-Checks. */
+  x: number
+  y: number
   hp: number | null
   hpMax: number | null
   description: string
@@ -100,6 +104,19 @@ const props = defineProps<{
    * erscheint im MiniCharSheet ein roter "Initiative wuerfeln"-Button.
    */
   awaitingInitiativeFor?: number[]
+  /**
+   * Pixel pro Rasterzelle. Wird fuer Entfernungs-Checks (Nahkampf-Reichweite,
+   * Spruch-Reichweite) gegen die Token-Pixel-Positionen verrechnet. Fehlt
+   * der Wert (z.B. weil das Eltern-Page ihn nicht durchreicht), wird die
+   * Reichweiten-Pruefung weich uebersprungen.
+   */
+  gridSize?: number
+  /**
+   * Ob der lokale User Spielleiter ist. Spieler werden bei Reichweiten-
+   * Verstoss am Wuerfeln gehindert, der DM darf jederzeit ausserhalb
+   * Reichweite wuerfeln (Storytelling, Edge-Cases).
+   */
+  isDm?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -595,13 +612,55 @@ const damageApplyResult = ref<string | null>(null)
 // Vollstaendige Token-Liste: bevorzugt die vom Parent gelieferte allTokens-
 // Prop (alle Spieler + NPCs auf der Karte), fallback auf die eigenen Tokens.
 const damageTargetTokens = computed<Token[]>(() => props.allTokens ?? props.tokens)
+// Distanz vom aktiven (eigenen) Token zum jeweiligen Ziel in Rasterzellen.
+// Null = keine Berechnung moeglich (kein gridSize gepflegt oder Token fehlt).
+const distanceToToken = (target: Token | null): number | null => {
+  if (!target) return null
+  const me = activeToken.value
+  if (!me) return null
+  const g = props.gridSize ?? 0
+  if (!g) return null
+  return chebyshevTiles({ x: me.x, y: me.y }, { x: target.x, y: target.y }, g)
+}
+const distanceLabel = (target: Token | null): string => {
+  const d = distanceToToken(target)
+  if (d === null) return ''
+  if (d === 0) return ' · selbes Feld'
+  if (d === 1) return ' · 1 Feld'
+  return ` · ${d} Felder`
+}
 const damageTargetOptions = computed(() => [
   { label: '— kein Ziel (nur würfeln) —', value: 0 },
   ...damageTargetTokens.value.map((t: Token) => {
     const hpStr = t.hp !== null && t.hpMax ? ` · ${t.hp}/${t.hpMax}` : ''
-    return { label: `${t.name}${hpStr}`, value: t.id }
+    return { label: `${t.name}${hpStr}${distanceLabel(t)}`, value: t.id }
   }),
 ])
+
+// — Nahkampf-Reichweite —
+// HtbaH-Waffen-Kategorien fernkampf/wurf duerfen mit Distanz wuerfeln; alle
+// anderen (stumpf/hieb/stich/sonstige) sind Nahkampf und brauchen das Ziel
+// direkt benachbart (Chebyshev <= 1, also selbes Feld oder eines daneben).
+// Ohne gewaehlte Waffe greift die Pruefung nicht — der Spieler wuerfelt
+// dann eine freie Probe ohne Waffe.
+const weaponIsMelee = computed<boolean>(() => {
+  const w = selectedWeapon.value
+  if (!w) return false
+  const cat = w.category
+  return cat !== 'fernkampf' && cat !== 'wurf'
+})
+const damageTargetToken = computed<Token | null>(() =>
+  damageTargetId.value
+    ? damageTargetTokens.value.find((t: Token) => t.id === damageTargetId.value) ?? null
+    : null,
+)
+const meleeOutOfReach = computed<boolean>(() => {
+  if (!weaponIsMelee.value) return false
+  const dist = distanceToToken(damageTargetToken.value)
+  if (dist === null) return false
+  return dist > 1
+})
+const meleeBlocked = computed<boolean>(() => meleeOutOfReach.value && !props.isDm)
 
 // Bei Tab-Wechsel auch das Damage-Ziel zuruecksetzen, damit nicht aus Versehen
 // ein altes Ziel uebernommen wird.
@@ -1114,8 +1173,36 @@ const castDamageParsed = computed<{ count: number; sides: number; mod: number } 
 const castTargetOptions = computed(() =>
   damageTargetTokens.value.map((t: Token) => {
     const hpStr = t.hp !== null && t.hpMax ? ` · ${t.hp}/${t.hpMax}` : ''
-    return { label: `${t.name}${hpStr}`, value: t.id }
+    return { label: `${t.name}${hpStr}${distanceLabel(t)}`, value: t.id }
   }),
+)
+// — Spruch-Reichweite —
+// Katalog-Spruechen kennen einen Reichweitentext ("Berührung", "50 m",
+// "Sicht"). Wir parsen ihn in Tiles und pruefen pro ausgewaehltem Ziel.
+// Bei freier Spruch-Eingabe (kein knownSpell gewaehlt) gibt es keine
+// automatische Pruefung — der Spieler soll dann frei wirken koennen.
+const castSpellRangeTiles = computed<number | null>(() => {
+  const key = selectedKnownKey.value
+  if (!key || key === '__free__') return null
+  const spell = HTBAH_SPELL_BY_KEY[key]
+  if (!spell) return null
+  return parseHtbahRangeTiles(spell.range)
+})
+const castOutOfRangeTargets = computed<Token[]>(() => {
+  const range = castSpellRangeTiles.value
+  if (range === null) return []
+  const out: Token[] = []
+  for (const id of castTargetIds.value) {
+    const t = damageTargetTokens.value.find((x: Token) => x.id === id)
+    if (!t) continue
+    const dist = distanceToToken(t)
+    if (dist === null) continue
+    if (dist > range) out.push(t)
+  }
+  return out
+})
+const castReachBlocked = computed<boolean>(
+  () => castOutOfRangeTargets.value.length > 0 && !props.isDm,
 )
 function rollDie(sides: number): number {
   return Math.floor(Math.random() * sides) + 1
@@ -2124,12 +2211,23 @@ const onImageError = (tokenId: number) => {
             · {{ castDamageMode === 'heal' ? 'Heilung' : 'Schaden' }} wird automatisch angerechnet.
           </p>
         </div>
+        <!-- Reichweiten-Warnung pro Ziel (nur bei Katalog-Spruechen mit
+             parsbarer Range). Spieler werden geblockt, der DM darf trotzdem. -->
+        <p
+          v-if="castOutOfRangeTargets.length"
+          class="text-[11px] font-semibold"
+          :class="castReachBlocked ? 'text-red-700' : 'text-amber-700'"
+        >
+          ⚠ Außer Reichweite ({{ castSpellRangeTiles === Number.POSITIVE_INFINITY ? '∞' : castSpellRangeTiles }} Felder):
+          {{ castOutOfRangeTargets.map((t) => `${t.name} (${distanceToToken(t)})`).join(', ') }}
+          <span v-if="!castReachBlocked" class="font-normal italic">— DM darf trotzdem.</span>
+        </p>
         <UButton
           block
           color="primary"
           icon="i-lucide-dices"
           :loading="castSending"
-          :disabled="!castSpellName.trim() || mana < HTBAH_SPELL_MANA_COST[castSpellLevel]"
+          :disabled="!castSpellName.trim() || mana < HTBAH_SPELL_MANA_COST[castSpellLevel] || castReachBlocked"
           @click="castSpell"
         >
           Wirken (3W10 + {{ arkanum }})
@@ -2417,7 +2515,7 @@ const onImageError = (tokenId: number) => {
           <UButton
             color="primary"
             icon="i-lucide-dices"
-            :disabled="!pickedRollOption"
+            :disabled="!pickedRollOption || meleeBlocked"
             :loading="rollSending"
             class="sm:col-span-5 roll-cta"
             size="lg"
@@ -2603,6 +2701,20 @@ const onImageError = (tokenId: number) => {
           <p class="mt-1 text-[11px] text-ink-300 italic">
             Wähle den Charakter/NPC, dem der Wurf angerechnet wird.
           </p>
+          <!-- Nahkampf-Reichweite: bei Nahkampfwaffe muss das Ziel direkt
+               benachbart sein (Chebyshev ≤ 1). Spieler werden geblockt,
+               der DM darf ausserhalb Reichweite wuerfeln. -->
+          <p
+            v-if="meleeOutOfReach"
+            class="mt-1 text-[11px] font-semibold"
+            :class="meleeBlocked ? 'text-red-700' : 'text-amber-700'"
+          >
+            ⚠ Nahkampf-Reichweite überschritten —
+            {{ damageTargetToken?.name }} ist {{ distanceToToken(damageTargetToken) }} Felder entfernt
+            (max. 1 Feld).
+            <span v-if="!meleeBlocked" class="font-normal italic">DM darf trotzdem.</span>
+            <span v-else class="font-normal italic">Bewege dich näher oder wähle eine Fernkampfwaffe.</span>
+          </p>
         </div>
         <!-- Formel + Bezeichnung + Wuerfel-Button -->
         <div>
@@ -2626,7 +2738,7 @@ const onImageError = (tokenId: number) => {
             <UButton
               :color="damageMode === 'heal' ? 'success' : 'primary'"
               :icon="damageMode === 'heal' ? 'i-lucide-heart-pulse' : 'i-lucide-swords'"
-              :disabled="!damageParsed || damageSending"
+              :disabled="!damageParsed || damageSending || (damageMode === 'damage' && meleeBlocked)"
               :loading="damageSending"
               class="sm:col-span-4 roll-cta"
               size="lg"
