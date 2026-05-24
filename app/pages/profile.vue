@@ -25,6 +25,63 @@ const remove = async (id: number) => {
 
 const roleLabel = (r: string) => (r === 'admin' ? 'Admin' : r === 'dm' ? 'DM' : 'Spieler')
 
+// Benutzername aendern
+const usernameDraft = ref<string>('')
+const usernameEditing = ref(false)
+const usernameSaving = ref(false)
+const usernameError = ref<string | null>(null)
+const usernameSuccess = ref(false)
+watchEffect(() => {
+  if (!usernameEditing.value) {
+    usernameDraft.value = user.value?.username ?? ''
+  }
+})
+const startUsernameEdit = () => {
+  usernameDraft.value = user.value?.username ?? ''
+  usernameError.value = null
+  usernameSuccess.value = false
+  usernameEditing.value = true
+}
+const cancelUsernameEdit = () => {
+  usernameEditing.value = false
+  usernameDraft.value = user.value?.username ?? ''
+  usernameError.value = null
+}
+const submitUsernameChange = async () => {
+  const next = usernameDraft.value.trim()
+  if (next === (user.value?.username ?? '')) {
+    usernameEditing.value = false
+    return
+  }
+  if (next.length < 3) {
+    usernameError.value = 'Mindestens 3 Zeichen.'
+    return
+  }
+  if (next.length > 40) {
+    usernameError.value = 'Maximal 40 Zeichen.'
+    return
+  }
+  usernameSaving.value = true
+  usernameError.value = null
+  try {
+    await $fetch('/api/profile/change-username', {
+      method: 'POST',
+      body: { username: next },
+    })
+    await refreshSession()
+    usernameEditing.value = false
+    usernameSuccess.value = true
+    setTimeout(() => (usernameSuccess.value = false), 2500)
+  } catch (e: unknown) {
+    usernameError.value =
+      (e as { statusMessage?: string; data?: { statusMessage?: string } }).statusMessage ??
+      (e as { data?: { statusMessage?: string } }).data?.statusMessage ??
+      'Benutzername-Änderung fehlgeschlagen.'
+  } finally {
+    usernameSaving.value = false
+  }
+}
+
 // Passwort aendern
 const pwCurrent = ref('')
 const pwNew = ref('')
@@ -108,7 +165,58 @@ const submitPasswordChange = async () => {
       <dl class="grid sm:grid-cols-2 gap-3 text-sm">
         <div>
           <dt class="text-xs uppercase tracking-widest text-ink-300">Benutzername</dt>
-          <dd class="font-serif text-xl">{{ user?.username }}</dd>
+          <dd v-if="!usernameEditing" class="font-serif text-xl flex items-center gap-2">
+            <span>{{ user?.username }}</span>
+            <UButton
+              size="xs"
+              variant="ghost"
+              icon="i-lucide-pencil"
+              title="Benutzername ändern"
+              @click="startUsernameEdit"
+            />
+            <span
+              v-if="usernameSuccess"
+              class="text-xs text-emerald-600 font-normal"
+            >
+              ✓ gespeichert
+            </span>
+          </dd>
+          <dd v-else>
+            <form class="flex items-center gap-2 flex-wrap" @submit.prevent="submitUsernameChange">
+              <UInput
+                v-model="usernameDraft"
+                size="sm"
+                :maxlength="40"
+                :disabled="usernameSaving"
+                autocomplete="username"
+                autofocus
+                class="w-48"
+                @keydown.escape="cancelUsernameEdit"
+              />
+              <UButton
+                type="submit"
+                size="sm"
+                color="primary"
+                :loading="usernameSaving"
+                icon="i-lucide-check"
+              >
+                Speichern
+              </UButton>
+              <UButton
+                type="button"
+                size="sm"
+                variant="ghost"
+                :disabled="usernameSaving"
+                @click="cancelUsernameEdit"
+              >
+                Abbrechen
+              </UButton>
+            </form>
+            <p v-if="usernameError" class="text-xs text-red-600 mt-1">{{ usernameError }}</p>
+            <p class="text-[11px] text-ink-300 mt-1 italic">
+              3–40 Zeichen, muss eindeutig sein.
+            </p>
+          </dd>
         </div>
         <div>
           <dt class="text-xs uppercase tracking-widest text-ink-300">E-Mail</dt>

@@ -2299,7 +2299,14 @@ interface VisionPolygon {
   points: Array<{ x: number; y: number }>
 }
 const visionPolygons = computed<VisionPolygon[]>(() => {
-  if (!map.value?.fogEnabled) return []
+  // Polygone werden nicht nur fuer Fog-of-War gebraucht — die Nacht-Maske
+  // schneidet damit ihre Sicht-„Loecher" aus dem dunklen Overlay. Ohne dieses
+  // Computed waeren die Spieler nachts in pitch black, sobald Fog deaktiviert
+  // ist. Daher: rechnen, wenn Fog AN ist oder wenn die aktuelle Tageszeit
+  // ein Sicht-Mask braucht (Nacht).
+  const needForFog = map.value?.fogEnabled === true
+  const needForTime = currentTodOverlay.value?.requiresVisionMask === true
+  if (!needForFog && !needForTime) return []
   const ws = walls.value
   return visionSources.value.map((src: VisionSource) => ({
     src,
