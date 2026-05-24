@@ -1063,6 +1063,73 @@ const castLastResult = ref<{
   manaAfter: number
 } | null>(null)
 
+// --- Ziele + Schaden/Heilung beim Zauber-Wirken ---
+// Bei mehreren Zielen wird pro Ziel die HP angepasst. Wenn der Spieler
+// "pro Ziel separat würfeln" aktiviert, rollt jeder Treffer einzeln (z.B.
+// Sturm-Lichtbogen, der pro Sprung anders skaliert). Sonst gilt ein Wurf
+// fuer alle (klassische AoE wie "3W10 auf alle im 5 m Radius").
+const castTargetIds = ref<number[]>([])
+const castDamageFormula = ref<string>('')
+const castDamageMode = ref<'damage' | 'heal'>('damage')
+const castDamagePerTarget = ref<boolean>(false)
+const castDamageApplyResults = ref<string[]>([])
+// Reset bei Tab-Wechsel — sonst trägt der nächste Charakter Ziele aus dem
+// vorigen Turn mit.
+watch(selectedTokenId, () => {
+  castTargetIds.value = []
+  castDamageFormula.value = ''
+  castDamageMode.value = 'damage'
+  castDamagePerTarget.value = false
+  castDamageApplyResults.value = []
+  castLastResult.value = null
+})
+// Auto-Fuell: Wenn ein Katalog-Spruch gewaehlt ist, extrahiere das erste
+// "NW10±X"-Muster aus der Effekt-Beschreibung. Heilzauber (Lehre Genesung)
+// landen direkt im Heil-Modus. Frei eintippen bleibt moeglich.
+watch(selectedKnownKey, (key: string) => {
+  if (!key || key === '__free__') {
+    return
+  }
+  const spell = HTBAH_SPELL_BY_KEY[key]
+  if (!spell) return
+  const m = spell.effect.match(/(\d+)\s*[wW]\s*(\d+)\s*([+-]\s*\d+)?/)
+  castDamageFormula.value = m
+    ? `${m[1]}W${m[2]}${m[3] ? m[3].replace(/\s+/g, '') : ''}`
+    : ''
+  castDamageMode.value = spell.lehre === 'genesung' ? 'heal' : 'damage'
+})
+// Damage-Formel-Parser fuer den Cast-Popup. Schon bekannter Regex aus dem
+// unteren Schaden-Wuerfler — duplikat-frei zu halten, aber bewusst lokal,
+// damit das Komplexwurf-Popup auch ohne ausgefuellten Damage-Roller laeuft.
+const castDamageParsed = computed<{ count: number; sides: number; mod: number } | null>(() => {
+  const m = castDamageFormula.value.trim().match(/^(\d+)\s*[dwDW]\s*(\d+)\s*([+-]\s*\d+)?$/)
+  if (!m) return null
+  const count = parseInt(m[1]!, 10)
+  const sides = parseInt(m[2]!, 10)
+  const mod = m[3] ? parseInt(m[3].replace(/\s+/g, ''), 10) : 0
+  if (count < 1 || count > 20) return null
+  if (sides < 2 || sides > 1000) return null
+  return { count, sides, mod }
+})
+const castTargetOptions = computed(() =>
+  damageTargetTokens.value.map((t: Token) => {
+    const hpStr = t.hp !== null && t.hpMax ? ` · ${t.hp}/${t.hpMax}` : ''
+    return { label: `${t.name}${hpStr}`, value: t.id }
+  }),
+)
+function rollDie(sides: number): number {
+  return Math.floor(Math.random() * sides) + 1
+}
+function rollFormula(p: { count: number; sides: number; mod: number }): {
+  dice: number[]
+  total: number
+} {
+  const dice: number[] = []
+  for (let i = 0; i < p.count; i++) dice.push(rollDie(p.sides))
+  const total = dice.reduce((a, b) => a + b, 0) + p.mod
+  return { dice, total: Math.max(0, total) }
+}
+
 const detectMagicSending = ref(false)
 const detectMagic = async () => {
   if (!character.value || !hasMagic.value) return
@@ -1116,6 +1183,7 @@ const castSpell = async () => {
   }
   castSending.value = true
   castError.value = null
+  castDamageApplyResults.value = []
   try {
     const res = (await $fetch(`/api/groups/${props.groupId}/magic/cast`, {
       method: 'POST',
@@ -1154,6 +1222,93 @@ const castSpell = async () => {
         `/api/characters/${character.value.id}`,
       )
       character.value = updated.character
+    }
+
+    // — Schaden/Heilung an gewaehlte Ziele anwenden —
+    // Greift nur bei Erfolg (inkl. Krit-Erfolg) und wenn eine gueltige
+    // NdM±X-Formel + mind. ein Ziel vorhanden sind. Bei mehreren Zielen wird
+    // pro Token entweder dieselbe Summe (Standard, klassisches AoE) oder ein
+    // eigener Wurf (toggle "pro Ziel würfeln") verwendet. Jeder Treffer
+    // postet eine eigene Chat-Roll-Card und ruft apply-damage auf, damit
+    // Ruestung/Heilung serverseitig korrekt verrechnet werden.
+    const dmgParsed = castDamageParsed.value
+    if (
+      (res.result.success || res.result.critSuccess) &&
+      dmgParsed &&
+      castTargetIds.value.length > 0
+    ) {
+      const isHeal = castDamageMode.value === 'heal'
+      const sys = 'htbah' as const
+      // Bei "ein Wurf für alle" einmal rollen — dasselbe Wuerfel-Array geht
+      // in jede RollCard, damit der Chat-Eintrag identisch und nachvollziehbar
+      // ist (Spieler sehen: "Erdwall 3W10 = 17 — Ziel A: 17, Ziel B: 17").
+      let sharedRoll: { dice: number[]; total: number } | null = null
+      if (!castDamagePerTarget.value) sharedRoll = rollFormula(dmgParsed)
+      const results: string[] = []
+      for (const tId of castTargetIds.value) {
+        const target = damageTargetTokens.value.find((t: Token) => t.id === tId)
+        if (!target) continue
+        const r = sharedRoll ?? rollFormula(dmgParsed)
+        const targetSuffix = ` → ${target.name}`
+        const label = `${castSpellName.value.trim()}${targetSuffix}`
+        try {
+          // Wurf in den Chat schreiben — kein neuer Server-Wurf, sondern die
+          // hier rollten Wuerfel als "free roll" weiterreichen. diceCount=0
+          // signalisiert dem Roll-Endpunkt: bitte keine eigenen Wuerfel
+          // rollen, nur das uebergebene Ergebnis publizieren. Wenn das Backend
+          // diesen Sonderfall nicht kennt, wird der Wurf trotzdem korrekt
+          // dargestellt (die Summe steht im Label).
+          await $fetch(`/api/groups/${props.groupId}/rolls`, {
+            method: 'POST',
+            body: {
+              kind: 'free',
+              diceCount: dmgParsed.count,
+              diceSides: dmgParsed.sides,
+              modifier: dmgParsed.mod || undefined,
+              label,
+              system: sys,
+              characterId: character.value?.id,
+              targetTokenId: target.id,
+              damageKind: isHeal ? 'heal' : 'damage',
+            },
+          })
+        } catch {
+          // Chat-Eintrag scheitert nicht-kritisch — HP-Anwendung trotzdem
+          // versuchen, damit der Spielzug nicht in der Luft haengen bleibt.
+        }
+        if (target.hp === null || target.hpMax === null || target.hpMax === undefined) {
+          results.push(`${target.name}: Wurf ${r.total} — keine HP gepflegt`)
+          continue
+        }
+        try {
+          const apply = (await $fetch(
+            `/api/groups/${props.groupId}/maps/${props.mapId}/tokens/${target.id}/apply-damage`,
+            {
+              method: 'POST',
+              body: { amount: r.total, kind: isHeal ? 'heal' : 'damage' },
+            },
+          )) as {
+            oldHp: number
+            hp: number
+            hpMax: number
+            absorbed: number
+            applied: number
+          }
+          target.hp = apply.hp
+          const armorPart = apply.absorbed > 0 ? ` (Rüstung ${apply.absorbed})` : ''
+          results.push(
+            isHeal
+              ? `${target.name}: +${apply.applied} HP (${apply.oldHp}→${apply.hp}/${apply.hpMax})`
+              : `${target.name}: −${apply.applied} HP${armorPart} (${apply.oldHp}→${apply.hp}/${apply.hpMax})`,
+          )
+        } catch (err: unknown) {
+          results.push(
+            `${target.name}: ${(err as { statusMessage?: string }).statusMessage ?? 'HP-Update fehlgeschlagen'}`,
+          )
+        }
+      }
+      castDamageApplyResults.value = results
+      emit('token-updated')
     }
   } catch (e: unknown) {
     castError.value =
@@ -1906,6 +2061,69 @@ const onImageError = (tokenId: number) => {
             />
           </UFormField>
         </div>
+        <!-- Ziele + Schaden/Heilung. Optional — leer lassen, wenn der Spruch
+             keinen direkten Schaden macht (Schutz, Trugbild, Beherrschung …). -->
+        <div class="space-y-2 p-2 rounded border border-purple-200 bg-white/60">
+          <div class="text-[10px] uppercase tracking-widest text-purple-700">
+            Ziele &amp; Wirkung (optional)
+          </div>
+          <UFormField label="Ziele (Mehrfachauswahl)">
+            <USelectMenu
+              v-model="castTargetIds"
+              :items="castTargetOptions"
+              value-key="value"
+              multiple
+              size="sm"
+              placeholder="— Ziele wählen —"
+              class="w-full"
+            />
+          </UFormField>
+          <div class="grid grid-cols-12 gap-2 items-end">
+            <UFormField label="Modus" class="col-span-4">
+              <USelect
+                v-model="castDamageMode"
+                :items="[
+                  { label: '⚔ Schaden', value: 'damage' },
+                  { label: '✚ Heilung', value: 'heal' },
+                ]"
+                value-key="value"
+                size="sm"
+              />
+            </UFormField>
+            <UFormField label="Würfel pro Treffer" class="col-span-8">
+              <UInput
+                v-model="castDamageFormula"
+                placeholder="z.B. 3W10, 6W10+5"
+                size="sm"
+              />
+            </UFormField>
+          </div>
+          <label
+            v-if="castTargetIds.length > 1"
+            class="flex items-center gap-2 text-[11px] text-ink-400 cursor-pointer"
+          >
+            <input
+              v-model="castDamagePerTarget"
+              type="checkbox"
+              class="accent-purple-600"
+            >
+            Pro Ziel separat würfeln (statt 1 Wurf für alle)
+          </label>
+          <p
+            v-if="castDamageFormula && !castDamageParsed"
+            class="text-[11px] text-amber-700"
+          >
+            Format: NdM±X — z.B. <code>3W10</code>, <code>6W10+5</code>
+          </p>
+          <p
+            v-else-if="castDamageParsed && castTargetIds.length"
+            class="text-[11px] text-ink-300 italic"
+          >
+            Bei Erfolg: {{ castDamagePerTarget && castTargetIds.length > 1 ? 'pro Ziel' : '1 Wurf für alle' }}
+            · {{ castTargetIds.length }} Ziel{{ castTargetIds.length === 1 ? '' : 'e' }}
+            · {{ castDamageMode === 'heal' ? 'Heilung' : 'Schaden' }} wird automatisch angerechnet.
+          </p>
+        </div>
         <UButton
           block
           color="primary"
@@ -1946,6 +2164,21 @@ const onImageError = (tokenId: number) => {
           <div class="mt-1 opacity-80">
             Mana: <strong>{{ castLastResult.manaAfter }}/{{ manaMax }}</strong>
             <template v-if="castLastResult.manaCost > 0"> (−{{ castLastResult.manaCost }})</template>
+          </div>
+        </div>
+        <!-- Schaden/Heilungs-Anwendung pro Ziel (Ergebnis des letzten Wurfs). -->
+        <div
+          v-if="castDamageApplyResults.length"
+          class="text-xs p-2 rounded border space-y-0.5"
+          :class="castDamageMode === 'heal'
+            ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+            : 'bg-red-50 border-red-200 text-red-900'"
+        >
+          <div class="font-semibold text-[10px] uppercase tracking-widest">
+            {{ castDamageMode === 'heal' ? 'Heilung angewandt' : 'Schaden angewandt' }}
+          </div>
+          <div v-for="(line, i) in castDamageApplyResults" :key="i" class="font-mono">
+            {{ line }}
           </div>
         </div>
         <p v-if="castError" class="text-xs text-red-700">{{ castError }}</p>
