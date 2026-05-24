@@ -1021,44 +1021,6 @@ const tokenDamageOverlay = (t: Token): { opacity: number; intense: boolean } | n
   return { opacity: 0.22, intense: false }
 }
 
-// --- Namens-Bogen ueber dem Token (SVG textPath) ---
-// Wir wollen die Schrift KLAR ueber der Token-Kante platzieren und nur
-// SANFT bogenfoermig — nicht als enger Halbkreis, sonst kippen die
-// aeusseren Buchstaben quer zum Token. Trick: ein sehr grosser
-// Kreis-Radius, dessen Mittelpunkt deutlich UNTER dem Token liegt; der
-// sichtbare Bogen oberhalb ist dadurch nur leicht gewoelbt.
-const FONT_PX = 11
-const APPROX_CHAR_PX = 6
-
-// Halbbreite des Textes inkl. kleinem Polster (links/rechts).
-function tokenNameHalfTextWidth(t: Token): number {
-  const len = (t.name ?? '').length
-  const tokenRadius = ((map.value?.gridSize ?? 50) * (t.sizeMultiplier ?? 1)) / 2
-  // Mind. so breit wie der Token, damit kurze Namen nicht im Token kleben.
-  return Math.max(tokenRadius * 0.6, (len * APPROX_CHAR_PX) / 2 + 6)
-}
-// Pfad mit grossem Kreis (R = 4 × Token-Radius + Apex-Hoehe), dessen Apex
-// 10 px ueber der Token-Kante sitzt — flach genug, dass die Schrift wie eine
-// leichte Welle ueber dem Token liegt, statt sich um ihn zu wickeln.
-const tokenNameArcPath = (t: Token): string => {
-  const tokenRadius = ((map.value?.gridSize ?? 50) * (t.sizeMultiplier ?? 1)) / 2
-  const apexAbove = tokenRadius + 10
-  const centerBelow = tokenRadius * 4
-  const R = centerBelow + apexAbove
-  const halfW = tokenNameHalfTextWidth(t)
-  const x = Math.min(halfW, R - 1)
-  // y-Koordinate des Endpunkts auf der OBEREN Kreishaelfte
-  // (Kreis-Center bei (0, centerBelow), Radius R).
-  const y = centerBelow - Math.sqrt(Math.max(0, R * R - x * x))
-  // sweep-flag = 0 → Bogen waelbt sich nach OBEN (SVG-y ist invertiert).
-  return `M ${-x} ${y} A ${R} ${R} 0 0 0 ${x} ${y}`
-}
-const tokenNameSvgSize = (t: Token): number => {
-  const tokenRadius = ((map.value?.gridSize ?? 50) * (t.sizeMultiplier ?? 1)) / 2
-  const halfW = tokenNameHalfTextWidth(t)
-  // SVG-Box muss Bogenbreite + Font-Hoehe + 3 px Stroke beidseitig fassen.
-  return Math.max(tokenRadius * 3, halfW * 2 + 28)
-}
 
 // --- Token hinzufuegen ---
 const showAddModal = ref(false)
@@ -3698,46 +3660,23 @@ const endResize = () => {
               >
                 {{ tokenCustomLabels(t).join(', ') }}
               </div>
-              <!-- Namens-Bogen: SVG textPath, der dem Token-Umriss folgt und
-                   den Namen oberhalb in einem Halbkreis platziert (links nach
-                   rechts oben um den Token). Bei Bedarf per Karten-Setting
-                   abschaltbar. Schwarzer Strich + weisser Fuellton, damit der
-                   Name auf jedem Karten-Hintergrund lesbar bleibt. -->
-              <svg
+              <!-- Namen-Stack: jedes Wort des Token-Namens auf einer eigenen
+                   Zeile direkt ueber dem Token, zentriert. Weisser Text mit
+                   Outline-Shadow fuer Lesbarkeit auf beliebigem Karten-
+                   Hintergrund. -->
+              <div
                 v-if="map.showTokenNames !== false && t.name"
-                class="absolute pointer-events-none"
-                :style="{
-                  left: '50%',
-                  top: '50%',
-                  width: tokenNameSvgSize(t) + 'px',
-                  height: tokenNameSvgSize(t) + 'px',
-                  transform: 'translate(-50%, -50%)',
-                  overflow: 'visible',
-                }"
-                :viewBox="`-${tokenNameSvgSize(t) / 2} -${tokenNameSvgSize(t) / 2} ${tokenNameSvgSize(t)} ${tokenNameSvgSize(t)}`"
+                class="absolute left-1/2 -translate-x-1/2 flex flex-col items-center pointer-events-none token-name-stack"
+                :style="{ bottom: '100%', marginBottom: '4px' }"
               >
-                <defs>
-                  <path
-                    :id="`name-arc-${t.id}`"
-                    :d="tokenNameArcPath(t)"
-                    fill="none"
-                  />
-                </defs>
-                <text
-                  font-size="11"
-                  font-weight="700"
-                  fill="#fff"
-                  stroke="rgba(0,0,0,0.85)"
-                  stroke-width="3"
-                  paint-order="stroke"
-                  text-anchor="middle"
-                  class="font-serif"
+                <div
+                  v-for="(word, i) in t.name.split(/\s+/).filter(Boolean)"
+                  :key="i"
+                  class="font-serif font-bold text-white whitespace-nowrap text-[11px] leading-tight"
                 >
-                  <textPath :href="`#name-arc-${t.id}`" startOffset="50%">
-                    {{ t.name }}
-                  </textPath>
-                </text>
-              </svg>
+                  {{ word }}
+                </div>
+              </div>
             </div>
 
             <!-- Fog of War: dynamische Beleuchtung. Pro Sichtquelle wird ein
@@ -5153,6 +5092,17 @@ const endResize = () => {
   box-shadow:
     0 0 0 2px var(--color-accent),
     0 0 14px 4px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+/* Token-Namen ueber dem Token: weisser Text mit dickem schwarzen Outline,
+   damit Namen auf jeder Karte (heller wie dunkler Hintergrund) lesbar
+   bleiben. Mehrere Shadows simulieren ein echtes 1-px-Stroke rundum. */
+.token-name-stack > div {
+  text-shadow:
+    -1px -1px 0 rgba(0, 0, 0, 0.9),
+     1px -1px 0 rgba(0, 0, 0, 0.9),
+    -1px  1px 0 rgba(0, 0, 0, 0.9),
+     1px  1px 0 rgba(0, 0, 0, 0.9),
+     0    0   3px rgba(0, 0, 0, 0.85);
 }
 /* Sanftes „Wandern" zwischen alter und neuer Position. Gilt fuer alle Tokens,
    die der lokale User NICHT gerade selbst zieht — die anderen Spieler sehen
