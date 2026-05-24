@@ -990,12 +990,24 @@ const postRollToGroup = async () => {
     </SheetSection>
 
     <SheetSection title="Status">
-      <div class="grid grid-cols-2 gap-2">
+      <div
+        class="grid gap-2"
+        :class="sheet.magicState?.active ? 'grid-cols-3' : 'grid-cols-2'"
+      >
         <StatBlock label="LP" :value="`${sheet.hp.current}/${sheet.hp.max}`" />
         <StatBlock
           label="Initiative"
           :value="`${htbahInitiativeBonus(sheet) >= 0 ? '+' : ''}${htbahInitiativeBonus(sheet)}`"
           sublabel="W10 + Handeln − RW/10"
+        />
+        <!-- Mana: Aktueller / Max-Wert (max = htbahManaMax(arkanum)). Wird
+             nur angezeigt, wenn das Magie-Modul aktiviert ist — sonst ist
+             der Wert irrelevant. -->
+        <StatBlock
+          v-if="sheet.magicState?.active"
+          label="Mana"
+          :value="`${sheet.magicState.mana}/${htbahManaMax(sheet.magicState.arkanum)}`"
+          :sublabel="`Arkanum ${sheet.magicState.arkanum}`"
         />
       </div>
       <div
@@ -1014,6 +1026,45 @@ const postRollToGroup = async () => {
         <UFormField label="LP max">
           <UInput type="number" :model-value="sheet.hp.max" @update:model-value="setHp('max', Number($event))" />
         </UFormField>
+      </div>
+
+      <!-- Mana-Editor: nur sichtbar, wenn das Magie-Modul aktiv ist. Auffüllen-
+           Button setzt Mana auf htbahManaMax(arkanum) — ohne Rasten/Tagessperre,
+           damit Mit-Spieler den Wert pflegen können ohne in den Magie-Tab
+           abzutauchen. -->
+      <div
+        v-if="sheet.magicState?.active"
+        class="grid grid-cols-12 gap-2 mt-3 items-end"
+      >
+        <UFormField label="Mana aktuell" class="col-span-5">
+          <UInput
+            type="number"
+            min="0"
+            :max="htbahManaMax(sheet.magicState.arkanum)"
+            :model-value="sheet.magicState.mana"
+            @update:model-value="setMagicMana(Number($event))"
+          />
+        </UFormField>
+        <UFormField label="Mana max" class="col-span-3">
+          <UInput
+            type="number"
+            :model-value="htbahManaMax(sheet.magicState.arkanum)"
+            disabled
+          />
+        </UFormField>
+        <UButton
+          size="sm"
+          color="primary"
+          variant="soft"
+          icon="i-lucide-sparkles"
+          class="col-span-4"
+          block
+          :disabled="sheet.magicState.mana >= htbahManaMax(sheet.magicState.arkanum)"
+          title="Mana auf Maximum auffüllen (Arkanum × 2)"
+          @click="restoreMagicMana"
+        >
+          Auffüllen
+        </UButton>
       </div>
       <p
         v-if="!sheet.rdd?.active"
