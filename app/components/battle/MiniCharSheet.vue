@@ -965,15 +965,6 @@ const useItem = async (item: HtbahUsableItem) => {
         resultLines.push(
           `+${res.applied} Mana an ${target.name} (${res.oldMana} → ${res.mana}/${res.manaMax})`,
         )
-        // Wenn das Ziel der eigene Charakter ist, lokal nachziehen, damit der
-        // Mana-Wert in der UI (z.B. Cast-Popup) sofort aktualisiert.
-        if (target.characterId === character.value.id) {
-          const updated = await $fetch<{ character: CharacterFull }>(
-            `/api/characters/${character.value.id}`,
-          )
-          character.value = updated.character
-          cacheByCharId.set(character.value.id, updated.character)
-        }
       } else {
         resultLines.push(
           `${manaAmount} Mana nicht angerechnet — ${target.name} hat kein aktives Magie-Modul`,
@@ -985,6 +976,21 @@ const useItem = async (item: HtbahUsableItem) => {
     emit('token-updated')
 
     // 3) Anzahl am Charakter um 1 verringern.
+    //
+    // WICHTIG: Wenn das Ziel UNSER Charakter war, hat apply-damage /
+    // apply-mana am Server bereits frische HP / Mana geschrieben. Unser
+    // lokales `character.value` (und damit `htbahData.value`) ist aber noch
+    // der Vor-Heilungs-Snapshot — wuerden wir den naiv mit nur quantity−1
+    // zurueckschreiben, ueberschriebe der PUT die frischen Werte wieder.
+    // Daher hier vor dem PUT einmal frisch laden, damit der Decrement auf
+    // dem aktuellen Server-Stand sitzt.
+    if (target.characterId === character.value.id && (healAmount > 0 || manaAmount > 0)) {
+      const refreshed = await $fetch<{ character: CharacterFull }>(
+        `/api/characters/${character.value.id}`,
+      )
+      character.value = refreshed.character
+      cacheByCharId.set(character.value.id, refreshed.character)
+    }
     const nextData: HtbahCharacterData = JSON.parse(JSON.stringify(htbahData.value))
     const list = nextData.usableItems ?? []
     const existing = list.find((x: HtbahUsableItem) => x.id === item.id)

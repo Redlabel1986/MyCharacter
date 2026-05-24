@@ -80,6 +80,9 @@ interface Token {
   hidden: boolean
   hp: number | null
   hpMax: number | null
+  /** Mana / Fokus — nur fuer HtbaH-Charakter-Tokens mit aktivem Magie-Modul. */
+  mana?: number | null
+  manaMax?: number | null
   statusText: string
   description: string
   system: 'htbah' | 'dnd' | 'dsa5' | null
@@ -1016,6 +1019,28 @@ const tokenDamageOverlay = (t: Token): { opacity: number; intense: boolean } | n
   if (pct >= 0.75) return { opacity: 0.55, intense: true }
   if (pct >= 0.5) return { opacity: 0.4, intense: false }
   return { opacity: 0.22, intense: false }
+}
+
+// --- Namens-Bogen ueber dem Token (SVG textPath) ---
+// Halbkreis-Pfad, Radius leicht groesser als der Token-Radius, damit der
+// Schriftzug knapp ueber der Token-Kante sitzt und mitwaechst, wenn der
+// Token (sizeMultiplier) groesser ist.
+const tokenNameArcRadius = (t: Token): number => {
+  const tokenRadius = ((map.value?.gridSize ?? 50) * (t.sizeMultiplier ?? 1)) / 2
+  return tokenRadius + 8
+}
+const tokenNameSvgSize = (t: Token): number => {
+  // SVG-Box muss den Halbkreis + Buchstabenhoehe + Outline-Stroke aufnehmen.
+  // 28 px Polster reichen fuer 11 px Font + 3 px Stroke pro Seite.
+  return tokenNameArcRadius(t) * 2 + 28
+}
+const tokenNameArcPath = (t: Token): string => {
+  const r = tokenNameArcRadius(t)
+  // Halbkreis ueber dem Center: von (−r, 0) nach (+r, 0), sweep-flag=0 →
+  // Boegen bulged in negative y, also visuell nach OBEN (SVG-y ist invertiert).
+  // Text folgt der Pfad-Richtung links→rechts und ist damit beim Schauen
+  // von oben am Token lesbar — wie ein Bogen ueber dem Kopf der Figur.
+  return `M -${r} 0 A ${r} ${r} 0 0 0 ${r} 0`
 }
 
 // --- Token hinzufuegen ---
@@ -3604,6 +3629,17 @@ const endResize = () => {
               >
                 {{ t.hp }}/{{ t.hpMax }}
               </div>
+              <!-- Mana / Fokus: nur Charakter-Tokens mit aktivem Magie-Modul.
+                   Lila Chip direkt unter dem HP-Chip, damit Spieler auf einen
+                   Blick sehen, ob noch Mana fuer Zauber da ist. -->
+              <div
+                v-if="t.mana !== null && t.mana !== undefined && t.manaMax !== null && t.manaMax !== undefined && t.manaMax > 0"
+                class="absolute left-1/2 -translate-x-1/2 text-[9px] bg-purple-800/85 text-white px-1 rounded whitespace-nowrap pointer-events-none tabular-nums"
+                :style="{ bottom: (t.hp !== null && t.hpMax ? -22 : -12) + 'px' }"
+                title="Mana / Fokus"
+              >
+                ✦ {{ t.mana }}/{{ t.manaMax }}
+              </div>
               <!-- Schadensstufen-Badge: zeigt aktuelle Wundstufe an. Wirkt
                    serverseitig als −10 pro Stufe auf jeden Wurf. -->
               <div
@@ -3645,13 +3681,46 @@ const endResize = () => {
               >
                 {{ tokenCustomLabels(t).join(', ') }}
               </div>
-              <!-- Namens-Bar (per Karten-Setting togglebar) -->
-              <div
-                v-if="map.showTokenNames !== false"
-                class="absolute -bottom-11 left-1/2 -translate-x-1/2 text-[10px] font-semibold bg-black/70 text-white px-1.5 rounded whitespace-nowrap pointer-events-none max-w-[160px] truncate"
+              <!-- Namens-Bogen: SVG textPath, der dem Token-Umriss folgt und
+                   den Namen oberhalb in einem Halbkreis platziert (links nach
+                   rechts oben um den Token). Bei Bedarf per Karten-Setting
+                   abschaltbar. Schwarzer Strich + weisser Fuellton, damit der
+                   Name auf jedem Karten-Hintergrund lesbar bleibt. -->
+              <svg
+                v-if="map.showTokenNames !== false && t.name"
+                class="absolute pointer-events-none"
+                :style="{
+                  left: '50%',
+                  top: '50%',
+                  width: tokenNameSvgSize(t) + 'px',
+                  height: tokenNameSvgSize(t) + 'px',
+                  transform: 'translate(-50%, -50%)',
+                  overflow: 'visible',
+                }"
+                :viewBox="`-${tokenNameSvgSize(t) / 2} -${tokenNameSvgSize(t) / 2} ${tokenNameSvgSize(t)} ${tokenNameSvgSize(t)}`"
               >
-                {{ t.name }}
-              </div>
+                <defs>
+                  <path
+                    :id="`name-arc-${t.id}`"
+                    :d="tokenNameArcPath(t)"
+                    fill="none"
+                  />
+                </defs>
+                <text
+                  font-size="11"
+                  font-weight="700"
+                  fill="#fff"
+                  stroke="rgba(0,0,0,0.85)"
+                  stroke-width="3"
+                  paint-order="stroke"
+                  text-anchor="middle"
+                  class="font-serif"
+                >
+                  <textPath :href="`#name-arc-${t.id}`" startOffset="50%">
+                    {{ t.name }}
+                  </textPath>
+                </text>
+              </svg>
             </div>
 
             <!-- Fog of War: dynamische Beleuchtung. Pro Sichtquelle wird ein
