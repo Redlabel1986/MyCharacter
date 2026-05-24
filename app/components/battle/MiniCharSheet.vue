@@ -896,9 +896,11 @@ const itemUseResult = ref<string | null>(null)
 
 const useItem = async (item: HtbahUsableItem) => {
   if (!character.value || !htbahData.value) return
-  const amount = Math.max(0, Math.floor(item.healAmount))
-  if (amount <= 0) {
-    itemUseError.value = 'Heilwert ist 0 — bitte am Charakterbogen einen Wert eintragen.'
+  const healAmount = Math.max(0, Math.floor(item.healAmount))
+  const manaAmount = Math.max(0, Math.floor(item.manaAmount ?? 0))
+  if (healAmount <= 0 && manaAmount <= 0) {
+    itemUseError.value =
+      'Weder Heilwert noch Mana-Wert gepflegt — bitte am Charakterbogen mind. einen Wert eintragen.'
     return
   }
   const targetId = getItemTarget(item.id)
@@ -911,17 +913,22 @@ const useItem = async (item: HtbahUsableItem) => {
   itemUseError.value = null
   itemUseResult.value = null
   try {
-    // 1) Chat-Nachricht: kein echter Wurf — diceCount=0, modifier=amount.
-    //    Server stempelt damageKind='heal' + targetName, RollCard zeigt dann
-    //    "Effekt: N · <Ziel> wird um N geheilt".
+    const resultLines: string[] = []
+
+    // 1) Chat-Nachricht: ein einziger Eintrag fuer das Item, der Heilwert
+    //    UND/ODER Mana-Wert kompakt nennt. modifier = healAmount (RollCard
+    //    benutzt das fuer "Effekt: N"); Mana fliesst nur ins Label.
+    const labelParts: string[] = [`Verwende ${item.name}`]
+    if (healAmount > 0) labelParts.push(`✚${healAmount} HP`)
+    if (manaAmount > 0) labelParts.push(`✦${manaAmount} Mana`)
     await $fetch(`/api/groups/${props.groupId}/rolls`, {
       method: 'POST',
       body: {
         kind: 'free',
         diceCount: 0,
         diceSides: 1,
-        modifier: amount,
-        label: `Verwende ${item.name}`,
+        modifier: healAmount || manaAmount,
+        label: labelParts.join(' · '),
         system: 'htbah',
         characterId: character.value.id,
         targetTokenId: target.id,
@@ -929,18 +936,53 @@ const useItem = async (item: HtbahUsableItem) => {
       },
     })
 
-    // 2) HP des Ziels anpassen — apply-damage verarbeitet Heilung korrekt.
-    if (target.hp !== null && target.hpMax !== null && target.hpMax !== undefined) {
-      const res = (await $fetch(
-        `/api/groups/${props.groupId}/maps/${props.mapId}/tokens/${target.id}/apply-damage`,
-        { method: 'POST', body: { amount, kind: 'heal' } },
-      )) as { oldHp: number; hp: number; hpMax: number; applied: number }
-      target.hp = res.hp
-      itemUseResult.value = `+${res.applied} HP an ${target.name} (${res.oldHp} → ${res.hp}/${res.hpMax}).`
-      emit('token-updated')
-    } else {
-      itemUseResult.value = `${item.name} verwendet — ${target.name} hat keine HP gepflegt, daher nicht automatisch angerechnet.`
+    // 2a) HP heilen, wenn der Gegenstand einen Heilwert hat UND das Ziel
+    //     HP gepflegt hat.
+    if (healAmount > 0) {
+      if (target.hp !== null && target.hpMax !== null && target.hpMax !== undefined) {
+        const res = (await $fetch(
+          `/api/groups/${props.groupId}/maps/${props.mapId}/tokens/${target.id}/apply-damage`,
+          { method: 'POST', body: { amount: healAmount, kind: 'heal' } },
+        )) as { oldHp: number; hp: number; hpMax: number; applied: number }
+        target.hp = res.hp
+        resultLines.push(
+          `+${res.applied} HP an ${target.name} (${res.oldHp} → ${res.hp}/${res.hpMax})`,
+        )
+      } else {
+        resultLines.push(`${healAmount} HP nicht angerechnet — ${target.name} hat keine HP gepflegt`)
+      }
     }
+
+    // 2b) Mana auffuellen, wenn der Gegenstand einen Mana-Wert hat. Server
+    //     prueft selbst, ob das Ziel HtbaH-Charakter mit Magie ist; sonst
+    //     wird `applied: 0` zurueckgegeben (kein harter Fehler).
+    if (manaAmount > 0) {
+      const res = (await $fetch(
+        `/api/groups/${props.groupId}/maps/${props.mapId}/tokens/${target.id}/apply-mana`,
+        { method: 'POST', body: { amount: manaAmount, kind: 'restore' } },
+      )) as { applied: number; mana: number; manaMax: number; oldMana: number; charSystem: string | null }
+      if (res.applied > 0) {
+        resultLines.push(
+          `+${res.applied} Mana an ${target.name} (${res.oldMana} → ${res.mana}/${res.manaMax})`,
+        )
+        // Wenn das Ziel der eigene Charakter ist, lokal nachziehen, damit der
+        // Mana-Wert in der UI (z.B. Cast-Popup) sofort aktualisiert.
+        if (target.characterId === character.value.id) {
+          const updated = await $fetch<{ character: CharacterFull }>(
+            `/api/characters/${character.value.id}`,
+          )
+          character.value = updated.character
+          cacheByCharId.set(character.value.id, updated.character)
+        }
+      } else {
+        resultLines.push(
+          `${manaAmount} Mana nicht angerechnet — ${target.name} hat kein aktives Magie-Modul`,
+        )
+      }
+    }
+
+    itemUseResult.value = resultLines.join(' · ')
+    emit('token-updated')
 
     // 3) Anzahl am Charakter um 1 verringern.
     const nextData: HtbahCharacterData = JSON.parse(JSON.stringify(htbahData.value))
@@ -2800,15 +2842,39 @@ const onImageError = (tokenId: number) => {
         >
           <div class="col-span-4 flex items-center gap-2 min-w-0">
             <span
+              v-if="item.healAmount > 0"
               class="text-[10px] tabular-nums px-1.5 py-0.5 rounded font-semibold"
               :style="{
                 background: '#10b98122',
                 color: '#065f46',
                 border: '1px solid #10b981',
               }"
-              :title="`Heilt ${item.healAmount} HP, ${item.quantity} dabei`"
+              :title="`Heilt ${item.healAmount} HP`"
             >
-              ✚{{ item.healAmount }} · {{ item.quantity }}×
+              ✚{{ item.healAmount }}
+            </span>
+            <span
+              v-if="(item.manaAmount ?? 0) > 0"
+              class="text-[10px] tabular-nums px-1.5 py-0.5 rounded font-semibold"
+              :style="{
+                background: '#7c3aed22',
+                color: '#4c1d95',
+                border: '1px solid #7c3aed',
+              }"
+              :title="`Gibt ${item.manaAmount} Mana — nur bei aktivem Magie-Modul`"
+            >
+              ✦{{ item.manaAmount }}
+            </span>
+            <span
+              class="text-[10px] tabular-nums px-1.5 py-0.5 rounded font-semibold"
+              :style="{
+                background: '#f5deb322',
+                color: '#7c2d12',
+                border: '1px solid #f59e0b',
+              }"
+              :title="`${item.quantity} dabei`"
+            >
+              {{ item.quantity }}×
             </span>
             <span class="text-xs font-semibold truncate" :title="item.name">
               {{ item.name }}

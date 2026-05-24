@@ -130,6 +130,7 @@ const sheet = computed<HtbahCharacterData>(() => {
           id: i.id,
           name: i.name ?? '',
           healAmount: Math.max(0, Math.floor(Number(i.healAmount ?? 0))),
+          manaAmount: Math.max(0, Math.floor(Number(i.manaAmount ?? 0))),
           quantity: Math.max(0, Math.floor(Number(i.quantity ?? 0))),
           note: i.note ?? '',
         }))
@@ -409,6 +410,7 @@ const addUsableItem = () => {
     id: crypto.randomUUID(),
     name: '',
     healAmount: 0,
+    manaAmount: 0,
     quantity: 1,
     note: '',
   })
@@ -2155,8 +2157,8 @@ const postRollToGroup = async () => {
     <SheetSection title="Verwendbare Gegenstände" class="lg:col-span-2">
       <div class="flex items-baseline justify-between gap-2 mb-2">
         <p class="text-xs text-ink-300/80">
-          Heiltrank, Erste-Hilfe-Paket o.ä. — Heilwert in HP plus Anzahl.
-          Im Battle-Map-Mini-Charsheet wählst du ein Ziel + verwendest sie per Klick.
+          Heiltrank, Manatrank, Erste-Hilfe-Paket o.ä. — Heilwert in HP und/oder
+          Mana plus Anzahl. Mana wirkt nur, wenn das Ziel das Magie-Modul aktiv hat.
         </p>
         <UButton size="xs" variant="soft" icon="i-lucide-plus" @click="addUsableItem">
           Gegenstand
@@ -2174,9 +2176,9 @@ const postRollToGroup = async () => {
         class="grid grid-cols-12 gap-2 items-center"
       >
         <UInput
-          class="col-span-5"
+          class="col-span-4"
           :model-value="item.name"
-          placeholder="z.B. Heiltrank, Erste-Hilfe-Paket"
+          placeholder="z.B. Heiltrank, Manatrank"
           :maxlength="60"
           @update:model-value="updateUsableItem(idx, { name: String($event) })"
         />
@@ -2185,16 +2187,25 @@ const postRollToGroup = async () => {
           type="number"
           min="0"
           :model-value="item.healAmount"
-          placeholder="Heilung"
-          title="Heilwert in HP"
+          placeholder="HP"
+          title="Heilwert in HP (0 = kein HP-Effekt)"
           @update:model-value="updateUsableItem(idx, { healAmount: Math.max(0, Math.floor(Number($event) || 0)) })"
         />
         <UInput
           class="col-span-2"
           type="number"
           min="0"
+          :model-value="item.manaAmount ?? 0"
+          placeholder="Mana"
+          title="Mana-Wert beim Verwenden (0 = kein Mana-Effekt) — wirkt nur, wenn das Ziel Magie aktiv hat"
+          @update:model-value="updateUsableItem(idx, { manaAmount: Math.max(0, Math.floor(Number($event) || 0)) })"
+        />
+        <UInput
+          class="col-span-1"
+          type="number"
+          min="0"
           :model-value="item.quantity"
-          placeholder="Anzahl"
+          placeholder="#"
           title="Wie viele du davon dabei hast"
           @update:model-value="updateUsableItem(idx, { quantity: Math.max(0, Math.floor(Number($event) || 0)) })"
         />

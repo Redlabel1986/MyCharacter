@@ -416,6 +416,14 @@ export interface HtbahUsableItem {
   name: string
   /** Fester Heilwert in HP. Negative Werte werden auf 0 geclampt. */
   healAmount: number
+  /**
+   * Fester Mana-Wert, der bei Verwendung an den Ziel-Charakter geht. Nur
+   * wirksam, wenn das Ziel ein Charakter mit aktivem Magie-Modul ist; sonst
+   * wird die Mana-Anwendung serverseitig stillschweigend uebersprungen
+   * (der HP-Effekt + Anzahl-Reduktion bleiben unberuehrt). 0/undefined =
+   * kein Mana-Effekt (klassischer Heiltrank).
+   */
+  manaAmount?: number
   /** Anzahl im Beutel. 0 = aufgebraucht. */
   quantity: number
   note?: string
