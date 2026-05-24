@@ -1942,6 +1942,11 @@ const myTokensOnMap = computed<Token[]>(() => {
 })
 
 // --- Initiative-Tracker ---
+// Tracking-Map fuer fehlgeschlagene Bild-Ladungen (alte Eintraege koennten
+// noch rohe private Blob-URLs enthalten, die der Browser nicht laden kann).
+// Bei `@error` wird die ID hier markiert und ein neutrales User-Icon
+// gerendert — das vermeidet das hässliche „broken image"-Glyph.
+const initEntryImageFailed = reactive<Record<string, boolean>>({})
 const initActive = computed(() => initiativeState.value?.active ?? false)
 const initEntries = computed<InitiativeEntry[]>(() => {
   const e = initiativeState.value?.entries ?? []
@@ -4122,11 +4127,17 @@ const endResize = () => {
           >
             <span class="font-mono text-xs w-6 text-right">{{ idx + 1 }}.</span>
             <img
-              v-if="e.imageUrl"
+              v-if="e.imageUrl && !initEntryImageFailed[e.id]"
               :src="e.imageUrl"
               :alt="e.name"
               class="w-6 h-6 rounded-full object-cover border border-[var(--color-accent)]"
+              @error="initEntryImageFailed[e.id] = true"
             >
+            <UIcon
+              v-else
+              name="i-lucide-user"
+              class="w-6 h-6 p-1 rounded-full border border-[var(--color-accent)] text-ink-400 shrink-0"
+            />
             <span class="flex-1 truncate">{{ e.name }}</span>
             <span v-if="e.id === initCurrentEntryId" class="text-[10px] uppercase tracking-widest text-[var(--color-accent)]">am Zug</span>
             <input

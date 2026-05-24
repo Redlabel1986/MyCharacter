@@ -16,6 +16,7 @@ import { and, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
 import {
+  battleMaps,
   battleTokens,
   characters,
   groups,
@@ -101,13 +102,27 @@ export default defineEventHandler(async (event) => {
   const die = Math.floor(Math.random() * 10) + 1
   const total = die + handelnBonus + stangenwaffeBonus
 
-  // Snapshot des Token-Bilds (wenn der Spieler ein Token auf einer der Karten
-  // dieser Gruppe hat) — rein kosmetisch fuer den SL-Tracker.
+  // Bild-URL fuer den Initiative-Tracker. Der rohe `battleTokens.imageUrl` ist
+  // oft ein privater Blob-URL (nicht direkt im Browser ladbar) oder fuer
+  // Charakter-Tokens schlicht null — wir muessen ueber den authentifizierten
+  // Token-Image-Endpoint laden, der auch das Charakter-Portrait als Fallback
+  // liefert. Wir nehmen das erste Token dieses Charakters auf einer Karte
+  // dieser Gruppe (cosmetisch — wenn der Spieler mehrere Karten bespielt,
+  // reicht ein beliebiger Treffer fuer das Initiative-Icon).
   const [tok] = await db
-    .select({ imageUrl: battleTokens.imageUrl })
+    .select({ id: battleTokens.id, mapId: battleTokens.mapId })
     .from(battleTokens)
-    .where(eq(battleTokens.characterId, body.characterId))
+    .innerJoin(battleMaps, eq(battleMaps.id, battleTokens.mapId))
+    .where(
+      and(
+        eq(battleTokens.characterId, body.characterId),
+        eq(battleMaps.groupId, groupId),
+      ),
+    )
     .limit(1)
+  const imageUrl = tok
+    ? `/api/groups/${groupId}/maps/${tok.mapId}/tokens/${tok.id}/image`
+    : `/api/portrait/${body.characterId}`
 
   // Eintrag in entries setzen — entweder bestehenden Eintrag des Chars updaten
   // oder neuen anlegen. ID = `char:<id>` damit es deterministisch ist.
@@ -119,7 +134,7 @@ export default defineEventHandler(async (event) => {
     characterId: body.characterId,
     ownerUserId: user.id,
     hasActed: false,
-    imageUrl: tok?.imageUrl ?? undefined,
+    imageUrl,
   }
   const nextEntries = [
     ...state.entries.filter((e) => e.id !== entryId && e.characterId !== body.characterId),
