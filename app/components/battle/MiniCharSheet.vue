@@ -117,6 +117,14 @@ const props = defineProps<{
    * Reichweite wuerfeln (Storytelling, Edge-Cases).
    */
   isDm?: boolean
+  /**
+   * Sichtlinie-Pruefung fuer Fernkampf + Magie: liefert true, wenn das
+   * Angreifer-Token das Ziel-Token sehen kann (Mauern + nachts
+   * Lichtquellen werden beruecksichtigt). Wird vom Battle-Map-Page
+   * gereicht, weil dort die Karten-Geometrie + Lichter live verfuegbar
+   * sind. Wenn nicht gesetzt, faellt die Sicht-Pruefung weg.
+   */
+  canSee?: (attackerTokenId: number, targetTokenId: number) => boolean
 }>()
 
 const emit = defineEmits<{
@@ -661,6 +669,22 @@ const meleeOutOfReach = computed<boolean>(() => {
   return dist > 1
 })
 const meleeBlocked = computed<boolean>(() => meleeOutOfReach.value && !props.isDm)
+// --- Sichtlinie fuer Fernkampf-Waffen ---
+// Nahkampf braucht Sichtlinie nicht (Berührung impliziert sichtbar). Bei
+// Fernkampfwaffen (Bogen/Schusswaffe/Wurf) muss der Angreifer das Ziel
+// sehen — Mauern und nachts auch Beleuchtung gehoeren dazu. Wird vom
+// Battle-Map-Page via `canSee`-Prop ausgewertet.
+const weaponIsRanged = computed<boolean>(() => {
+  const w = selectedWeapon.value
+  if (!w) return false
+  return w.category === 'fernkampf' || w.category === 'wurf'
+})
+const rangedOutOfSight = computed<boolean>(() => {
+  if (!weaponIsRanged.value) return false
+  if (!props.canSee || !activeToken.value || !damageTargetToken.value) return false
+  return !props.canSee(activeToken.value.id, damageTargetToken.value.id)
+})
+const rangedBlocked = computed<boolean>(() => rangedOutOfSight.value && !props.isDm)
 
 // Bei Tab-Wechsel auch das Damage-Ziel zuruecksetzen, damit nicht aus Versehen
 // ein altes Ziel uebernommen wird.
@@ -1251,6 +1275,23 @@ const castOutOfRangeTargets = computed<Token[]>(() => {
 })
 const castReachBlocked = computed<boolean>(
   () => castOutOfRangeTargets.value.length > 0 && !props.isDm,
+)
+// Sichtlinie pro Cast-Ziel: Spruchwurf-Ziele muessen vom Angreifer sehbar sein
+// (Mauer / Nacht-Dunkelheit blockiert). Selbst-Sprueche ("Selbst" → 0 Tiles)
+// brauchen die Pruefung nicht — Reichweite=0 sorgt sowieso fuer Block, wenn
+// das Ziel nicht der Wirker selbst ist.
+const castOutOfSightTargets = computed<Token[]>(() => {
+  if (!props.canSee || !activeToken.value) return []
+  const out: Token[] = []
+  for (const id of castTargetIds.value) {
+    const t = damageTargetTokens.value.find((x: Token) => x.id === id)
+    if (!t) continue
+    if (!props.canSee(activeToken.value.id, t.id)) out.push(t)
+  }
+  return out
+})
+const castSightBlocked = computed<boolean>(
+  () => castOutOfSightTargets.value.length > 0 && !props.isDm,
 )
 function rollDie(sides: number): number {
   return Math.floor(Math.random() * sides) + 1
@@ -2270,12 +2311,22 @@ const onImageError = (tokenId: number) => {
           {{ castOutOfRangeTargets.map((t) => `${t.name} (${distanceToToken(t)})`).join(', ') }}
           <span v-if="!castReachBlocked" class="font-normal italic">— DM darf trotzdem.</span>
         </p>
+        <!-- Sichtlinie pro Ziel (Mauer dazwischen / nachts unbeleuchtet). -->
+        <p
+          v-if="castOutOfSightTargets.length"
+          class="text-[11px] font-semibold"
+          :class="castSightBlocked ? 'text-red-700' : 'text-amber-700'"
+        >
+          ⚠ Nicht sichtbar: {{ castOutOfSightTargets.map((t) => t.name).join(', ') }} —
+          Mauer dazwischen oder nachts ohne Licht.
+          <span v-if="!castSightBlocked" class="font-normal italic">DM darf trotzdem.</span>
+        </p>
         <UButton
           block
           color="primary"
           icon="i-lucide-dices"
           :loading="castSending"
-          :disabled="!castSpellName.trim() || mana < HTBAH_SPELL_MANA_COST[castSpellLevel] || castReachBlocked"
+          :disabled="!castSpellName.trim() || mana < HTBAH_SPELL_MANA_COST[castSpellLevel] || castReachBlocked || castSightBlocked"
           @click="castSpell"
         >
           Wirken (3W10 + {{ arkanum }})
@@ -2563,7 +2614,7 @@ const onImageError = (tokenId: number) => {
           <UButton
             color="primary"
             icon="i-lucide-dices"
-            :disabled="!pickedRollOption || meleeBlocked"
+            :disabled="!pickedRollOption || meleeBlocked || rangedBlocked"
             :loading="rollSending"
             class="sm:col-span-5 roll-cta"
             size="lg"
@@ -2763,6 +2814,16 @@ const onImageError = (tokenId: number) => {
             <span v-if="!meleeBlocked" class="font-normal italic">DM darf trotzdem.</span>
             <span v-else class="font-normal italic">Bewege dich näher oder wähle eine Fernkampfwaffe.</span>
           </p>
+          <!-- Fernkampf-Sichtlinie: Mauer dazwischen / nachts unbeleuchtet
+               = kein Angriff. -->
+          <p
+            v-if="rangedOutOfSight"
+            class="mt-1 text-[11px] font-semibold"
+            :class="rangedBlocked ? 'text-red-700' : 'text-amber-700'"
+          >
+            ⚠ {{ damageTargetToken?.name }} ist nicht sichtbar — Mauer dazwischen oder nachts ohne Licht.
+            <span v-if="!rangedBlocked" class="font-normal italic">DM darf trotzdem.</span>
+          </p>
         </div>
         <!-- Formel + Bezeichnung + Wuerfel-Button -->
         <div>
@@ -2786,7 +2847,7 @@ const onImageError = (tokenId: number) => {
             <UButton
               :color="damageMode === 'heal' ? 'success' : 'primary'"
               :icon="damageMode === 'heal' ? 'i-lucide-heart-pulse' : 'i-lucide-swords'"
-              :disabled="!damageParsed || damageSending || (damageMode === 'damage' && meleeBlocked)"
+              :disabled="!damageParsed || damageSending || (damageMode === 'damage' && (meleeBlocked || rangedBlocked))"
               :loading="damageSending"
               class="sm:col-span-4 roll-cta"
               size="lg"
