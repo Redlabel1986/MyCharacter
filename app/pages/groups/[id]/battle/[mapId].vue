@@ -26,7 +26,6 @@ import {
   type Wall,
 } from '~~/shared/fog'
 import { computeDamageLevel, damageLevelColor } from '~~/shared/damage-level'
-import { canSeeTargetForAttack, type LightSource } from '~~/shared/distance'
 import { subscribeMap, subscribeGroup, type RealtimeSubscription } from '~/composables/usePusher'
 import {
   BUILT_IN_MAP_OBJECTS,
@@ -2298,45 +2297,6 @@ const visionSources = computed<VisionSource[]>(() => {
   return out
 })
 
-// LoS-Check fuer Fernkampf / Magie: kann der Angreifer-Token sein Ziel
-// sehen? Tagsueber reicht direkte Sichtlinie (Mauer blockt). Nachts muss
-// das Ziel zusaetzlich beleuchtet sein — entweder im Sichtkreis des
-// Angreifers oder in einer Karten-Lichtquelle (Fackel, Lagerfeuer).
-// Wird als Prop an MiniCharSheet gereicht; dort wird damit der „Würfeln"-
-// Button fuer Fernkampfwaffen / Zaubersprueche blockiert (Spieler) bzw.
-// gewarnt (DM).
-const canAttackerSeeTarget = (attackerId: number, targetId: number): boolean => {
-  if (attackerId === targetId) return true
-  const attacker = tokens.value.find((t: Token) => t.id === attackerId)
-  const target = tokens.value.find((t: Token) => t.id === targetId)
-  if (!attacker || !target || !map.value) return true
-  const isNight = currentTimeOfDay.value === 'night'
-  // Lichtquellen fuer den Angreifer: sein eigener Sichtkreis + alle Karten-
-  // Objekt-Lichter. Mitspieler-Sichtkreise zaehlen RAW nicht als „Lichtquelle"
-  // (das waere ihre persoenliche Wahrnehmung, kein Licht zum Anvisieren).
-  const lights: LightSource[] = []
-  if (attacker.visionRadius > 0) {
-    lights.push({ centerX: attacker.x, centerY: attacker.y, radiusCells: attacker.visionRadius })
-  }
-  for (const o of objects.value) {
-    if (o.lightRadius <= 0) continue
-    const g = map.value.gridSize
-    lights.push({
-      centerX: o.x + (displayW(o) * g) / 2,
-      centerY: o.y + (displayH(o) * g) / 2,
-      radiusCells: o.lightRadius,
-    })
-  }
-  return canSeeTargetForAttack({
-    attacker: { x: attacker.x, y: attacker.y },
-    target: { x: target.x, y: target.y },
-    walls: walls.value,
-    gridSize: map.value.gridSize,
-    isNight,
-    lightSources: lights,
-  })
-}
-
 // Sicht-Polygone fuer das weiche Radial-Gradient-Overlay: pro Quelle ein
 // Polygon, das die Mauern (Wand-Schatten) beruecksichtigt.
 interface VisionPolygon {
@@ -4212,7 +4172,6 @@ const endResize = () => {
           :awaiting-initiative-for="initiativeState?.awaitingFromCharacters ?? []"
           :grid-size="map?.gridSize"
           :is-dm="isDm"
-          :can-see="canAttackerSeeTarget"
           @token-updated="fetchMap"
         />
       </div>

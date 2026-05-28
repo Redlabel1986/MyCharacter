@@ -11,7 +11,6 @@
  * Wenn das spaeter pro Karte konfigurierbar werden soll, hier die einzige
  * Stelle, an der die Konvertierung steckt.
  */
-import { segmentBlockedByWalls, type Wall } from './fog'
 
 export const METERS_PER_TILE = 1
 
@@ -60,67 +59,4 @@ export function parseHtbahRangeTiles(text: string | undefined | null): number | 
   }
   if (lower.includes('sicht')) return Number.POSITIVE_INFINITY
   return null
-}
-
-/**
- * Beschreibt eine Sichtquelle fuer Nacht-Beleuchtung. Tokens (eigener
- * Sichtkreis) und Lichtquellen-Objekte (Fackel, Lagerfeuer) liefern beides
- * passend gefuellt.
- */
-export interface LightSource {
-  centerX: number
-  centerY: number
-  /** Sicht/Licht-Radius in Rasterzellen. */
-  radiusCells: number
-}
-
-/**
- * Prueft, ob ein Angreifer sein Ziel fuer Fernkampf / Magie sehen kann.
- *
- *  - **Tag** (`timeOfDay !== 'night'`): einzige Bedingung ist direkte
- *    Sichtlinie — keine Mauer zwischen Angreifer- und Ziel-Mittelpunkt.
- *  - **Nacht**: zusaetzlich muss das Ziel beleuchtet sein, d.h. innerhalb
- *    des Sicht-/Licht-Radius mindestens einer Quelle liegen, von der aus
- *    selbst keine Mauer das Ziel verdeckt. Beleuchtungs-Quellen sind:
- *    der Angreifer selbst (sein eigener Sichtkreis) und alle Karten-Licht-
- *    quellen (z.B. Fackeln/Lagerfeuer). Mitspieler-Sichtkreise werden vom
- *    Aufrufer ueblicherweise nicht uebergeben — RAW: "Lichtquelle ODER
- *    eigener Sichtkreis".
- *
- * `gridSize` ist die Pixel-Groesse einer Rasterzelle (zur Umrechnung der
- * Radien in Pixel). `walls` darf leer sein — dann faellt die Mauer-Pruefung
- * weg und es genuegt der Radius.
- */
-export function canSeeTargetForAttack(args: {
-  attacker: { x: number; y: number }
-  target: { x: number; y: number }
-  walls: Wall[]
-  gridSize: number
-  isNight: boolean
-  lightSources?: LightSource[]
-}): boolean {
-  const { attacker, target, walls, gridSize, isNight, lightSources = [] } = args
-  // 1) Direkte Sichtlinie — Mauer dazwischen = nie sichtbar.
-  if (segmentBlockedByWalls(attacker.x, attacker.y, target.x, target.y, walls)) {
-    return false
-  }
-  // 2) Tags: keine Beleuchtungs-Bedingung — Sichtlinie reicht.
-  if (!isNight) return true
-  // 3) Nachts: das Ziel-Tile muss in mindestens einer Lichtquelle liegen,
-  // die selbst nicht von einer Mauer verdeckt ist. Wir testen jede Quelle
-  // einzeln per Radius- und Mauer-Pruefung — wenn EINE passt, ist es beleuchtet.
-  if (!gridSize || gridSize <= 0) return true
-  for (const src of lightSources) {
-    if (src.radiusCells <= 0) continue
-    const dxPx = target.x - src.centerX
-    const dyPx = target.y - src.centerY
-    const distCells = Math.sqrt(dxPx * dxPx + dyPx * dyPx) / gridSize
-    // +0.5 Zelle wie bei cellsInTokenVision — symmetrische Kreis-Sicht.
-    if (distCells > src.radiusCells + 0.5) continue
-    if (segmentBlockedByWalls(src.centerX, src.centerY, target.x, target.y, walls)) {
-      continue
-    }
-    return true
-  }
-  return false
 }

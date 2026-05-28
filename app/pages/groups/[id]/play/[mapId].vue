@@ -12,17 +12,6 @@ import MiniCharSheet from '~/components/battle/MiniCharSheet.vue'
 import { subscribeMap, subscribeGroup, type RealtimeSubscription } from '~/composables/usePusher'
 import type { NpcAbility } from '~~/shared/npc'
 import type { TimeOfDay } from '~~/shared/time-of-day'
-import type { Wall } from '~~/shared/fog'
-import { canSeeTargetForAttack, type LightSource } from '~~/shared/distance'
-
-interface MapObjectLite {
-  x: number
-  y: number
-  width: number
-  height: number
-  rotation: number
-  lightRadius: number
-}
 
 definePageMeta({ middleware: ['auth'], layout: false })
 
@@ -76,16 +65,13 @@ const initiativeState = ref<InitiativeState | null>(null)
 const currentTimeOfDay = ref<TimeOfDay | undefined>(undefined)
 const gridSize = ref<number | undefined>(undefined)
 const isDm = ref<boolean>(false)
-const walls = ref<Wall[]>([])
-const objects = ref<MapObjectLite[]>([])
 const loadError = ref<string | null>(null)
 
 const fetchMap = async () => {
   try {
     const res = await $fetch<{
-      map: { name: string; timeOfDay?: TimeOfDay; gridSize?: number; walls?: Wall[] }
+      map: { name: string; timeOfDay?: TimeOfDay; gridSize?: number }
       tokens: Token[]
-      objects?: MapObjectLite[]
       initiativeState: InitiativeState | null
       isDm?: boolean
     }>(`/api/groups/${groupId}/maps/${mapId}`)
@@ -94,50 +80,12 @@ const fetchMap = async () => {
     initiativeState.value = res.initiativeState
     currentTimeOfDay.value = res.map.timeOfDay
     gridSize.value = res.map.gridSize
-    walls.value = res.map.walls ?? []
-    objects.value = res.objects ?? []
     isDm.value = !!res.isDm
     loadError.value = null
   } catch (e: unknown) {
     loadError.value =
       (e as { statusMessage?: string }).statusMessage ?? 'Karte konnte nicht geladen werden.'
   }
-}
-
-// Spiegelt die Logik aus battle/[mapId].vue: kann der Angreifer sein Ziel
-// sehen (Mauer / Nacht-Beleuchtung)? Wird an MiniCharSheet weitergereicht,
-// damit Fernkampf/Magie auch im Play-Modus mit korrektem Sichtcheck arbeiten.
-const displayW = (o: MapObjectLite) =>
-  o.rotation === 90 || o.rotation === 270 ? o.height : o.width
-const displayH = (o: MapObjectLite) =>
-  o.rotation === 90 || o.rotation === 270 ? o.width : o.height
-const canAttackerSeeTarget = (attackerId: number, targetId: number): boolean => {
-  if (attackerId === targetId) return true
-  const attacker = tokens.value.find((t: Token) => t.id === attackerId)
-  const target = tokens.value.find((t: Token) => t.id === targetId)
-  const g = gridSize.value
-  if (!attacker || !target || !g) return true
-  const isNight = currentTimeOfDay.value === 'night'
-  const lights: LightSource[] = []
-  if (attacker.visionRadius > 0) {
-    lights.push({ centerX: attacker.x, centerY: attacker.y, radiusCells: attacker.visionRadius })
-  }
-  for (const o of objects.value) {
-    if (o.lightRadius <= 0) continue
-    lights.push({
-      centerX: o.x + (displayW(o) * g) / 2,
-      centerY: o.y + (displayH(o) * g) / 2,
-      radiusCells: o.lightRadius,
-    })
-  }
-  return canSeeTargetForAttack({
-    attacker: { x: attacker.x, y: attacker.y },
-    target: { x: target.x, y: target.y },
-    walls: walls.value,
-    gridSize: g,
-    isNight,
-    lightSources: lights,
-  })
 }
 await fetchMap()
 
@@ -202,7 +150,6 @@ onBeforeUnmount(() => {
         :awaiting-initiative-for="initiativeState?.awaitingFromCharacters ?? []"
         :grid-size="gridSize"
         :is-dm="isDm"
-        :can-see="canAttackerSeeTarget"
         @token-updated="fetchMap"
       />
     </main>
