@@ -451,7 +451,20 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
     CREATE INDEX IF NOT EXISTS idx_glossary_group ON glossary_entries(group_id)
   `)
 
-  // Regelbuch pro Gruppe — vom DM gepflegte Hausregeln/Tischvereinbarungen.
+  // Regelbuch pro Gruppe — Tabs (Paragraphenreiter) + Regeln pro Tab.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS group_rule_tabs (
+      id SERIAL PRIMARY KEY,
+      group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      order_idx INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_group_rule_tabs_group ON group_rule_tabs(group_id)
+  `)
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS group_rules (
       id SERIAL PRIMARY KEY,
@@ -465,6 +478,43 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   `)
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_group_rules_group ON group_rules(group_id)
+  `)
+  // tab_id-Spalte fuer bestehende group_rules-Tabellen nachziehen (idempotent).
+  await db.execute(sql`
+    ALTER TABLE group_rules
+    ADD COLUMN IF NOT EXISTS tab_id INTEGER
+      REFERENCES group_rule_tabs(id) ON DELETE CASCADE
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_group_rules_tab ON group_rules(tab_id)
+  `)
+  // Backfill: jede Gruppe mit alten tab-losen Regeln bekommt einen
+  // „Allgemein"-Tab, alle ihre tab-losen Regeln werden dort eingehaengt.
+  // app_settings-Gate sorgt dafuer, dass das nur einmal laeuft.
+  await db.execute(sql`
+    INSERT INTO group_rule_tabs (group_id, name, order_idx)
+    SELECT DISTINCT r.group_id, 'Allgemein', 0
+    FROM group_rules r
+    WHERE r.tab_id IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM group_rule_tabs t
+        WHERE t.group_id = r.group_id AND t.name = 'Allgemein'
+      )
+      AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'group_rules_default_tab_backfill')
+  `)
+  await db.execute(sql`
+    UPDATE group_rules r
+    SET tab_id = t.id
+    FROM group_rule_tabs t
+    WHERE r.tab_id IS NULL
+      AND t.group_id = r.group_id
+      AND t.name = 'Allgemein'
+      AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'group_rules_default_tab_backfill')
+  `)
+  await db.execute(sql`
+    INSERT INTO app_settings (key, value)
+    VALUES ('group_rules_default_tab_backfill', '1')
+    ON CONFLICT (key) DO NOTHING
   `)
 
   await db.execute(sql`

@@ -686,7 +686,28 @@ export type GlossaryEntry = typeof glossaryEntries.$inferSelect
 export type NewGlossaryEntry = typeof glossaryEntries.$inferInsert
 
 // Regelbuch der Gruppe — vom DM gepflegte Hausregeln/Tischvereinbarungen.
-// Jede Regel ist ein Titel + Markdown-Text. orderIdx steuert die Reihenfolge.
+// Regeln sind in Tabs (Paragraphenreiter) gruppiert. Pro Gruppe beliebig
+// viele Tabs; pro Tab beliebig viele Regeln. Tabs kaskadieren auf Loeschen
+// die zugehoerigen Regeln mit.
+export const groupRuleTabs = pgTable(
+  'group_rule_tabs',
+  {
+    id: serial('id').primaryKey(),
+    groupId: integer('group_id')
+      .notNull()
+      .references(() => groups.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    orderIdx: integer('order_idx').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    groupIdx: index('idx_group_rule_tabs_group').on(table.groupId),
+  }),
+)
+export type GroupRuleTab = typeof groupRuleTabs.$inferSelect
+export type NewGroupRuleTab = typeof groupRuleTabs.$inferInsert
+
 export const groupRules = pgTable(
   'group_rules',
   {
@@ -694,6 +715,14 @@ export const groupRules = pgTable(
     groupId: integer('group_id')
       .notNull()
       .references(() => groups.id, { onDelete: 'cascade' }),
+    /**
+     * Tab, in dem die Regel haengt. Per ensureSchema-Migration werden
+     * Alt-Regeln einem Default-Tab „Allgemein" zugewiesen — danach ist
+     * tabId immer gesetzt (UI verlangt Tab-Auswahl beim Anlegen).
+     */
+    tabId: integer('tab_id').references(() => groupRuleTabs.id, {
+      onDelete: 'cascade',
+    }),
     title: text('title').notNull(),
     content: text('content').notNull().default(''),
     orderIdx: integer('order_idx').notNull().default(0),
@@ -702,6 +731,7 @@ export const groupRules = pgTable(
   },
   (table) => ({
     groupIdx: index('idx_group_rules_group').on(table.groupId),
+    tabIdx: index('idx_group_rules_tab').on(table.tabId),
   }),
 )
 export type GroupRule = typeof groupRules.$inferSelect
