@@ -112,6 +112,17 @@ const roleBadge = (r: 'player' | 'dm' | 'admin') =>
             Glossar
           </UButton>
           <UButton
+            :to="`/groups/${id}/rules`"
+            color="primary"
+            variant="soft"
+            size="lg"
+            icon="i-lucide-scroll-text"
+            class="font-semibold"
+            title="Regelbuch: Hausregeln und Tischvereinbarungen"
+          >
+            Regelbuch
+          </UButton>
+          <UButton
             :to="`/groups/${id}/battle`"
             color="primary"
             size="lg"
