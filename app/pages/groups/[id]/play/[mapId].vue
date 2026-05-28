@@ -133,6 +133,14 @@ onBeforeUnmount(() => {
       </NuxtLink>
       <span class="text-xs text-ink-300">·</span>
       <h1 class="font-serif text-base truncate flex-1">{{ mapName }}</h1>
+      <NuxtLink
+        :to="`/groups/${groupId}/rules`"
+        class="text-xs text-[var(--color-accent)] hover:underline shrink-0 flex items-center gap-1"
+        title="Regelbuch: Hausregeln und Tischvereinbarungen"
+      >
+        <UIcon name="i-lucide-scroll-text" class="size-4" />
+        <span class="hidden sm:inline">Regelbuch</span>
+      </NuxtLink>
       <span class="text-[10px] uppercase tracking-widest text-ink-300 hidden sm:inline">
         Mein Mini-Sheet
       </span>
