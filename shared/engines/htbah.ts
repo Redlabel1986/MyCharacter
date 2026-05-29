@@ -152,7 +152,27 @@ export interface HtbahCharacterData {
    * waehlen. Wenn `combatModule='universal'`, wird das als Default vorgewaehlt.
    */
   combatModule?: 'standard' | 'universal'
+  /**
+   * Optionales Hausregel-Modul "Battlebuben Modus" (eigenes Regelwerk, W100-
+   * Kern wie HtbaH, aber abweichende QS-Tabelle, Krit-/Patzer-Bereiche,
+   * Initiative (1W20), Kampf- und Herstellungsregeln). Wenn `battlebuben:true`,
+   * laufen alle Proben dieses Charakters nach dem Battlebuben-Ruleset
+   * (siehe HtbahRuleset + die ruleset-abhaengigen Helfer weiter unten).
+   */
+  battlebuben?: boolean
   notes: string
+}
+
+/**
+ * Aktives Probe-Ruleset eines Charakters. 'standard' = klassisches HtbaH,
+ * 'battlebuben' = Hausregel-Modul mit eigener QS-Tabelle und Krit-/Patzer-
+ * Bereichen (siehe Battlebuben-Regelwerk).
+ */
+export type HtbahRuleset = 'standard' | 'battlebuben'
+
+/** Liefert das aktive Ruleset eines Charakters. */
+export function htbahRuleset(data: HtbahCharacterData): HtbahRuleset {
+  return data.battlebuben === true ? 'battlebuben' : 'standard'
 }
 
 export function createBlankHtbah(name: string): HtbahCharacterData {
@@ -192,6 +212,7 @@ export function createBlankHtbah(name: string): HtbahCharacterData {
     magicState: undefined,
     rdd: undefined,
     combatModule: 'standard',
+    battlebuben: false,
     notes: '',
   }
 }
@@ -1174,20 +1195,34 @@ export function htbahStatus(hp: { current: number }): HtbahStatus {
 }
 
 /**
- * Krit-Erfolg-Bereich: Wurf ≤ floor(skillValue/10).
- * Regelwerk Lexikon "Kritische Würfe": "10% des Fähigkeitswertes".
- * KEIN Krit-Erfolg bei reinen Begabungswürfen (also wenn kein Skill verfügbar).
+ * Krit-Erfolg-Bereich: Wurf ≤ Schwelle.
+ *
+ * - standard (HtbaH): floor(skillValue/10) — "10% des Fähigkeitswertes".
+ * - battlebuben: Talentwert < 30 → Wurf 1–5, Talentwert ≥ 30 → Wurf 1–10
+ *   (Battlebuben-Regelwerk, "Kritische Würfe").
+ *
+ * KEIN Krit-Erfolg bei reinen Begabungswürfen im HtbaH-Standard (Aufrufer
+ * prueft isTalentOnly); Battlebuben kennt diese Einschraenkung nicht.
  */
-export function htbahCritThreshold(skillValue: number): number {
+export function htbahCritThreshold(
+  skillValue: number,
+  ruleset: HtbahRuleset = 'standard',
+): number {
+  if (ruleset === 'battlebuben') return skillValue < 30 ? 5 : 10
   return Math.max(1, Math.floor(skillValue / 10))
 }
 
 /**
- * Krit-Patzer-Bereich: Wurf ≥ ⌈skillValue/10⌉ + 90.
- * Regelwerk: "Die untere Grenze des Bereichs für einen kritischen Misserfolg
- * wird durch 10% der Fähigkeit/Begabung plus 90 gekennzeichnet."
+ * Krit-Patzer-Bereich: Wurf ≥ Schwelle.
+ *
+ * - standard (HtbaH): ⌈skillValue/10⌉ + 90.
+ * - battlebuben: Talentwert < 30 → Wurf 90–100, Talentwert ≥ 30 → Wurf 95–100.
  */
-export function htbahFumbleThreshold(skillValue: number): number {
+export function htbahFumbleThreshold(
+  skillValue: number,
+  ruleset: HtbahRuleset = 'standard',
+): number {
+  if (ruleset === 'battlebuben') return skillValue < 30 ? 90 : 95
   return Math.ceil(skillValue / 10) + 90
 }
 
@@ -1199,9 +1234,15 @@ export interface HtbahProbeInput {
   isTalentOnly?: boolean
   /**
    * Stichwaffen mit "Aufspießen": Krit-Bereich verdoppelt sich (≤ 20% statt
-   * ≤ 10% des Skill-Werts). Nur wirksam, wenn !isTalentOnly.
+   * ≤ 10% des Skill-Werts). Nur wirksam, wenn !isTalentOnly. HtbaH-Standard.
    */
   aufspiessen?: boolean
+  /**
+   * Aktives Ruleset. 'battlebuben' verwendet die abweichende QS-Tabelle und
+   * Krit-/Patzer-Bereiche und erlaubt Krits auch auf Begabungsproben.
+   * Default 'standard'.
+   */
+  ruleset?: HtbahRuleset
 }
 
 export interface HtbahProbeResult {
@@ -1217,7 +1258,19 @@ export interface HtbahProbeResult {
   qualityStep?: number
 }
 
-export function htbahQualityStep(margin: number): number {
+export function htbahQualityStep(
+  margin: number,
+  ruleset: HtbahRuleset = 'standard',
+): number {
+  if (ruleset === 'battlebuben') {
+    // Battlebuben-Regelwerk: QS 1–6, bei 60+ gedeckelt (kein "Maximaler Erfolg").
+    if (margin < 20) return 1
+    if (margin < 30) return 2
+    if (margin < 40) return 3
+    if (margin < 50) return 4
+    if (margin < 60) return 5
+    return 6
+  }
   if (margin < 20) return 1
   if (margin < 30) return 2
   if (margin < 40) return 3
@@ -1227,18 +1280,32 @@ export function htbahQualityStep(margin: number): number {
   return 7
 }
 
-export function htbahQualityLabel(step: number): string {
+export function htbahQualityLabel(
+  step: number,
+  ruleset: HtbahRuleset = 'standard',
+): string {
+  if (ruleset === 'battlebuben') return `QS ${step}`
   return step >= 7 ? 'Maximaler Erfolg' : `Stufe ${step}`
 }
 
 export function htbahRollProbe(input: HtbahProbeInput): HtbahProbeResult {
+  const ruleset = input.ruleset ?? 'standard'
   const success = input.roll <= input.target
-  const critBound = input.aufspiessen
-    ? htbahCritThresholdAufspiessen(input.target)
-    : htbahCritThreshold(input.target)
-  const critical = !input.isTalentOnly && success && input.roll <= critBound
-  const fumble = input.roll >= htbahFumbleThreshold(input.target)
-  const qualityStep = success ? htbahQualityStep(input.target - input.roll) : undefined
+  // Krit-Bereich: im Battlebuben-Modus rein nach Talentwert (Aufspießen ist eine
+  // HtbaH-Sonderregel und wird dort ignoriert). Sonst HtbaH-Standard.
+  const critBound =
+    ruleset === 'battlebuben'
+      ? htbahCritThreshold(input.target, 'battlebuben')
+      : input.aufspiessen
+        ? htbahCritThresholdAufspiessen(input.target)
+        : htbahCritThreshold(input.target)
+  // Battlebuben erlaubt Krits auch auf Begabungsproben; HtbaH-Standard nicht.
+  const critAllowed = ruleset === 'battlebuben' ? true : !input.isTalentOnly
+  const critical = critAllowed && success && input.roll <= critBound
+  const fumble = input.roll >= htbahFumbleThreshold(input.target, ruleset)
+  const qualityStep = success
+    ? htbahQualityStep(input.target - input.roll, ruleset)
+    : undefined
   return { success, critical, fumble, qualityStep }
 }
 
@@ -1265,3 +1332,104 @@ export const HTBAH_WEAPON_PRESETS: HtbahWeaponPreset[] = [
   { name: 'Schrotflinte', dice: 9 },
   { name: 'Bombe / Granate / Raketenwerfer', dice: 10 },
 ]
+
+/* ==================================================================== */
+/*  Battlebuben Modus (Hausregel) — Kampf, Herstellung, Regeneration     */
+/* ==================================================================== */
+
+/**
+ * Initiative im Battlebuben-Modus: flach 1W20 (kein Begabungs-Bonus, keine
+ * Ruestungs-Init-Malus). Hier nur die Wuerfel-Definition; der Wurf passiert
+ * serverseitig im Initiative-Endpoint.
+ */
+export const HTBAH_BB_INITIATIVE_DICE = { count: 1, sides: 20 } as const
+
+/**
+ * Zwei-Waffen-Kampf (Battlebuben): der Angriff mit der Haupthand erhaelt −20,
+ * der folgende Angriff mit der Nebenhand −40. Als Modifikatoren zum
+ * Trefferwurf zu verstehen.
+ */
+export const HTBAH_BB_DUAL_WIELD = { mainHand: -20, offHand: -40 } as const
+
+/**
+ * Kampftalent-Level: pro volle 20 Stufen (Fertigkeitswert) in einem
+ * Kampftalent ein Level. Bestimmt verfuegbare Kampfmanoever-Stufen.
+ * Gleiches Prinzip gilt fuer Magietalente → Anzahl Zauber-Slots.
+ */
+export function htbahBbTalentLevel(skillValue: number): number {
+  return Math.floor(Math.max(0, skillValue) / 20)
+}
+
+/**
+ * Bewegungsreichweite in Feldern nach Koerpergroesse (Battlebuben).
+ */
+export const HTBAH_BB_MOVEMENT = {
+  klein: 4,
+  mittelgross: 5,
+  gross: 6,
+} as const
+export type HtbahBbSize = keyof typeof HTBAH_BB_MOVEMENT
+
+/* ----- Herstellung (Sammelprobe + Grade der Vollendung) ----- */
+
+/**
+ * Die fuenf Grade der Vollendung. `requiredQs` = Summe der QS, die ueber
+ * Sammelproben erreicht werden muss, bis das Werk vollendet ist.
+ */
+export const HTBAH_BB_CRAFT_GRADES = [
+  { grad: 1, roman: 'I', label: 'Trivial', hint: 'Alltägliche, einfache Arbeiten', requiredQs: 3, examples: 'Seil, Holzlöffel, Tonbecher' },
+  { grad: 2, roman: 'II', label: 'Einfach', hint: 'Routinearbeiten des Handwerks', requiredQs: 6, examples: 'Messer, einfache Kleidung, Fass' },
+  { grad: 3, roman: 'III', label: 'Gehobene Arbeit', hint: 'Anspruchsvolle, präzise Arbeiten', requiredQs: 9, examples: 'Langschwert, Rad, Stuhl, Musikinstrument' },
+  { grad: 4, roman: 'IV', label: 'Komplex', hint: 'Erfordert Erfahrung und Werkstatt', requiredQs: 12, examples: 'Plattenrüstung, Armbrust, Buch, Glasschliff' },
+  { grad: 5, roman: 'V', label: 'Kunst-Handwerk', hint: 'Mehrere Arbeitsschritte & Gewerke', requiredQs: 15, examples: 'Schmuckstück, Uhrwerk, edle Kleidung' },
+] as const
+export type HtbahBbCraftGrade = (typeof HTBAH_BB_CRAFT_GRADES)[number]['grad']
+
+/** Werkqualitaet aus dem abschliessenden Qualitaetswurf. */
+export type HtbahBbQuality = 'schlecht' | 'normal' | 'gut' | 'meisterlich'
+export const HTBAH_BB_QUALITY_LABELS: Record<HtbahBbQuality, string> = {
+  schlecht: 'Schlecht',
+  normal: 'Normal',
+  gut: 'Gut',
+  meisterlich: 'Meisterlich',
+}
+
+/**
+ * Werkqualitaet aus der QS des abschliessenden Qualitaetswurfs:
+ *   gescheitert / keine QS → schlecht
+ *   QS 1–3 → normal
+ *   QS 4–5 → gut
+ *   QS 6+  → meisterlich
+ */
+export function htbahBbCraftQuality(qualityQs: number | undefined | null): HtbahBbQuality {
+  const qs = qualityQs ?? 0
+  if (qs < 1) return 'schlecht'
+  if (qs <= 3) return 'normal'
+  if (qs <= 5) return 'gut'
+  return 'meisterlich'
+}
+
+/** Schadensbonus einer Waffe nach Werkqualitaet (Battlebuben Herstellung). */
+export const HTBAH_BB_WEAPON_QUALITY_BONUS: Record<HtbahBbQuality, number> = {
+  schlecht: -2,
+  normal: 0,
+  gut: 1,
+  meisterlich: 3,
+}
+export function htbahBbWeaponQualityBonus(quality: HtbahBbQuality): number {
+  return HTBAH_BB_WEAPON_QUALITY_BONUS[quality]
+}
+
+/* ----- Regeneration & Heilkunde ----- */
+
+/**
+ * Natuerliche Regeneration (Battlebuben) als wuerfelbare Eintraege:
+ *   3 h Rast → 1W10, 6 h Rast → 2W10, ausreichend Mahlzeiten am Tag → +1W10.
+ * Heilkunde-Behandlung: 1W10 + erreichte QS (QS wird separat aufaddiert).
+ */
+export const HTBAH_BB_REGEN = {
+  rest3h: { count: 1, sides: 10, label: 'Rast 3 h (1W10)' },
+  rest6h: { count: 2, sides: 10, label: 'Rast 6 h (2W10)' },
+  meals: { count: 1, sides: 10, label: 'Mahlzeiten am Tag (+1W10)' },
+  heilkunde: { count: 1, sides: 10, label: 'Heilkunde (1W10 + QS)' },
+} as const

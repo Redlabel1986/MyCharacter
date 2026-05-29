@@ -19,6 +19,8 @@ import {
   HTBAH_RDD_SCALE_LABELS,
   HTBAH_UNIVERSAL_WEAPON_MOD,
   HTBAH_UNIVERSAL_ARMOR_MOD,
+  HTBAH_BB_DUAL_WIELD,
+  HTBAH_BB_REGEN,
   htbahSkillTotal,
   htbahTalentValue,
   htbahTotalArmor,
@@ -195,6 +197,9 @@ const isDsa5 = computed(() => character.value?.system === 'dsa5')
 const htbahData = computed<HtbahCharacterData | null>(() =>
   isHtbah.value && character.value ? (character.value.data as HtbahCharacterData) : null,
 )
+// Battlebuben-Hausregel aktiv? Schaltet Zwei-Waffen-Manoever, Parade-QS-
+// Hinweis und Regenerations-/Heilkunde-Quickrolls frei.
+const isBattlebuben = computed(() => htbahData.value?.battlebuben === true)
 const dndData = computed<DnDCharacterData | null>(() =>
   isDnd.value && character.value ? (character.value.data as DnDCharacterData) : null,
 )
@@ -1167,10 +1172,47 @@ const HTBAH_MANEUVERS: Maneuver[] = [
   { id: 'ringen', label: 'Ringkampf', modifier: 10, note: 'Ringkampf (+10 wenn beidhändig) — beide werden Ringend' },
   { id: 'zerstoeren', label: 'Gegenstand zerstören', modifier: 0, note: 'Gegenstand zerstören — Schaden geht aufs Objekt; Krit = sofort zerstört' },
 ]
+// Battlebuben: Zwei-Waffen-Kampf. Haupthand −20, Nebenhand −40.
+const HTBAH_BB_MANEUVERS: Maneuver[] = [
+  { id: 'bb-haupthand', label: `Zwei Waffen — Haupthand (${HTBAH_BB_DUAL_WIELD.mainHand})`, modifier: HTBAH_BB_DUAL_WIELD.mainHand, note: `Zwei-Waffen-Kampf: Angriff mit der Haupthand (${HTBAH_BB_DUAL_WIELD.mainHand})` },
+  { id: 'bb-nebenhand', label: `Zwei Waffen — Nebenhand (${HTBAH_BB_DUAL_WIELD.offHand})`, modifier: HTBAH_BB_DUAL_WIELD.offHand, note: `Zwei-Waffen-Kampf: folgender Angriff mit der Nebenhand (${HTBAH_BB_DUAL_WIELD.offHand})` },
+]
+// Im Battlebuben-Modus stehen die Zwei-Waffen-Manoever zusaetzlich bereit.
+const maneuvers = computed<Maneuver[]>(() =>
+  isBattlebuben.value ? [...HTBAH_MANEUVERS, ...HTBAH_BB_MANEUVERS] : HTBAH_MANEUVERS,
+)
 const applyManeuver = (m: Maneuver) => {
   rollMod.value = m.modifier
   rollNote.value = m.note
   maneuverOpen.value = false
+}
+
+// --- Battlebuben: Regeneration & Heilkunde (freie Wuerfe in den Chat) ---
+const regenOpen = ref(false)
+const regenRolling = ref(false)
+type RegenKind = keyof typeof HTBAH_BB_REGEN
+const rollRegen = async (kind: RegenKind) => {
+  if (!isBattlebuben.value || !character.value) return
+  const r = HTBAH_BB_REGEN[kind]
+  regenRolling.value = true
+  try {
+    await $fetch(`/api/groups/${props.groupId}/rolls`, {
+      method: 'POST',
+      body: {
+        kind: 'free',
+        diceCount: r.count,
+        diceSides: r.sides,
+        label: `Battlebuben — ${r.label}`,
+        system: 'htbah',
+        characterId: character.value.id,
+      },
+    })
+    regenOpen.value = false
+  } catch {
+    // Chat-Eintrag nicht-kritisch.
+  } finally {
+    regenRolling.value = false
+  }
 }
 
 // --- Magie-Modul (§8) — Komplexitaetswurf-Quick-Cast ---
@@ -2146,6 +2188,17 @@ const onImageError = (tokenId: number) => {
           Manöver
         </UButton>
         <UButton
+          v-if="isBattlebuben"
+          color="success"
+          variant="soft"
+          icon="i-lucide-heart-pulse"
+          size="sm"
+          title="Battlebuben: natürliche Regeneration & Heilkunde würfeln"
+          @click="regenOpen = !regenOpen"
+        >
+          Regeneration
+        </UButton>
+        <UButton
           v-if="hasMagic"
           color="primary"
           variant="soft"
@@ -2194,8 +2247,38 @@ const onImageError = (tokenId: number) => {
           Keine Skills/Begabungen verfuegbar.
         </p>
         <p v-if="paradeError" class="text-xs text-red-700">{{ paradeError }}</p>
-        <p class="text-[10px] text-ink-300/80">
+        <p v-if="isBattlebuben" class="text-[10px] text-amber-700">
+          Battlebuben: höhere QS gewinnt die Aktion (bei Gleichstand die Parade).
+          Kritischer Erfolg = direkter Konterangriff mit 50 % Schaden.
+        </p>
+        <p v-else class="text-[10px] text-ink-300/80">
           Erfolg = kein Schaden. Krit. Angriffe und Schusswaffen sind nicht parierbar.
+        </p>
+      </div>
+
+      <!-- Battlebuben: Regeneration & Heilkunde — postet einen freien Wurf
+           (1W10 / 2W10 / +1W10 / 1W10+QS) in den Gruppen-Chat. -->
+      <div
+        v-if="regenOpen && isBattlebuben"
+        class="p-2 rounded border border-emerald-300 bg-emerald-50/60 space-y-1"
+      >
+        <div class="text-[10px] uppercase tracking-widest text-emerald-700 mb-1">
+          Regeneration & Heilkunde
+        </div>
+        <UButton block size="xs" variant="outline" :loading="regenRolling" @click="rollRegen('rest3h')">
+          {{ HTBAH_BB_REGEN.rest3h.label }}
+        </UButton>
+        <UButton block size="xs" variant="outline" :loading="regenRolling" @click="rollRegen('rest6h')">
+          {{ HTBAH_BB_REGEN.rest6h.label }}
+        </UButton>
+        <UButton block size="xs" variant="outline" :loading="regenRolling" @click="rollRegen('meals')">
+          {{ HTBAH_BB_REGEN.meals.label }}
+        </UButton>
+        <UButton block size="xs" variant="outline" :loading="regenRolling" @click="rollRegen('heilkunde')">
+          {{ HTBAH_BB_REGEN.heilkunde.label }}
+        </UButton>
+        <p class="text-[10px] text-ink-300/80">
+          Heilkunde: erreichte QS manuell zum 1W10 addieren. Heilung danach im HP-Feld eintragen.
         </p>
       </div>
 
@@ -2492,7 +2575,7 @@ const onImageError = (tokenId: number) => {
           Kampfmanöver — welches?
         </div>
         <div
-          v-for="m in HTBAH_MANEUVERS"
+          v-for="m in maneuvers"
           :key="m.id"
         >
           <UButton

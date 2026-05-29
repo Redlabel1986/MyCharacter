@@ -11,6 +11,7 @@
 import {
   HTBAH_TALENT_LABELS,
   htbahRollProbe,
+  htbahRuleset,
   htbahSchlagwaffeReroll,
   htbahSkillTotal,
   htbahTalentValue,
@@ -86,11 +87,13 @@ export function rollHtbahSkill(input: HtbahSkillRollInput): RollPayload {
   const mod = input.modifier ?? 0
   const target = baseTarget + mod
   const roll = rand1to100()
+  const ruleset = htbahRuleset(data)
   const probe = htbahRollProbe({
     roll,
     target,
     isTalentOnly: false,
     aufspiessen: input.aufspiessen,
+    ruleset,
   })
 
   return {
@@ -106,6 +109,7 @@ export function rollHtbahSkill(input: HtbahSkillRollInput): RollPayload {
     fumble: probe.fumble || undefined,
     qualityStep: probe.qualityStep,
     aufspiessen: input.aufspiessen || undefined,
+    ruleset: ruleset === 'battlebuben' ? 'battlebuben' : undefined,
     note: input.note?.trim() || undefined,
   }
 }
@@ -119,8 +123,10 @@ export function rollHtbahTalent(input: HtbahTalentRollInput): RollPayload {
   const mod = input.modifier ?? 0
   const target = baseTarget + mod
   const roll = rand1to100()
-  // Begabungs-Proben kennen keinen Krit-Erfolg (Regelwerk).
-  const probe = htbahRollProbe({ roll, target, isTalentOnly: true })
+  const ruleset = htbahRuleset(data)
+  // HtbaH-Standard: Begabungs-Proben kennen keinen Krit-Erfolg. Battlebuben
+  // erlaubt Krits auch hier (htbahRollProbe entscheidet anhand des ruleset).
+  const probe = htbahRollProbe({ roll, target, isTalentOnly: true, ruleset })
 
   return {
     system: 'htbah',
@@ -134,6 +140,7 @@ export function rollHtbahTalent(input: HtbahTalentRollInput): RollPayload {
     critical: probe.critical || undefined,
     fumble: probe.fumble || undefined,
     qualityStep: probe.qualityStep,
+    ruleset: ruleset === 'battlebuben' ? 'battlebuben' : undefined,
     note: input.note?.trim() || undefined,
   }
 }

@@ -93,13 +93,18 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  // Server wuerfelt 1W10 + Handeln-Begabungswert (− Ruestungs-Init-Malus,
-  // bereits in htbahInitiativeBonus eingerechnet, Regelwerk §2.2 + §6.2.3).
+  // Initiative-Wurf, ruleset-abhaengig:
+  //  - HtbaH-Standard: 1W10 + Handeln-Begabungswert (− Ruestungs-Init-Malus,
+  //    bereits in htbahInitiativeBonus eingerechnet, Regelwerk §2.2 + §6.2.3).
+  //  - Battlebuben-Modus: flach 1W20, kein Begabungs-/Ruestungs-Bonus.
   // Stangenwaffen-Bonus (+10) kommt obendrauf, wenn der Client das Flag setzt.
   const data = char.data as HtbahCharacterData
-  const handelnBonus = htbahInitiativeBonus(data)
+  const battlebuben = data.battlebuben === true
+  const handelnBonus = battlebuben ? 0 : htbahInitiativeBonus(data)
   const stangenwaffeBonus = body.stangenwaffe ? 10 : 0
-  const die = Math.floor(Math.random() * 10) + 1
+  const die = battlebuben
+    ? Math.floor(Math.random() * 20) + 1
+    : Math.floor(Math.random() * 10) + 1
   const total = die + handelnBonus + stangenwaffeBonus
 
   // Bild-URL fuer den Initiative-Tracker. Der rohe `battleTokens.imageUrl` ist

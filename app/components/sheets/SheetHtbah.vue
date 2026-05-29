@@ -16,6 +16,11 @@ import {
   HTBAH_RDD_SCALE_LABELS,
   HTBAH_MAGIC_MODULES,
   HTBAH_MAGIC_MODULE_LABELS,
+  HTBAH_BB_MOVEMENT,
+  HTBAH_BB_DUAL_WIELD,
+  HTBAH_BB_CRAFT_GRADES,
+  HTBAH_BB_WEAPON_QUALITY_BONUS,
+  htbahBbTalentLevel,
   htbahRddBaseValue,
   htbahRddPointsBudget,
   htbahRddMaxSpread,
@@ -219,6 +224,7 @@ const sheet = computed<HtbahCharacterData>(() => {
         }
       : undefined,
     combatModule: incoming.combatModule === 'universal' ? 'universal' : 'standard',
+    battlebuben: incoming.battlebuben === true,
     notes: incoming.notes ?? '',
   }
 })
@@ -625,6 +631,13 @@ const setRddWoundScale = (id: string, raw: unknown) => {
 const setCombatModule = (v: 'standard' | 'universal') => {
   const n = clone()
   n.combatModule = v
+  update(n)
+}
+
+// --- Battlebuben Modus (Hausregel) ---
+const setBattlebuben = (v: boolean) => {
+  const n = clone()
+  n.battlebuben = v
   update(n)
 }
 
@@ -1099,6 +1112,59 @@ const postRollToGroup = async () => {
         >
           Universalkampf
         </UButton>
+        <UButton
+          size="xs"
+          :variant="sheet.battlebuben ? 'solid' : 'outline'"
+          :color="sheet.battlebuben ? 'primary' : 'neutral'"
+          :icon="sheet.battlebuben ? 'i-lucide-toggle-right' : 'i-lucide-toggle-left'"
+          title="Battlebuben Modus — eigenes Regelwerk: QS 1–6, Krit nach Talentwert, Initiative 1W20, Zwei-Waffen-Malus, Herstellung"
+          @click="setBattlebuben(!sheet.battlebuben)"
+        >
+          Battlebuben Modus
+        </UButton>
+      </div>
+
+      <!-- Battlebuben-Modus: Regel-Kurzreferenz + Herstellung -->
+      <div
+        v-if="sheet.battlebuben"
+        class="mt-3 space-y-2 border border-amber-300 rounded p-2 bg-amber-50/50"
+      >
+        <div class="text-xs uppercase tracking-widest text-amber-900">
+          Battlebuben Modus aktiv
+        </div>
+        <ul class="text-[11px] text-ink-400 space-y-0.5 list-disc list-inside">
+          <li>Proben: QS aus (Fertigkeitswert − Wurf) — QS 1 (0–19) … QS 6 (60+).</li>
+          <li>Krit-Erfolg: Talentwert &lt; 30 → Wurf 1–5, ab 30 → 1–10.</li>
+          <li>Krit-Patzer: Talentwert &lt; 30 → 90–100, ab 30 → 95–100.</li>
+          <li>Initiative: flach 1W20. Bewegung: klein {{ HTBAH_BB_MOVEMENT.klein }} / mittel {{ HTBAH_BB_MOVEMENT.mittelgross }} / groß {{ HTBAH_BB_MOVEMENT.gross }} Felder.</li>
+          <li>Zwei Waffen: Haupthand {{ HTBAH_BB_DUAL_WIELD.mainHand }}, Nebenhand {{ HTBAH_BB_DUAL_WIELD.offHand }}.</li>
+          <li>Parade: höhere QS gewinnt (bei Gleichstand Parade); Krit = Konter (50 % Schaden).</li>
+          <li>Pro 20 Fertigkeitsstufen: +1 Kampftalent-Level bzw. +1 Zauber-Slot.</li>
+        </ul>
+
+        <div class="text-[11px] uppercase tracking-widest text-amber-900 pt-1">
+          Herstellung — Grade der Vollendung
+        </div>
+        <div class="text-[11px] text-ink-400 space-y-0.5">
+          <div
+            v-for="g in HTBAH_BB_CRAFT_GRADES"
+            :key="g.grad"
+          >
+            <strong>{{ g.roman }} · {{ g.label }}</strong>
+            — {{ g.requiredQs }} QS sammeln
+            <span class="opacity-70">({{ g.examples }})</span>
+          </div>
+        </div>
+        <div class="text-[11px] text-ink-400">
+          Qualitätswurf (QS des Abschluss-Wurfs): gescheitert → schlecht
+          ({{ HTBAH_BB_WEAPON_QUALITY_BONUS.schlecht }} Schaden),
+          QS 1–3 → normal (±0), QS 4–5 → gut (+{{ HTBAH_BB_WEAPON_QUALITY_BONUS.gut }}),
+          QS 6 → meisterlich (+{{ HTBAH_BB_WEAPON_QUALITY_BONUS.meisterlich }}).
+        </div>
+        <div class="text-[11px] text-ink-400">
+          Regeneration: 3 h Rast 1W10 · 6 h Rast 2W10 · Mahlzeiten +1W10.
+          Heilkunde: 1W10 + QS. (Würfeln im Battle-Mini-Bogen.)
+        </div>
       </div>
 
       <!-- Regel-der-Drei-Skalen (§7.2.1) -->
@@ -1354,11 +1420,18 @@ const postRollToGroup = async () => {
               @update:model-value="updateSkill(entry.idx, { modifier: Number($event) })"
             />
             <div
-              class="col-span-2 text-center font-serif text-base"
+              class="col-span-2 text-center font-serif text-base leading-tight"
               :class="(entry.skill.spentPoints + htbahTalentValue(sheet, talent)) > HTBAH_SKILL_CAP ? 'text-amber-700' : ''"
               :title="(entry.skill.spentPoints + htbahTalentValue(sheet, talent)) > HTBAH_SKILL_CAP ? 'Über Regelwerk-Richtwert von 100 — bewusst erlaubt' : ''"
             >
               {{ htbahSkillTotal(sheet, entry.skill) }}
+              <div
+                v-if="sheet.battlebuben && htbahBbTalentLevel(htbahSkillTotal(sheet, entry.skill)) > 0"
+                class="text-[9px] font-sans not-italic text-amber-700"
+                title="Battlebuben: pro 20 Fertigkeitsstufen +1 Kampftalent-Level / Zauber-Slot"
+              >
+                Lvl {{ htbahBbTalentLevel(htbahSkillTotal(sheet, entry.skill)) }}
+              </div>
             </div>
             <UButton
               size="xs"

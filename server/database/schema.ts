@@ -144,6 +144,12 @@ export interface RollPayload {
   fumble?: boolean
   /** Qualitaetsstufe / Erfolgsstufe (system-abhaengig). */
   qualityStep?: number
+  /**
+   * HtbaH-Ruleset, in dem gewuerfelt wurde. 'battlebuben' nutzt die QS-Tabelle
+   * QS 1–6 und beschriftet die Erfolgsstufe als "QS X" statt "Stufe X".
+   * Undefined/'standard' = klassisches HtbaH.
+   */
+  ruleset?: 'standard' | 'battlebuben'
   /** Frei-Notiz, optional. */
   note?: string
   /**

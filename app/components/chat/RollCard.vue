@@ -15,6 +15,8 @@ interface RollPayload {
   critical?: boolean
   fumble?: boolean
   qualityStep?: number
+  /** HtbaH-Ruleset des Wurfs ('battlebuben' → "QS X"-Beschriftung). */
+  ruleset?: 'standard' | 'battlebuben'
   note?: string
   /** Wunden-Malus, der serverseitig auf den Wurf angewandt wurde (negativ). */
   damageMalus?: number
@@ -109,6 +111,8 @@ const margin = computed(() => {
 const qualityLabel = computed(() => {
   const s = props.payload.qualityStep
   if (!s) return null
+  // Battlebuben: QS 1–6, kein "Maximaler Erfolg".
+  if (props.payload.ruleset === 'battlebuben') return `QS ${s}`
   return s >= 7 ? 'Maximaler Erfolg' : `Qualitätsstufe ${s}`
 })
 
