@@ -203,14 +203,19 @@ const isBattlebuben = computed(() => htbahData.value?.battlebuben === true)
 
 // --- Shop / Einkaufen beim NPC-Haendler ---
 const shopOpen = ref(false)
-// Nach einem Kauf: Charakter neu laden, damit Inventar + Geldbeutel stimmen.
+// Nach einem Kauf: Charakter neu laden, damit Inventar + Geldbeutel SOFORT
+// stimmen. Wichtig: auch den Cache aktualisieren — sonst ueberschreibt ein
+// erneuter fetchChar (z.B. durch den Token-Reload nach 'token-updated') die
+// frischen Daten wieder mit dem alten Stand, und das Item erscheint erst nach
+// einem manuellen Refresh.
 const onShopBought = async () => {
   if (!character.value) return
   try {
     const res = await $fetch<{ character: CharacterFull }>(`/api/characters/${character.value.id}`)
     character.value = res.character
+    cacheByCharId.set(res.character.id, res.character)
   } catch {
-    // Reload nicht-kritisch — Server ist die Wahrheit, naechster Poll holt es nach.
+    // Reload-Fehler ist nicht-kritisch — der Server hat den Kauf bereits verbucht.
   }
   emit('token-updated')
 }
