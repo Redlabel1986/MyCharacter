@@ -1,7 +1,11 @@
 /**
  * Schadensstufen-System: jeder Spieler/NPC bekommt aus seinem aktuellen
- * HP-Verhaeltnis eine Wundstufe von 0..3. Pro Stufe gilt ein Malus von
- * −10 auf alle Wuerfe (Skill, Save, Ability-Probe, NPC-Probe, freier Wurf).
+ * HP-Verhaeltnis eine Wundstufe von 0..3. Pro Stufe gilt ein Malus von −10.
+ *
+ * Wo der Malus wirkt, entscheidet der Aufrufer (rolls.post.ts): bei HtbaH
+ * trifft der Schmerz-Malus NUR koerperliche Proben — alle Fertigkeiten der
+ * Begabung "Handeln" inklusive Angriffs- und Paradewuerfen; Wissen/Soziales
+ * bleiben frei. Freie Wuerfe (Schaden/Heilung) bekommen nie einen Malus.
  *
  * Schwellen:
  *   HP > 75 %  → Stufe 0 (unverletzt, kein Malus)

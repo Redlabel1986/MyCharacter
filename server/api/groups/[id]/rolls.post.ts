@@ -266,6 +266,24 @@ const NO_WOUNDS: DamageLevelInfo = {
   short: '–',
 }
 
+/**
+ * Schmerzstufen-Regel (HtbaH): der Wunden-Malus wirkt NUR auf koerperliche
+ * Proben. Das sind alle Fertigkeiten der Begabung "Handeln" — dazu zaehlen
+ * insbesondere Angriffs- und Paradewuerfe, die immer ueber Handeln-
+ * Fertigkeiten laufen. Proben auf Wissen und Soziales bleiben unberuehrt.
+ *
+ * Liefert true, wenn die Fertigkeit zur Begabung Handeln gehoert (dann gilt
+ * der Malus). Existiert die Fertigkeit nicht (sollte rollHtbahSkill ohnehin
+ * vorher abfangen), gilt sicherheitshalber kein Malus.
+ */
+function htbahSkillCountsAsPhysical(
+  data: HtbahCharacterData,
+  skillId: string,
+): boolean {
+  const skill = data.skills.find((s) => s.id === skillId)
+  return skill?.talent === 'handeln'
+}
+
 export default defineEventHandler(async (event) => {
   const { user } = await requireUserSession(event)
   const groupId = Number(getRouterParam(event, 'id'))
@@ -297,6 +315,11 @@ export default defineEventHandler(async (event) => {
   if (body.kind === 'htbahSkill') {
     const char = await loadCharacterOrThrow(db, body.characterId, user.id)
     wounds = woundsFromChar(char)
+    // Schmerzstufen wirken nur auf koerperliche (Handeln-)Fertigkeiten —
+    // dazu zaehlen Angriffs- und Paradewuerfe. Wissen/Soziales bleibt frei.
+    if (!htbahSkillCountsAsPhysical(char.data as HtbahCharacterData, body.skillId)) {
+      wounds = NO_WOUNDS
+    }
     // Jagdwaffen-Bonus: +15 auf den Trefferwurf, wenn das gewaehlte Ziel-Token
     // RW <= huntingThreshold hat. Wird zum User-Modifier addiert, BEVOR der
     // Wunden-Malus draufkommt — damit der Bonus auch in der RollCard sauber
@@ -345,6 +368,12 @@ export default defineEventHandler(async (event) => {
   } else if (body.kind === 'htbahTalent') {
     const char = await loadCharacterOrThrow(db, body.characterId, user.id)
     wounds = woundsFromChar(char)
+    // Nur die koerperliche Begabung (Handeln) bekommt den Schmerz-Malus —
+    // Wissen/Soziales bleiben unberuehrt. Die Parade-Begabungsprobe laeuft
+    // ueber Handeln und ist damit korrekt erfasst.
+    if (body.talent !== 'handeln') {
+      wounds = NO_WOUNDS
+    }
     payload = rollHtbahTalent({
       character: char,
       talent: body.talent,
