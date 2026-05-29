@@ -517,6 +517,43 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
     ON CONFLICT (key) DO NOTHING
   `)
 
+  // Waffenkammer pro Gruppe (Battlebuben) — Tabs (Kategorien) + Eintraege pro Tab.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS group_armory_tabs (
+      id SERIAL PRIMARY KEY,
+      group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      order_idx INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_group_armory_tabs_group ON group_armory_tabs(group_id)
+  `)
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS group_armory_items (
+      id SERIAL PRIMARY KEY,
+      group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      tab_id INTEGER REFERENCES group_armory_tabs(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      price TEXT NOT NULL DEFAULT '',
+      damage TEXT NOT NULL DEFAULT '',
+      armor INTEGER,
+      properties TEXT NOT NULL DEFAULT '',
+      note TEXT NOT NULL DEFAULT '',
+      order_idx INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_group_armory_items_group ON group_armory_items(group_id)
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_group_armory_items_tab ON group_armory_items(tab_id)
+  `)
+
   await db.execute(sql`
     UPDATE users SET role = 'admin' WHERE email = ${ADMIN_EMAIL} AND role <> 'admin'
   `)

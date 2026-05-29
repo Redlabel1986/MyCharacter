@@ -123,6 +123,17 @@ const roleBadge = (r: 'player' | 'dm' | 'admin') =>
             Regelbuch
           </UButton>
           <UButton
+            :to="`/groups/${id}/armory`"
+            color="primary"
+            variant="soft"
+            size="lg"
+            icon="i-lucide-swords"
+            class="font-semibold"
+            title="Waffenkammer: Waffen-/Rüstungskatalog (Battlebuben)"
+          >
+            Waffenkammer
+          </UButton>
+          <UButton
             :to="`/groups/${id}/battle`"
             color="primary"
             size="lg"

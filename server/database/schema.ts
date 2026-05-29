@@ -743,6 +743,62 @@ export const groupRules = pgTable(
 export type GroupRule = typeof groupRules.$inferSelect
 export type NewGroupRule = typeof groupRules.$inferInsert
 
+// Waffenkammer der Gruppe (Battlebuben) — vom DM gepflegter Waffen-/Ruestungs-
+// katalog. Eintraege sind in Tabs (Kategorien: Schwerter, Aexte, Fernkampf,
+// Ruestungen, …) gruppiert. Pro Gruppe beliebig viele Tabs; pro Tab beliebig
+// viele Eintraege. Tabs kaskadieren auf Loeschen die zugehoerigen Eintraege mit.
+export const groupArmoryTabs = pgTable(
+  'group_armory_tabs',
+  {
+    id: serial('id').primaryKey(),
+    groupId: integer('group_id')
+      .notNull()
+      .references(() => groups.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    orderIdx: integer('order_idx').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    groupIdx: index('idx_group_armory_tabs_group').on(table.groupId),
+  }),
+)
+export type GroupArmoryTab = typeof groupArmoryTabs.$inferSelect
+export type NewGroupArmoryTab = typeof groupArmoryTabs.$inferInsert
+
+export const groupArmoryItems = pgTable(
+  'group_armory_items',
+  {
+    id: serial('id').primaryKey(),
+    groupId: integer('group_id')
+      .notNull()
+      .references(() => groups.id, { onDelete: 'cascade' }),
+    tabId: integer('tab_id').references(() => groupArmoryTabs.id, {
+      onDelete: 'cascade',
+    }),
+    name: text('name').notNull(),
+    /** Preis als Freitext, z.B. "70 S" oder "??". Leer = unbekannt/kostenlos. */
+    price: text('price').notNull().default(''),
+    /** Schadensformel (Waffen), z.B. "4W10", "5W10+5". Leer bei Ruestung. */
+    damage: text('damage').notNull().default(''),
+    /** Schutzwert (Ruestung/Schild). null bei Waffen. */
+    armor: integer('armor'),
+    /** Eigenschaften als Freitext, z.B. "+10 Parade / +5 Durchschlag". */
+    properties: text('properties').notNull().default(''),
+    /** Freie Notiz. */
+    note: text('note').notNull().default(''),
+    orderIdx: integer('order_idx').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    groupIdx: index('idx_group_armory_items_group').on(table.groupId),
+    tabIdx: index('idx_group_armory_items_tab').on(table.tabId),
+  }),
+)
+export type GroupArmoryItem = typeof groupArmoryItems.$inferSelect
+export type NewGroupArmoryItem = typeof groupArmoryItems.$inferInsert
+
 // App-weite Einstellungen als Key/Value (z. B. library_password_hash).
 export const appSettings = pgTable('app_settings', {
   key: text('key').primaryKey(),

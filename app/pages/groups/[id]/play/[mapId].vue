@@ -141,6 +141,14 @@ onBeforeUnmount(() => {
         <UIcon name="i-lucide-scroll-text" class="size-4" />
         <span class="hidden sm:inline">Regelbuch</span>
       </NuxtLink>
+      <NuxtLink
+        :to="`/groups/${groupId}/armory`"
+        class="text-xs text-[var(--color-accent)] hover:underline shrink-0 flex items-center gap-1"
+        title="Waffenkammer: Waffen-/Rüstungskatalog (Battlebuben)"
+      >
+        <UIcon name="i-lucide-swords" class="size-4" />
+        <span class="hidden sm:inline">Waffenkammer</span>
+      </NuxtLink>
       <span class="text-[10px] uppercase tracking-widest text-ink-300 hidden sm:inline">
         Mein Mini-Sheet
       </span>

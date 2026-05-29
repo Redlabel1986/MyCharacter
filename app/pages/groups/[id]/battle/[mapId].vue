@@ -2966,6 +2966,14 @@ const endResize = () => {
           <UIcon name="i-lucide-scroll-text" class="size-4" />
           Regelbuch
         </NuxtLink>
+        <NuxtLink
+          :to="`/groups/${groupId}/armory`"
+          class="text-sm text-[var(--color-accent)] hover:underline flex items-center gap-1"
+          title="Waffenkammer: Waffen-/Rüstungskatalog (Battlebuben)"
+        >
+          <UIcon name="i-lucide-swords" class="size-4" />
+          Waffenkammer
+        </NuxtLink>
         <h1 class="font-serif text-2xl flex-1 truncate">{{ map.name }}</h1>
         <div class="flex items-center gap-2 flex-wrap">
           <UButton size="xs" variant="outline" icon="i-lucide-zoom-out" @click="zoomOut" />
