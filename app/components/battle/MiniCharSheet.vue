@@ -2151,6 +2151,144 @@ const onImageError = (tokenId: number) => {
         </div>
       </div>
 
+      <!-- Schadensstufen-Badge: zeigt, welcher Wunden-Malus aktuell auf jeden
+           Wurf wirkt. Wird nur eingeblendet, wenn der Wuerfler tatsaechlich
+           verwundet ist (Stufe >= 1). -->
+      <div
+        v-if="activeDamageLevel.level > 0"
+        class="text-xs px-2 py-1 rounded font-semibold flex items-center gap-2"
+        :style="{
+          background: damageLevelColor(activeDamageLevel.level) + '22',
+          border: '1px solid ' + damageLevelColor(activeDamageLevel.level),
+          color: damageLevelColor(activeDamageLevel.level),
+        }"
+      >
+        <UIcon name="i-lucide-heart-crack" class="size-4" />
+        <span>Schadensstufe {{ activeDamageLevel.level }}</span>
+        <span class="ml-auto tabular-nums">
+          {{ activeDamageLevel.malus }} auf jeden Wurf
+        </span>
+      </div>
+
+      <!-- HP-Editor + schnell Schaden/Heilung -->
+      <div class="flex flex-wrap items-end gap-2 text-xs">
+        <UFormField label="HP">
+          <UInput v-model.number="hpDraft" type="number" size="xs" class="w-20" />
+        </UFormField>
+        <UFormField label="Max">
+          <UInput v-model.number="hpMaxDraft" type="number" size="xs" class="w-20" />
+        </UFormField>
+        <UButton
+          v-if="hpDirty"
+          size="xs"
+          color="primary"
+          :loading="hpSaving"
+          @click="saveHp"
+        >
+          HP speichern
+        </UButton>
+        <span class="flex-1" />
+        <UFormField label="±">
+          <UInput v-model.number="hpDelta" type="number" size="xs" class="w-16" />
+        </UFormField>
+        <UButton size="xs" variant="outline" color="error" icon="i-lucide-minus" @click="applyHpDelta(-1)">
+          Schaden
+        </UButton>
+        <UButton size="xs" variant="outline" color="success" icon="i-lucide-plus" @click="applyHpDelta(1)">
+          Heilung
+        </UButton>
+      </div>
+
+      <!-- Skill-/Begabungs-Würfler (HtbaH, D&D 5e/2024, DSA 5) — Talent-Proben -->
+      <div v-if="supportsRoller" class="space-y-2">
+        <div class="text-[10px] uppercase tracking-widest text-ink-300">{{ rollPanelTitle }}</div>
+        <UFormField label="Probe">
+          <USelect
+            v-model="pickedRollId"
+            :items="rollOptions.map((o) => ({ label: `${o.label} (${o.value})`, value: `${o.kind}:${o.id}:${o.source ?? ''}` }))"
+            value-key="value"
+            placeholder="— Probe wählen —"
+            size="sm"
+            class="w-full"
+          />
+        </UFormField>
+        <div v-if="isDnd || isNpcDnd" class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+          <UFormField label="Modus" class="sm:col-span-4">
+            <USelect
+              v-model="rollMode"
+              :items="[
+                { label: 'Normal', value: 'normal' },
+                { label: 'Vorteil', value: 'advantage' },
+                { label: 'Nachteil', value: 'disadvantage' },
+              ]"
+              value-key="value"
+              size="sm"
+            />
+          </UFormField>
+          <UFormField label="DC (optional)" class="sm:col-span-4">
+            <UInput v-model.number="rollDc" type="number" size="sm" placeholder="z.B. 15" />
+          </UFormField>
+          <UFormField label="Mod ±" class="sm:col-span-4">
+            <UInput v-model.number="rollMod" type="number" size="sm" />
+          </UFormField>
+        </div>
+        <div v-else class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+          <UFormField
+            label="Mod ±"
+            class="sm:col-span-12"
+            :help="isDsa5 ? 'Erleichterung (+) / Erschwernis (−) auf jede Eigenschaft' : 'z.B. −10 Erschwernis'"
+          >
+            <UInput v-model.number="rollMod" type="number" size="sm" class="w-full" />
+          </UFormField>
+        </div>
+        <!-- DC-Presets (nur HtbaH) — setzen rollMod auf den Regelwerk-Wert
+             fuer Erschwernis-Stufen. So muss der Spieler nicht jedes Mal die
+             genaue Zahl raten. -->
+        <div v-if="isHtbah" class="flex flex-wrap gap-1">
+          <span class="text-[10px] uppercase tracking-widest text-ink-300 mr-1 self-center">
+            Schwierigkeit:
+          </span>
+          <UButton
+            v-for="preset in HTBAH_DC_PRESETS"
+            :key="preset.id"
+            size="xs"
+            :variant="rollMod === preset.modifier ? 'solid' : 'outline'"
+            :title="`${preset.label} (Mod ${preset.modifier > 0 ? '+' : ''}${preset.modifier})`"
+            @click="rollMod = preset.modifier"
+          >
+            {{ preset.label }} {{ preset.modifier > 0 ? '+' : '' }}{{ preset.modifier }}
+          </UButton>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+          <UFormField label="Notiz (optional)" class="sm:col-span-7">
+            <UInput
+              v-model="rollNote"
+              placeholder="z.B. „klettert hoch“ oder „mit Anlauf“"
+              size="sm"
+              :maxlength="200"
+              class="w-full"
+            />
+          </UFormField>
+          <UButton
+            color="primary"
+            icon="i-lucide-dices"
+            :disabled="!pickedRollOption || meleeBlocked"
+            :loading="rollSending"
+            class="sm:col-span-5 roll-cta"
+            size="lg"
+            block
+            @click="rollIt"
+          >
+            Würfeln
+          </UButton>
+        </div>
+        <p v-if="rollError" class="text-xs text-red-700">{{ rollError }}</p>
+        <p v-if="rollSuccess" class="text-xs text-emerald-700">✓ Wurf in Gruppen-Chat gepostet</p>
+      </div>
+      <div v-else-if="character" class="text-xs text-ink-300 italic">
+        Für dieses Regelwerk ist (noch) kein Würfler eingebaut — der volle Bogen unten zeigt alle Werte.
+      </div>
+
       <!-- Quick-Actions: Initiative (nur wenn SL angefordert hat) und
            Parade/Ausweichen. Nur fuer HtbaH-Charaktere relevant. -->
       <div
@@ -2279,6 +2417,315 @@ const onImageError = (tokenId: number) => {
         </UButton>
         <p class="text-[10px] text-ink-300/80">
           Heilkunde: erreichte QS manuell zum 1W10 addieren. Heilung danach im HP-Feld eintragen.
+        </p>
+      </div>
+
+      <!-- Kampfmanoever-Popup: setzt Modifier + Notiz vor, Spieler klickt dann
+           den normalen Wuerfeln-Button. -->
+      <div
+        v-if="maneuverOpen && isHtbah"
+        class="p-2 rounded border border-parchment-700/30 bg-white/60 space-y-1"
+      >
+        <div class="text-[10px] uppercase tracking-widest text-ink-300 mb-1">
+          Kampfmanöver — welches?
+        </div>
+        <div
+          v-for="m in maneuvers"
+          :key="m.id"
+        >
+          <UButton
+            block
+            size="xs"
+            variant="outline"
+            @click="applyManeuver(m)"
+          >
+            {{ m.label }}
+            <span class="ml-auto text-[10px] opacity-70">
+              {{ m.modifier > 0 ? '+' : '' }}{{ m.modifier !== 0 ? m.modifier : '±0' }}
+            </span>
+          </UButton>
+        </div>
+        <p class="text-[10px] text-ink-300/80 mt-1">
+          Setzt Modifier + Notiz für deinen nächsten Wurf vor.
+        </p>
+      </div>
+
+      <!-- Schaden-/Heilungs-Wuerfler: freier NdM+X-Wurf, optional gegen ein
+           Ziel-Token. Wenn ein Ziel gewaehlt ist, wird das Ergebnis direkt von
+           seinen HP abgezogen (Schaden) oder addiert (Heilung). -->
+      <div class="space-y-2 border-t border-parchment-700/30 pt-3">
+        <!-- Universalkampf-Toggle (§3): nur fuer HtbaH-Charaktere mit aktivem Modul -->
+        <div v-if="isUniversalCombat" class="flex items-center justify-between gap-2">
+          <div class="text-[10px] uppercase tracking-widest text-ink-300">
+            Universalkampf (§3)
+          </div>
+          <UButton
+            size="xs"
+            :variant="universalOpen ? 'solid' : 'outline'"
+            :color="universalOpen ? 'primary' : 'neutral'"
+            icon="i-lucide-calculator"
+            title="Universalkampf-Schadensrechner ein/ausblenden"
+            @click="universalOpen = !universalOpen"
+          >
+            Schaden = (T − W) / Mod
+          </UButton>
+        </div>
+        <!-- Universalkampf-Rechner: Talent + Wurf + Waffe + Ruestung → Schaden -->
+        <div
+          v-if="isUniversalCombat && universalOpen"
+          class="p-2 rounded border border-amber-300 bg-amber-50/60 space-y-2"
+        >
+          <div class="text-[10px] text-amber-900">
+            Formel: <code class="font-mono">(Talent − Wurf) / (WaffenMod + RüstungsMod)</code> ·
+            Min 10 LP bei Treffer · Max kombinierter Mod 4
+          </div>
+          <div class="grid grid-cols-4 gap-2">
+            <UFormField label="Talent">
+              <UInput v-model.number="uniTalentValue" type="number" size="xs" />
+            </UFormField>
+            <UFormField label="Wurf">
+              <UInput v-model.number="uniAttackRoll" type="number" size="xs" />
+            </UFormField>
+            <UFormField label="Waffe">
+              <USelect
+                v-model="uniWeaponKind"
+                :items="[
+                  { label: 'Schusswaffe (1)', value: 'schusswaffe' },
+                  { label: 'Handwaffe (2)', value: 'handwaffe' },
+                  { label: 'Waffenlos (3)', value: 'waffenlos' },
+                ]"
+                value-key="value"
+                size="xs"
+              />
+            </UFormField>
+            <UFormField label="Rüstung">
+              <USelect
+                v-model="uniArmorKind"
+                :items="[
+                  { label: 'Keine (0)', value: 'keine' },
+                  { label: 'Leicht (1)', value: 'leicht' },
+                  { label: 'Schwer (2)', value: 'schwer' },
+                ]"
+                value-key="value"
+                size="xs"
+              />
+            </UFormField>
+          </div>
+          <div
+            class="text-center p-2 rounded font-mono text-base"
+            :class="universalResult.damage > 0
+              ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+              : 'bg-amber-100 text-amber-900 border border-amber-300'"
+          >
+            <template v-if="universalResult.damage > 0">
+              Schaden: <strong>{{ universalResult.damage }}</strong>
+              <span class="text-[10px] opacity-75 ml-2">
+                Mod {{ universalResult.combinedMod }}
+              </span>
+            </template>
+            <template v-else>
+              Kein Treffer (Wurf {{ uniAttackRoll }} &gt; Talent {{ uniTalentValue }})
+            </template>
+          </div>
+          <!-- Ziel + Anwenden: schreibt die berechneten HP direkt am Token ab,
+               postet einen Chat-Eintrag mit der Berechnung. -->
+          <div class="grid grid-cols-12 gap-2 items-end">
+            <UFormField label="Ziel" class="col-span-7">
+              <USelect
+                v-model="uniTargetId"
+                :items="damageTargetOptions"
+                value-key="value"
+                size="sm"
+                class="w-full"
+              />
+            </UFormField>
+            <UButton
+              class="col-span-5"
+              size="sm"
+              color="error"
+              icon="i-lucide-swords"
+              block
+              :loading="uniApplying"
+              :disabled="universalResult.damage <= 0 || !uniTargetId || uniApplying"
+              title="Berechneten Schaden ans Ziel-Token anwenden"
+              @click="applyUniversalDamage"
+            >
+              Schaden anwenden
+            </UButton>
+          </div>
+          <p v-if="uniApplyError" class="text-xs text-red-700">{{ uniApplyError }}</p>
+          <p v-if="uniApplyResult" class="text-xs text-emerald-700">{{ uniApplyResult }}</p>
+        </div>
+
+        <div class="flex items-baseline justify-between gap-2">
+          <div class="text-[10px] uppercase tracking-widest text-ink-300">
+            {{ damageMode === 'heal' ? 'Heilung' : 'Schaden' }} würfeln
+          </div>
+          <span
+            v-if="activeArmor > 0"
+            class="text-[10px] uppercase tracking-widest font-semibold px-2 py-0.5 rounded"
+            :style="{
+              background: '#1e3a8a22',
+              color: '#1e3a8a',
+              border: '1px solid #1e3a8a',
+            }"
+            title="Ruestung wird beim eingehenden Schaden serverseitig abgezogen."
+          >
+            🛡 Ruestung {{ activeArmor }}
+          </span>
+        </div>
+        <!-- Waffe waehlen (nur HtbaH-Charaktere mit Waffen) -->
+        <div v-if="characterWeapons.length">
+          <UFormField label="Waffe">
+            <USelect
+              v-model="selectedWeaponId"
+              :items="weaponOptions"
+              value-key="value"
+              size="sm"
+              class="w-full"
+            />
+          </UFormField>
+          <p class="mt-1 text-[11px] text-ink-300 italic">
+            Auswahl fuellt Wuerfel + Bezeichnung automatisch.
+          </p>
+        </div>
+        <!-- Zauber + Stufe (nur HtbaH-Charaktere mit Zaubern). Stufe befuellt
+             damageFormula/-Label und stellt zugleich Probe-Skill + Mod ein,
+             sodass der Spieler oben „Würfeln" (Probe) und unten „Würfeln"
+             (Schaden) ohne weitere Einstellungen klicken kann. -->
+        <div v-if="characterSpells.length">
+          <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+            <UFormField label="Zauber" class="sm:col-span-6">
+              <USelect
+                v-model="selectedSpellId"
+                :items="spellOptions"
+                value-key="value"
+                size="sm"
+                class="w-full"
+              />
+            </UFormField>
+            <UFormField label="Stufe" class="sm:col-span-6">
+              <USelect
+                v-model="selectedSpellLevelId"
+                :items="spellLevelOptions"
+                value-key="value"
+                size="sm"
+                class="w-full"
+                :disabled="!selectedSpellId"
+              />
+            </UFormField>
+          </div>
+          <p class="mt-1 text-[11px] text-ink-300 italic">
+            Probe und Schadensformel werden automatisch befüllt.
+          </p>
+        </div>
+        <!-- Modus + Ziel -->
+        <div>
+          <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+            <UFormField label="Modus" class="sm:col-span-4">
+              <USelect
+                v-model="damageMode"
+                :items="[
+                  { label: '⚔ Schaden', value: 'damage' },
+                  { label: '✚ Heilung', value: 'heal' },
+                ]"
+                value-key="value"
+                size="sm"
+                class="w-full"
+              />
+            </UFormField>
+            <UFormField label="Ziel" class="sm:col-span-8">
+              <USelect
+                v-model="damageTargetId"
+                :items="damageTargetOptions"
+                value-key="value"
+                size="sm"
+                class="w-full"
+              />
+            </UFormField>
+          </div>
+          <p class="mt-1 text-[11px] text-ink-300 italic">
+            Wähle den Charakter/NPC, dem der Wurf angerechnet wird.
+          </p>
+          <!-- Nahkampf-Reichweite: bei Nahkampfwaffe muss das Ziel direkt
+               benachbart sein (Chebyshev ≤ 1). Spieler werden geblockt,
+               der DM darf ausserhalb Reichweite wuerfeln. -->
+          <p
+            v-if="meleeOutOfReach"
+            class="mt-1 text-[11px] font-semibold"
+            :class="meleeBlocked ? 'text-red-700' : 'text-amber-700'"
+          >
+            ⚠ Nahkampf-Reichweite überschritten —
+            {{ damageTargetToken?.name }} ist {{ distanceToToken(damageTargetToken) }} Felder entfernt
+            (max. 1 Feld).
+            <span v-if="!meleeBlocked" class="font-normal italic">DM darf trotzdem.</span>
+            <span v-else class="font-normal italic">Bewege dich näher oder wähle eine Fernkampfwaffe.</span>
+          </p>
+        </div>
+        <!-- Formel + Bezeichnung + Wuerfel-Button -->
+        <div>
+          <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+            <UFormField label="Würfel" class="sm:col-span-4">
+              <UInput
+                v-model="damageFormula"
+                placeholder="2d6+3"
+                size="sm"
+                @keydown.enter="rollDamage"
+              />
+            </UFormField>
+            <UFormField label="Bezeichnung" class="sm:col-span-4">
+              <UInput
+                v-model="damageLabel"
+                :placeholder="damageMode === 'heal' ? 'Heilung' : 'Schaden'"
+                size="sm"
+                :maxlength="60"
+              />
+            </UFormField>
+            <UButton
+              :color="damageMode === 'heal' ? 'success' : 'primary'"
+              :icon="damageMode === 'heal' ? 'i-lucide-heart-pulse' : 'i-lucide-swords'"
+              :disabled="!damageParsed || damageSending || (damageMode === 'damage' && meleeBlocked)"
+              :loading="damageSending"
+              class="sm:col-span-4 roll-cta"
+              size="lg"
+              block
+              @click="rollDamage"
+            >
+              Würfeln
+            </UButton>
+          </div>
+        </div>
+        <!-- Krit-verdopplungs-Hinweis: zeigt an, dass die letzte Probe ein Krit
+             war und der naechste Schadenswurf entsprechend verdoppelt wird
+             (HTBaH §2.5/§10). Verschwindet bei Heilmodus. -->
+        <p
+          v-if="probeResultLast?.critical && damageMode === 'damage'"
+          class="text-xs font-semibold text-emerald-700"
+        >
+          ✨ Kritischer Treffer aktiv — Schadenswurf wird ×2 verdoppelt.
+        </p>
+        <p
+          v-if="damageFormula && !damageParsed"
+          class="text-xs text-amber-700"
+        >
+          Format: NdM±X — z.B. <code>2d6+3</code>, <code>1w20</code>, <code>4d10−2</code>
+        </p>
+        <p
+          v-else-if="damageParsed"
+          class="text-[11px] text-ink-300 italic"
+        >
+          Wirft <code class="font-semibold">{{ damagePreview }}</code> in den Gruppen-Chat.
+        </p>
+        <p v-if="damageError" class="text-xs text-red-700">{{ damageError }}</p>
+        <p v-if="damageSuccess" class="text-xs text-emerald-700">
+          ✓ {{ damageMode === 'heal' ? 'Heilung' : 'Schaden' }} in Gruppen-Chat gepostet
+        </p>
+        <p
+          v-if="damageApplyResult"
+          class="text-xs"
+          :class="damageMode === 'heal' ? 'text-emerald-700' : 'text-red-700'"
+        >
+          {{ damageApplyResult }}
         </p>
       </div>
 
@@ -2565,84 +3012,6 @@ const onImageError = (tokenId: number) => {
         </div>
       </div>
 
-      <!-- Kampfmanoever-Popup: setzt Modifier + Notiz vor, Spieler klickt dann
-           den normalen Wuerfeln-Button. -->
-      <div
-        v-if="maneuverOpen && isHtbah"
-        class="p-2 rounded border border-parchment-700/30 bg-white/60 space-y-1"
-      >
-        <div class="text-[10px] uppercase tracking-widest text-ink-300 mb-1">
-          Kampfmanöver — welches?
-        </div>
-        <div
-          v-for="m in maneuvers"
-          :key="m.id"
-        >
-          <UButton
-            block
-            size="xs"
-            variant="outline"
-            @click="applyManeuver(m)"
-          >
-            {{ m.label }}
-            <span class="ml-auto text-[10px] opacity-70">
-              {{ m.modifier > 0 ? '+' : '' }}{{ m.modifier !== 0 ? m.modifier : '±0' }}
-            </span>
-          </UButton>
-        </div>
-        <p class="text-[10px] text-ink-300/80 mt-1">
-          Setzt Modifier + Notiz für deinen nächsten Wurf vor.
-        </p>
-      </div>
-
-      <!-- Schadensstufen-Badge: zeigt, welcher Wunden-Malus aktuell auf jeden
-           Wurf wirkt. Wird nur eingeblendet, wenn der Wuerfler tatsaechlich
-           verwundet ist (Stufe >= 1). -->
-      <div
-        v-if="activeDamageLevel.level > 0"
-        class="text-xs px-2 py-1 rounded font-semibold flex items-center gap-2"
-        :style="{
-          background: damageLevelColor(activeDamageLevel.level) + '22',
-          border: '1px solid ' + damageLevelColor(activeDamageLevel.level),
-          color: damageLevelColor(activeDamageLevel.level),
-        }"
-      >
-        <UIcon name="i-lucide-heart-crack" class="size-4" />
-        <span>Schadensstufe {{ activeDamageLevel.level }}</span>
-        <span class="ml-auto tabular-nums">
-          {{ activeDamageLevel.malus }} auf jeden Wurf
-        </span>
-      </div>
-
-      <!-- HP-Editor -->
-      <div class="flex flex-wrap items-end gap-2 text-xs">
-        <UFormField label="HP">
-          <UInput v-model.number="hpDraft" type="number" size="xs" class="w-20" />
-        </UFormField>
-        <UFormField label="Max">
-          <UInput v-model.number="hpMaxDraft" type="number" size="xs" class="w-20" />
-        </UFormField>
-        <UButton
-          v-if="hpDirty"
-          size="xs"
-          color="primary"
-          :loading="hpSaving"
-          @click="saveHp"
-        >
-          HP speichern
-        </UButton>
-        <span class="flex-1" />
-        <UFormField label="±">
-          <UInput v-model.number="hpDelta" type="number" size="xs" class="w-16" />
-        </UFormField>
-        <UButton size="xs" variant="outline" color="error" icon="i-lucide-minus" @click="applyHpDelta(-1)">
-          Schaden
-        </UButton>
-        <UButton size="xs" variant="outline" color="success" icon="i-lucide-plus" @click="applyHpDelta(1)">
-          Heilung
-        </UButton>
-      </div>
-
       <!-- Geldbeutel (nur fuer Charakter-Tokens) -->
       <div v-if="character" class="space-y-2 border-t border-parchment-700/30 pt-3">
         <div class="flex items-center gap-2">
@@ -2693,375 +3062,6 @@ const onImageError = (tokenId: number) => {
           </UFormField>
         </div>
         <p v-if="purseError" class="text-xs text-red-700">{{ purseError }}</p>
-      </div>
-
-      <!-- Skill-/Begabungs-Würfler (HtbaH, D&D 5e/2024, DSA 5) -->
-      <div v-if="supportsRoller" class="space-y-2">
-        <div class="text-[10px] uppercase tracking-widest text-ink-300">{{ rollPanelTitle }}</div>
-        <UFormField label="Probe">
-          <USelect
-            v-model="pickedRollId"
-            :items="rollOptions.map((o) => ({ label: `${o.label} (${o.value})`, value: `${o.kind}:${o.id}:${o.source ?? ''}` }))"
-            value-key="value"
-            placeholder="— Probe wählen —"
-            size="sm"
-            class="w-full"
-          />
-        </UFormField>
-        <div v-if="isDnd || isNpcDnd" class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
-          <UFormField label="Modus" class="sm:col-span-4">
-            <USelect
-              v-model="rollMode"
-              :items="[
-                { label: 'Normal', value: 'normal' },
-                { label: 'Vorteil', value: 'advantage' },
-                { label: 'Nachteil', value: 'disadvantage' },
-              ]"
-              value-key="value"
-              size="sm"
-            />
-          </UFormField>
-          <UFormField label="DC (optional)" class="sm:col-span-4">
-            <UInput v-model.number="rollDc" type="number" size="sm" placeholder="z.B. 15" />
-          </UFormField>
-          <UFormField label="Mod ±" class="sm:col-span-4">
-            <UInput v-model.number="rollMod" type="number" size="sm" />
-          </UFormField>
-        </div>
-        <div v-else class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
-          <UFormField
-            label="Mod ±"
-            class="sm:col-span-12"
-            :help="isDsa5 ? 'Erleichterung (+) / Erschwernis (−) auf jede Eigenschaft' : 'z.B. −10 Erschwernis'"
-          >
-            <UInput v-model.number="rollMod" type="number" size="sm" class="w-full" />
-          </UFormField>
-        </div>
-        <!-- DC-Presets (nur HtbaH) — setzen rollMod auf den Regelwerk-Wert
-             fuer Erschwernis-Stufen. So muss der Spieler nicht jedes Mal die
-             genaue Zahl raten. -->
-        <div v-if="isHtbah" class="flex flex-wrap gap-1">
-          <span class="text-[10px] uppercase tracking-widest text-ink-300 mr-1 self-center">
-            Schwierigkeit:
-          </span>
-          <UButton
-            v-for="preset in HTBAH_DC_PRESETS"
-            :key="preset.id"
-            size="xs"
-            :variant="rollMod === preset.modifier ? 'solid' : 'outline'"
-            :title="`${preset.label} (Mod ${preset.modifier > 0 ? '+' : ''}${preset.modifier})`"
-            @click="rollMod = preset.modifier"
-          >
-            {{ preset.label }} {{ preset.modifier > 0 ? '+' : '' }}{{ preset.modifier }}
-          </UButton>
-        </div>
-        <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
-          <UFormField label="Notiz (optional)" class="sm:col-span-7">
-            <UInput
-              v-model="rollNote"
-              placeholder="z.B. „klettert hoch“ oder „mit Anlauf“"
-              size="sm"
-              :maxlength="200"
-              class="w-full"
-            />
-          </UFormField>
-          <UButton
-            color="primary"
-            icon="i-lucide-dices"
-            :disabled="!pickedRollOption || meleeBlocked"
-            :loading="rollSending"
-            class="sm:col-span-5 roll-cta"
-            size="lg"
-            block
-            @click="rollIt"
-          >
-            Würfeln
-          </UButton>
-        </div>
-        <p v-if="rollError" class="text-xs text-red-700">{{ rollError }}</p>
-        <p v-if="rollSuccess" class="text-xs text-emerald-700">✓ Wurf in Gruppen-Chat gepostet</p>
-      </div>
-      <div v-else-if="character" class="text-xs text-ink-300 italic">
-        Für dieses Regelwerk ist (noch) kein Würfler eingebaut — der volle Bogen unten zeigt alle Werte.
-      </div>
-
-      <!-- Schaden-/Heilungs-Wuerfler: freier NdM+X-Wurf, optional gegen ein
-           Ziel-Token. Wenn ein Ziel gewaehlt ist, wird das Ergebnis direkt von
-           seinen HP abgezogen (Schaden) oder addiert (Heilung). -->
-      <div class="space-y-2 border-t border-parchment-700/30 pt-3">
-        <!-- Universalkampf-Toggle (§3): nur fuer HtbaH-Charaktere mit aktivem Modul -->
-        <div v-if="isUniversalCombat" class="flex items-center justify-between gap-2">
-          <div class="text-[10px] uppercase tracking-widest text-ink-300">
-            Universalkampf (§3)
-          </div>
-          <UButton
-            size="xs"
-            :variant="universalOpen ? 'solid' : 'outline'"
-            :color="universalOpen ? 'primary' : 'neutral'"
-            icon="i-lucide-calculator"
-            title="Universalkampf-Schadensrechner ein/ausblenden"
-            @click="universalOpen = !universalOpen"
-          >
-            Schaden = (T − W) / Mod
-          </UButton>
-        </div>
-        <!-- Universalkampf-Rechner: Talent + Wurf + Waffe + Ruestung → Schaden -->
-        <div
-          v-if="isUniversalCombat && universalOpen"
-          class="p-2 rounded border border-amber-300 bg-amber-50/60 space-y-2"
-        >
-          <div class="text-[10px] text-amber-900">
-            Formel: <code class="font-mono">(Talent − Wurf) / (WaffenMod + RüstungsMod)</code> ·
-            Min 10 LP bei Treffer · Max kombinierter Mod 4
-          </div>
-          <div class="grid grid-cols-4 gap-2">
-            <UFormField label="Talent">
-              <UInput v-model.number="uniTalentValue" type="number" size="xs" />
-            </UFormField>
-            <UFormField label="Wurf">
-              <UInput v-model.number="uniAttackRoll" type="number" size="xs" />
-            </UFormField>
-            <UFormField label="Waffe">
-              <USelect
-                v-model="uniWeaponKind"
-                :items="[
-                  { label: 'Schusswaffe (1)', value: 'schusswaffe' },
-                  { label: 'Handwaffe (2)', value: 'handwaffe' },
-                  { label: 'Waffenlos (3)', value: 'waffenlos' },
-                ]"
-                value-key="value"
-                size="xs"
-              />
-            </UFormField>
-            <UFormField label="Rüstung">
-              <USelect
-                v-model="uniArmorKind"
-                :items="[
-                  { label: 'Keine (0)', value: 'keine' },
-                  { label: 'Leicht (1)', value: 'leicht' },
-                  { label: 'Schwer (2)', value: 'schwer' },
-                ]"
-                value-key="value"
-                size="xs"
-              />
-            </UFormField>
-          </div>
-          <div
-            class="text-center p-2 rounded font-mono text-base"
-            :class="universalResult.damage > 0
-              ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
-              : 'bg-amber-100 text-amber-900 border border-amber-300'"
-          >
-            <template v-if="universalResult.damage > 0">
-              Schaden: <strong>{{ universalResult.damage }}</strong>
-              <span class="text-[10px] opacity-75 ml-2">
-                Mod {{ universalResult.combinedMod }}
-              </span>
-            </template>
-            <template v-else>
-              Kein Treffer (Wurf {{ uniAttackRoll }} &gt; Talent {{ uniTalentValue }})
-            </template>
-          </div>
-          <!-- Ziel + Anwenden: schreibt die berechneten HP direkt am Token ab,
-               postet einen Chat-Eintrag mit der Berechnung. -->
-          <div class="grid grid-cols-12 gap-2 items-end">
-            <UFormField label="Ziel" class="col-span-7">
-              <USelect
-                v-model="uniTargetId"
-                :items="damageTargetOptions"
-                value-key="value"
-                size="sm"
-                class="w-full"
-              />
-            </UFormField>
-            <UButton
-              class="col-span-5"
-              size="sm"
-              color="error"
-              icon="i-lucide-swords"
-              block
-              :loading="uniApplying"
-              :disabled="universalResult.damage <= 0 || !uniTargetId || uniApplying"
-              title="Berechneten Schaden ans Ziel-Token anwenden"
-              @click="applyUniversalDamage"
-            >
-              Schaden anwenden
-            </UButton>
-          </div>
-          <p v-if="uniApplyError" class="text-xs text-red-700">{{ uniApplyError }}</p>
-          <p v-if="uniApplyResult" class="text-xs text-emerald-700">{{ uniApplyResult }}</p>
-        </div>
-
-        <div class="flex items-baseline justify-between gap-2">
-          <div class="text-[10px] uppercase tracking-widest text-ink-300">
-            {{ damageMode === 'heal' ? 'Heilung' : 'Schaden' }} würfeln
-          </div>
-          <span
-            v-if="activeArmor > 0"
-            class="text-[10px] uppercase tracking-widest font-semibold px-2 py-0.5 rounded"
-            :style="{
-              background: '#1e3a8a22',
-              color: '#1e3a8a',
-              border: '1px solid #1e3a8a',
-            }"
-            title="Ruestung wird beim eingehenden Schaden serverseitig abgezogen."
-          >
-            🛡 Ruestung {{ activeArmor }}
-          </span>
-        </div>
-        <!-- Waffe waehlen (nur HtbaH-Charaktere mit Waffen) -->
-        <div v-if="characterWeapons.length">
-          <UFormField label="Waffe">
-            <USelect
-              v-model="selectedWeaponId"
-              :items="weaponOptions"
-              value-key="value"
-              size="sm"
-              class="w-full"
-            />
-          </UFormField>
-          <p class="mt-1 text-[11px] text-ink-300 italic">
-            Auswahl fuellt Wuerfel + Bezeichnung automatisch.
-          </p>
-        </div>
-        <!-- Zauber + Stufe (nur HtbaH-Charaktere mit Zaubern). Stufe befuellt
-             damageFormula/-Label und stellt zugleich Probe-Skill + Mod ein,
-             sodass der Spieler oben „Würfeln" (Probe) und unten „Würfeln"
-             (Schaden) ohne weitere Einstellungen klicken kann. -->
-        <div v-if="characterSpells.length">
-          <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
-            <UFormField label="Zauber" class="sm:col-span-6">
-              <USelect
-                v-model="selectedSpellId"
-                :items="spellOptions"
-                value-key="value"
-                size="sm"
-                class="w-full"
-              />
-            </UFormField>
-            <UFormField label="Stufe" class="sm:col-span-6">
-              <USelect
-                v-model="selectedSpellLevelId"
-                :items="spellLevelOptions"
-                value-key="value"
-                size="sm"
-                class="w-full"
-                :disabled="!selectedSpellId"
-              />
-            </UFormField>
-          </div>
-          <p class="mt-1 text-[11px] text-ink-300 italic">
-            Probe und Schadensformel werden automatisch befüllt.
-          </p>
-        </div>
-        <!-- Modus + Ziel -->
-        <div>
-          <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
-            <UFormField label="Modus" class="sm:col-span-4">
-              <USelect
-                v-model="damageMode"
-                :items="[
-                  { label: '⚔ Schaden', value: 'damage' },
-                  { label: '✚ Heilung', value: 'heal' },
-                ]"
-                value-key="value"
-                size="sm"
-                class="w-full"
-              />
-            </UFormField>
-            <UFormField label="Ziel" class="sm:col-span-8">
-              <USelect
-                v-model="damageTargetId"
-                :items="damageTargetOptions"
-                value-key="value"
-                size="sm"
-                class="w-full"
-              />
-            </UFormField>
-          </div>
-          <p class="mt-1 text-[11px] text-ink-300 italic">
-            Wähle den Charakter/NPC, dem der Wurf angerechnet wird.
-          </p>
-          <!-- Nahkampf-Reichweite: bei Nahkampfwaffe muss das Ziel direkt
-               benachbart sein (Chebyshev ≤ 1). Spieler werden geblockt,
-               der DM darf ausserhalb Reichweite wuerfeln. -->
-          <p
-            v-if="meleeOutOfReach"
-            class="mt-1 text-[11px] font-semibold"
-            :class="meleeBlocked ? 'text-red-700' : 'text-amber-700'"
-          >
-            ⚠ Nahkampf-Reichweite überschritten —
-            {{ damageTargetToken?.name }} ist {{ distanceToToken(damageTargetToken) }} Felder entfernt
-            (max. 1 Feld).
-            <span v-if="!meleeBlocked" class="font-normal italic">DM darf trotzdem.</span>
-            <span v-else class="font-normal italic">Bewege dich näher oder wähle eine Fernkampfwaffe.</span>
-          </p>
-        </div>
-        <!-- Formel + Bezeichnung + Wuerfel-Button -->
-        <div>
-          <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
-            <UFormField label="Würfel" class="sm:col-span-4">
-              <UInput
-                v-model="damageFormula"
-                placeholder="2d6+3"
-                size="sm"
-                @keydown.enter="rollDamage"
-              />
-            </UFormField>
-            <UFormField label="Bezeichnung" class="sm:col-span-4">
-              <UInput
-                v-model="damageLabel"
-                :placeholder="damageMode === 'heal' ? 'Heilung' : 'Schaden'"
-                size="sm"
-                :maxlength="60"
-              />
-            </UFormField>
-            <UButton
-              :color="damageMode === 'heal' ? 'success' : 'primary'"
-              :icon="damageMode === 'heal' ? 'i-lucide-heart-pulse' : 'i-lucide-swords'"
-              :disabled="!damageParsed || damageSending || (damageMode === 'damage' && meleeBlocked)"
-              :loading="damageSending"
-              class="sm:col-span-4 roll-cta"
-              size="lg"
-              block
-              @click="rollDamage"
-            >
-              Würfeln
-            </UButton>
-          </div>
-        </div>
-        <!-- Krit-verdopplungs-Hinweis: zeigt an, dass die letzte Probe ein Krit
-             war und der naechste Schadenswurf entsprechend verdoppelt wird
-             (HTBaH §2.5/§10). Verschwindet bei Heilmodus. -->
-        <p
-          v-if="probeResultLast?.critical && damageMode === 'damage'"
-          class="text-xs font-semibold text-emerald-700"
-        >
-          ✨ Kritischer Treffer aktiv — Schadenswurf wird ×2 verdoppelt.
-        </p>
-        <p
-          v-if="damageFormula && !damageParsed"
-          class="text-xs text-amber-700"
-        >
-          Format: NdM±X — z.B. <code>2d6+3</code>, <code>1w20</code>, <code>4d10−2</code>
-        </p>
-        <p
-          v-else-if="damageParsed"
-          class="text-[11px] text-ink-300 italic"
-        >
-          Wirft <code class="font-semibold">{{ damagePreview }}</code> in den Gruppen-Chat.
-        </p>
-        <p v-if="damageError" class="text-xs text-red-700">{{ damageError }}</p>
-        <p v-if="damageSuccess" class="text-xs text-emerald-700">
-          ✓ {{ damageMode === 'heal' ? 'Heilung' : 'Schaden' }} in Gruppen-Chat gepostet
-        </p>
-        <p
-          v-if="damageApplyResult"
-          class="text-xs"
-          :class="damageMode === 'heal' ? 'text-emerald-700' : 'text-red-700'"
-        >
-          {{ damageApplyResult }}
-        </p>
       </div>
 
       <!-- Verwendbare Gegenstände: Heiltrank, Erste-Hilfe-Paket o.aE. — pro
