@@ -12,9 +12,15 @@ import { groupArmoryItems, groupArmoryTabs } from '~~/server/database/schema'
 
 const bodySchema = z.object({
   name: z.string().min(1).max(120).optional(),
+  kind: z.enum(['weapon', 'armor', 'consumable']).optional(),
   price: z.string().max(40).optional(),
+  priceGold: z.number().int().min(0).max(99999).optional(),
+  priceSilver: z.number().int().min(0).max(99999).optional(),
+  priceCopper: z.number().int().min(0).max(99999).optional(),
   damage: z.string().max(40).optional(),
   armor: z.number().int().min(0).max(999).nullable().optional(),
+  healAmount: z.number().int().min(0).max(9999).nullable().optional(),
+  manaAmount: z.number().int().min(0).max(9999).nullable().optional(),
   properties: z.string().max(400).optional(),
   note: z.string().max(2000).optional(),
   orderIdx: z.number().int().optional(),
@@ -46,9 +52,15 @@ export default defineEventHandler(async (event) => {
 
   const patch: Record<string, unknown> = { updatedAt: new Date() }
   if (body.name !== undefined) patch.name = body.name.trim()
+  if (body.kind !== undefined) patch.kind = body.kind
   if (body.price !== undefined) patch.price = body.price.trim()
+  if (body.priceGold !== undefined) patch.priceGold = body.priceGold
+  if (body.priceSilver !== undefined) patch.priceSilver = body.priceSilver
+  if (body.priceCopper !== undefined) patch.priceCopper = body.priceCopper
   if (body.damage !== undefined) patch.damage = body.damage.trim()
   if (body.armor !== undefined) patch.armor = body.armor
+  if (body.healAmount !== undefined) patch.healAmount = body.healAmount
+  if (body.manaAmount !== undefined) patch.manaAmount = body.manaAmount
   if (body.properties !== undefined) patch.properties = body.properties.trim()
   if (body.note !== undefined) patch.note = body.note
   if (body.orderIdx !== undefined) patch.orderIdx = body.orderIdx

@@ -9,6 +9,7 @@
  */
 import GroupChat from '~/components/chat/GroupChat.vue'
 import MiniCharSheet from '~/components/battle/MiniCharSheet.vue'
+import ShopModal from '~/components/battle/ShopModal.vue'
 import NpcAbilitiesEditor from '~/components/battle/NpcAbilitiesEditor.vue'
 import {
   TOKEN_CONDITIONS,
@@ -1341,6 +1342,29 @@ const removeToken = async () => {
 // --- Info-Karte (NPC-Card) ---
 const infoTokenId = ref<number | null>(null)
 const infoToken = computed(() => tokens.value.find((t) => t.id === infoTokenId.value) ?? null)
+
+// NPC-Haendler der Gruppe — fuer den "Shop oeffnen"-Button in der Info-Card.
+const merchantCharacterIds = ref<Set<number>>(new Set())
+const loadMerchants = async () => {
+  try {
+    const res = await $fetch<{ merchants: { characterId: number }[] }>(`/api/groups/${groupId}/merchants`)
+    merchantCharacterIds.value = new Set(res.merchants.map((m) => m.characterId))
+  } catch {
+    // nicht-kritisch
+  }
+}
+onMounted(loadMerchants)
+const infoTokenIsMerchant = computed(
+  () => !!infoToken.value?.characterId && merchantCharacterIds.value.has(infoToken.value.characterId),
+)
+const shopOpen = ref(false)
+const shopMerchantId = ref<number | undefined>(undefined)
+const openShopForInfo = () => {
+  if (!infoToken.value?.characterId) return
+  shopMerchantId.value = infoToken.value.characterId
+  infoTokenId.value = null
+  shopOpen.value = true
+}
 // Aktuelles Bild in der Info-Galerie (0 = Haupt-/Token-Bild, 1..N = Galerie-Bilder).
 const infoImageIdx = ref(0)
 watch(infoTokenId, () => {
@@ -4933,6 +4957,14 @@ const endResize = () => {
       <template #footer>
         <div class="flex gap-2 justify-end">
           <UButton
+            v-if="infoTokenIsMerchant"
+            color="warning"
+            icon="i-lucide-store"
+            @click="openShopForInfo"
+          >
+            Shop öffnen
+          </UButton>
+          <UButton
             v-if="infoToken && canMoveToken(infoToken)"
             variant="outline"
             icon="i-lucide-edit"
@@ -4944,6 +4976,13 @@ const endResize = () => {
         </div>
       </template>
     </UModal>
+
+    <!-- Shop-Modal: oeffnet sich aus der Info-Card eines Haendler-NPCs. -->
+    <ShopModal
+      v-model:open="shopOpen"
+      :group-id="groupId"
+      :merchant-character-id="shopMerchantId"
+    />
 
     <!-- Objekt-Picker: Bibliothek aus Built-ins + Custom-Templates des DM -->
     <UModal v-model:open="showObjectPicker" title="Objekt auf Karte platzieren" :ui="{ content: 'max-w-3xl' }">

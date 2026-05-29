@@ -57,11 +57,23 @@ export default defineEventHandler(async (event) => {
     let order = present.length
     for (const it of cat.items) {
       if (presentNames.has(it.name)) continue
+      // Preis-Freitext (z.B. "70 S", "1 G 50 K") in strukturierte Werte parsen.
+      const priceText = it.price ?? ''
+      const gold = /(\d+)\s*G/i.exec(priceText)
+      const silver = /(\d+)\s*S/i.exec(priceText)
+      const copper = /(\d+)\s*K/i.exec(priceText)
+      // Typ ableiten: Schutzwert → Ruestung, sonst Waffe (Waffenkunde hat keine
+      // echten Verbrauchsgegenstaende — der DM kann das nachpflegen).
+      const kind: 'weapon' | 'armor' | 'consumable' = it.armor != null ? 'armor' : 'weapon'
       await db.insert(groupArmoryItems).values({
         groupId,
         tabId: tab.id,
         name: it.name,
-        price: it.price ?? '',
+        kind,
+        price: priceText,
+        priceGold: gold ? Number(gold[1]) : 0,
+        priceSilver: silver ? Number(silver[1]) : 0,
+        priceCopper: copper ? Number(copper[1]) : 0,
         damage: it.damage ?? '',
         armor: it.armor ?? null,
         properties: it.properties ?? '',

@@ -710,6 +710,81 @@ const removeShopItem = (id: string) => {
   update(n)
 }
 
+// --- Aus Gegenstandsbibliothek (Waffenkammer einer Gruppe) uebernehmen ---
+interface LibGroup { id: number; name: string }
+interface LibItem {
+  id: number
+  name: string
+  kind: 'weapon' | 'armor' | 'consumable'
+  priceGold: number
+  priceSilver: number
+  priceCopper: number
+  damage: string
+  armor: number | null
+  healAmount: number | null
+  manaAmount: number | null
+  properties: string
+  note: string
+}
+const libOpen = ref(false)
+const libGroups = ref<LibGroup[]>([])
+const libGroupId = ref<number | undefined>(undefined)
+const libItems = ref<LibItem[]>([])
+const libLoading = ref(false)
+const libError = ref<string | null>(null)
+
+const openLibrary = async () => {
+  libOpen.value = !libOpen.value
+  if (!libOpen.value) return
+  libError.value = null
+  try {
+    const res = await $fetch<{ groups: LibGroup[] }>('/api/groups')
+    libGroups.value = res.groups ?? []
+    if (!libGroupId.value && libGroups.value.length === 1) {
+      libGroupId.value = libGroups.value[0]!.id
+      await loadLibItems()
+    }
+  } catch (e: unknown) {
+    libError.value = (e as { statusMessage?: string }).statusMessage ?? 'Gruppen konnten nicht geladen werden.'
+  }
+}
+const loadLibItems = async () => {
+  if (!libGroupId.value) {
+    libItems.value = []
+    return
+  }
+  libLoading.value = true
+  libError.value = null
+  try {
+    const res = await $fetch<{ items: LibItem[] }>(`/api/groups/${libGroupId.value}/armory`)
+    libItems.value = res.items ?? []
+  } catch (e: unknown) {
+    libError.value = (e as { statusMessage?: string }).statusMessage ?? 'Bibliothek konnte nicht geladen werden.'
+  } finally {
+    libLoading.value = false
+  }
+}
+const importLibItem = (it: LibItem) => {
+  const n = clone()
+  const m = ensureMerchant(n)
+  m.items.push({
+    id: crypto.randomUUID(),
+    kind: it.kind ?? 'weapon',
+    name: it.name,
+    priceGold: it.priceGold || 0,
+    priceSilver: it.priceSilver || 0,
+    priceCopper: it.priceCopper || 0,
+    stock: null,
+    damageFormula: it.kind === 'weapon' ? (it.damage || '') : undefined,
+    armorValue: it.kind === 'armor' ? (it.armor ?? 0) : undefined,
+    healAmount: it.kind === 'consumable' ? (it.healAmount ?? 0) : undefined,
+    manaAmount: it.kind === 'consumable' && it.manaAmount ? it.manaAmount : undefined,
+    properties: it.properties || '',
+    note: it.note || '',
+  })
+  update(n)
+}
+
 // --- Magie-Modul-Switching ---
 const setMagicModule = (raw: unknown) => {
   const v = String(raw)
@@ -2915,7 +2990,48 @@ const postRollToGroup = async () => {
           <UButton size="xs" variant="outline" icon="i-lucide-plus" @click="addShopItem('weapon')">Waffe</UButton>
           <UButton size="xs" variant="outline" icon="i-lucide-plus" @click="addShopItem('armor')">Rüstung</UButton>
           <UButton size="xs" variant="outline" icon="i-lucide-plus" @click="addShopItem('consumable')">Verbrauchsgegenstand</UButton>
+          <UButton size="xs" variant="soft" color="primary" icon="i-lucide-library" @click="openLibrary">
+            Aus Bibliothek übernehmen
+          </UButton>
         </div>
+
+        <!-- Bibliotheks-Import: Gruppe waehlen → Waffenkammer-Eintraege uebernehmen -->
+        <div v-if="libOpen" class="p-2 rounded border border-primary-300 bg-primary-50/40 space-y-2">
+          <div class="flex items-center gap-2">
+            <UFormField label="Gruppe / Bibliothek" class="flex-1">
+              <USelect
+                v-model="libGroupId"
+                :items="libGroups.map((g) => ({ label: g.name, value: g.id }))"
+                value-key="value"
+                size="sm"
+                placeholder="— Gruppe wählen —"
+                @update:model-value="loadLibItems"
+              />
+            </UFormField>
+            <UButton size="xs" variant="ghost" icon="i-lucide-x" class="mt-5" @click="libOpen = false" />
+          </div>
+          <p v-if="libError" class="text-xs text-red-700">{{ libError }}</p>
+          <p v-if="libLoading" class="text-xs text-ink-400">Lade …</p>
+          <div v-else-if="libGroupId" class="max-h-64 overflow-auto space-y-1">
+            <div
+              v-for="li in libItems"
+              :key="li.id"
+              class="flex items-center gap-2 p-1.5 rounded border border-parchment-700/20 bg-white/60"
+            >
+              <span class="text-[9px] uppercase tracking-widest px-1 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
+                {{ li.kind === 'armor' ? 'Rüst' : li.kind === 'consumable' ? 'Verbr' : 'Waffe' }}
+              </span>
+              <span class="flex-1 truncate text-sm">{{ li.name }}</span>
+              <UButton size="xs" variant="outline" icon="i-lucide-plus" @click="importLibItem(li)">
+                Übernehmen
+              </UButton>
+            </div>
+            <p v-if="!libItems.length" class="text-[11px] text-ink-300 italic">
+              Diese Gruppe hat noch keine Bibliothekseinträge.
+            </p>
+          </div>
+        </div>
+
         <p class="text-[11px] text-ink-300/80">
           Tipp: In der Waffenkammer (Gruppen-Menü) pflegst du eine Gegenstandsbibliothek als Vorlage.
         </p>

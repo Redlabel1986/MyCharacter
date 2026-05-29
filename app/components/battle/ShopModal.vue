@@ -17,8 +17,11 @@ import {
 const props = defineProps<{
   open: boolean
   groupId: number
-  /** Charakter, der kauft (muss dem User gehoeren). */
-  buyerCharacterId: number
+  /**
+   * Charakter, der kauft (muss dem User gehoeren). Optional — fehlt er,
+   * waehlt der Spieler im Modal aus seinen eigenen HtbaH-Charakteren.
+   */
+  buyerCharacterId?: number
   /** Optional: direkt diesen Haendler oeffnen. */
   merchantCharacterId?: number
 }>()
@@ -34,8 +37,12 @@ interface Merchant {
   items: HtbahShopItem[]
 }
 
+interface BuyerChar { id: number; name: string; system: string }
+
 const merchants = ref<Merchant[]>([])
 const activeMerchantId = ref<number | undefined>(undefined)
+const buyers = ref<BuyerChar[]>([])
+const buyerId = ref<number | undefined>(undefined)
 const purse = ref<HtbahPurse>({ copper: 0, silver: 0, gold: 0 })
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -50,17 +57,42 @@ const haveCopper = computed(() => htbahPurseToCopper(purse.value))
 const kindLabel = (k: HtbahShopItem['kind']) =>
   k === 'weapon' ? 'Waffe' : k === 'armor' ? 'Rüstung' : 'Verbrauch'
 
+// Geldbeutel des gewaehlten Kaeufers laden (purse steckt nur in der Detail-API).
+const loadBuyerPurse = async () => {
+  if (!buyerId.value) {
+    purse.value = { copper: 0, silver: 0, gold: 0 }
+    return
+  }
+  try {
+    const res = await $fetch<{ character: { data?: { purse?: HtbahPurse } } }>(
+      `/api/characters/${buyerId.value}`,
+    )
+    purse.value = res.character?.data?.purse ?? { copper: 0, silver: 0, gold: 0 }
+  } catch {
+    purse.value = { copper: 0, silver: 0, gold: 0 }
+  }
+}
+watch(buyerId, loadBuyerPurse)
+
 const load = async () => {
   loading.value = true
   error.value = null
   try {
     const [mRes, cRes] = await Promise.all([
       $fetch<{ merchants: Merchant[] }>(`/api/groups/${props.groupId}/merchants`),
-      $fetch<{ character: { data: { purse?: HtbahPurse } } }>(`/api/characters/${props.buyerCharacterId}`),
+      $fetch<{ characters: BuyerChar[] }>(`/api/characters`),
     ])
     merchants.value = mRes.merchants ?? []
-    purse.value = cRes.character?.data?.purse ?? { copper: 0, silver: 0, gold: 0 }
-    // Vorauswahl: gewuenschter Haendler, sonst der erste.
+    // Nur HtbaH-Charaktere koennen kaufen (Geldbeutel + Inventar).
+    buyers.value = (cRes.characters ?? []).filter((c) => c.system === 'htbah')
+    // Kaeufer vorwaehlen: uebergebener Charakter, sonst der erste eigene.
+    if (props.buyerCharacterId && buyers.value.some((b) => b.id === props.buyerCharacterId)) {
+      buyerId.value = props.buyerCharacterId
+    } else if (buyers.value.length) {
+      buyerId.value = buyers.value[0]!.id
+    }
+    await loadBuyerPurse()
+    // Vorauswahl Haendler: gewuenschter, sonst der erste.
     if (props.merchantCharacterId && merchants.value.some((m) => m.characterId === props.merchantCharacterId)) {
       activeMerchantId.value = props.merchantCharacterId
     } else if (!activeMerchantId.value && merchants.value.length) {
@@ -85,7 +117,7 @@ const canAfford = (it: HtbahShopItem) => haveCopper.value >= htbahShopItemCopper
 const soldOut = (it: HtbahShopItem) => it.stock !== null && it.stock !== undefined && it.stock <= 0
 
 const buy = async (it: HtbahShopItem) => {
-  if (!activeMerchant.value) return
+  if (!activeMerchant.value || !buyerId.value) return
   buyingId.value = it.id
   error.value = null
   flash.value = null
@@ -95,7 +127,7 @@ const buy = async (it: HtbahShopItem) => {
       {
         method: 'POST',
         body: {
-          buyerCharacterId: props.buyerCharacterId,
+          buyerCharacterId: buyerId.value,
           merchantCharacterId: activeMerchant.value.characterId,
           itemId: it.id,
           quantity: 1,
@@ -139,6 +171,19 @@ const buy = async (it: HtbahShopItem) => {
             />
           </UFormField>
 
+          <!-- Kaeufer-Auswahl (wenn der User mehrere Charaktere hat) -->
+          <UFormField v-if="buyers.length > 1" label="Käufer (dein Charakter)">
+            <USelect
+              v-model="buyerId"
+              :items="buyers.map((b) => ({ label: b.name, value: b.id }))"
+              value-key="value"
+              size="sm"
+            />
+          </UFormField>
+          <p v-else-if="!buyers.length" class="text-xs text-amber-700">
+            Du hast keinen HtbaH-Charakter zum Einkaufen.
+          </p>
+
           <!-- Geldbeutel -->
           <div class="flex items-center gap-2 text-sm">
             <UIcon name="i-lucide-coins" class="size-4 text-[var(--color-accent)]" />
@@ -181,7 +226,7 @@ const buy = async (it: HtbahShopItem) => {
                   :color="canAfford(it) && !soldOut(it) ? 'primary' : 'neutral'"
                   icon="i-lucide-shopping-cart"
                   :loading="buyingId === it.id"
-                  :disabled="!canAfford(it) || soldOut(it) || buyingId !== null || !it.name"
+                  :disabled="!buyerId || !canAfford(it) || soldOut(it) || buyingId !== null || !it.name"
                   @click="buy(it)"
                 >
                   {{ soldOut(it) ? 'Ausverkauft' : canAfford(it) ? 'Kaufen' : 'Zu teuer' }}

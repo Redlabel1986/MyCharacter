@@ -15,6 +15,19 @@ import {
   BATTLEBUBEN_QUALITY_BONUS,
   BATTLEBUBEN_COST_RULES,
 } from '~~/shared/battlebuben-armory'
+import { htbahFormatPrice } from '~~/shared/engines/htbah'
+
+const KIND_OPTIONS = [
+  { label: 'Waffe', value: 'weapon' },
+  { label: 'Rüstung', value: 'armor' },
+  { label: 'Verbrauch', value: 'consumable' },
+]
+const kindLabel = (k: string) =>
+  k === 'armor' ? 'Rüstung' : k === 'consumable' ? 'Verbrauch' : 'Waffe'
+const priceLabel = (r: { priceGold: number; priceSilver: number; priceCopper: number; price: string }) =>
+  r.priceGold || r.priceSilver || r.priceCopper
+    ? htbahFormatPrice(r.priceGold, r.priceSilver, r.priceCopper)
+    : r.price
 
 definePageMeta({ middleware: ['auth'] })
 
@@ -29,9 +42,15 @@ interface Item {
   groupId: number
   tabId: number | null
   name: string
+  kind: 'weapon' | 'armor' | 'consumable'
   price: string
+  priceGold: number
+  priceSilver: number
+  priceCopper: number
   damage: string
   armor: number | null
+  healAmount: number | null
+  manaAmount: number | null
   properties: string
   note: string
   orderIdx: number
@@ -120,9 +139,14 @@ const seedCatalog = async () => {
 // — Neuer Eintrag —
 const blankDraft = () => ({
   name: '',
-  price: '',
+  kind: 'weapon' as 'weapon' | 'armor' | 'consumable',
+  priceGold: 0,
+  priceSilver: 0,
+  priceCopper: 0,
   damage: '',
   armor: null as number | null,
+  healAmount: null as number | null,
+  manaAmount: null as number | null,
   properties: '',
   note: '',
 })
@@ -139,9 +163,14 @@ const addItem = async () => {
       body: {
         tabId: activeTabId.value,
         name: newItem.name.trim(),
-        price: newItem.price.trim(),
-        damage: newItem.damage.trim(),
-        armor: newItem.armor,
+        kind: newItem.kind,
+        priceGold: newItem.priceGold || 0,
+        priceSilver: newItem.priceSilver || 0,
+        priceCopper: newItem.priceCopper || 0,
+        damage: newItem.kind === 'weapon' ? newItem.damage.trim() : '',
+        armor: newItem.kind === 'armor' ? newItem.armor : null,
+        healAmount: newItem.kind === 'consumable' ? newItem.healAmount : null,
+        manaAmount: newItem.kind === 'consumable' ? newItem.manaAmount : null,
         properties: newItem.properties.trim(),
         note: newItem.note,
       },
@@ -165,9 +194,14 @@ const editError = ref<string | null>(null)
 const startEdit = (r: Item) => {
   editingId.value = r.id
   editDraft.name = r.name
-  editDraft.price = r.price
+  editDraft.kind = r.kind ?? 'weapon'
+  editDraft.priceGold = r.priceGold ?? 0
+  editDraft.priceSilver = r.priceSilver ?? 0
+  editDraft.priceCopper = r.priceCopper ?? 0
   editDraft.damage = r.damage
   editDraft.armor = r.armor
+  editDraft.healAmount = r.healAmount
+  editDraft.manaAmount = r.manaAmount
   editDraft.properties = r.properties
   editDraft.note = r.note
   editTabId.value = r.tabId ?? undefined
@@ -186,9 +220,14 @@ const saveEdit = async () => {
       method: 'PUT',
       body: {
         name: editDraft.name.trim(),
-        price: editDraft.price.trim(),
-        damage: editDraft.damage.trim(),
-        armor: editDraft.armor,
+        kind: editDraft.kind,
+        priceGold: editDraft.priceGold || 0,
+        priceSilver: editDraft.priceSilver || 0,
+        priceCopper: editDraft.priceCopper || 0,
+        damage: editDraft.kind === 'weapon' ? editDraft.damage.trim() : '',
+        armor: editDraft.kind === 'armor' ? editDraft.armor : null,
+        healAmount: editDraft.kind === 'consumable' ? editDraft.healAmount : null,
+        manaAmount: editDraft.kind === 'consumable' ? editDraft.manaAmount : null,
         properties: editDraft.properties.trim(),
         note: editDraft.note,
         tabId: editTabId.value ?? undefined,
@@ -427,9 +466,10 @@ const showReference = ref(false)
             </span>
           </div>
           <div class="text-sm text-ink-400 flex flex-wrap gap-x-4 gap-y-0.5 mt-0.5">
-            <span v-if="r.damage">Schaden: <strong>{{ r.damage }}</strong></span>
-            <span v-if="r.armor !== null">Schutz: <strong>{{ r.armor }}</strong></span>
-            <span v-if="r.price">Preis: {{ r.price }}</span>
+            <span v-if="r.kind === 'weapon' && r.damage">Schaden: <strong>{{ r.damage }}</strong></span>
+            <span v-if="r.kind === 'armor' && r.armor !== null">Schutz: <strong>{{ r.armor }}</strong></span>
+            <span v-if="r.kind === 'consumable' && r.healAmount">+{{ r.healAmount }} HP</span>
+            <span v-if="priceLabel(r)">Preis: {{ priceLabel(r) }}</span>
             <span v-if="r.properties">{{ r.properties }}</span>
           </div>
         </li>
@@ -536,10 +576,27 @@ const showReference = ref(false)
             <template v-if="isOwner && editingId === r.id">
               <div class="grid sm:grid-cols-2 gap-2">
                 <UFormField label="Name"><UInput v-model="editDraft.name" :maxlength="120" /></UFormField>
-                <UFormField label="Preis"><UInput v-model="editDraft.price" :maxlength="40" placeholder="z.B. 70 S" /></UFormField>
-                <UFormField label="Schaden"><UInput v-model="editDraft.damage" :maxlength="40" placeholder="z.B. 4W10" /></UFormField>
-                <UFormField label="Schutz (Rüstung)">
-                  <UInput v-model.number="editDraft.armor" type="number" min="0" placeholder="leer = Waffe" />
+                <UFormField label="Typ">
+                  <USelect v-model="editDraft.kind" :items="KIND_OPTIONS" value-key="value" />
+                </UFormField>
+                <UFormField label="Preis (Gold / Silber / Kupfer)" class="sm:col-span-2">
+                  <div class="grid grid-cols-3 gap-2">
+                    <UInput v-model.number="editDraft.priceGold" type="number" min="0" placeholder="G" />
+                    <UInput v-model.number="editDraft.priceSilver" type="number" min="0" placeholder="S" />
+                    <UInput v-model.number="editDraft.priceCopper" type="number" min="0" placeholder="K" />
+                  </div>
+                </UFormField>
+                <UFormField v-if="editDraft.kind === 'weapon'" label="Schaden">
+                  <UInput v-model="editDraft.damage" :maxlength="40" placeholder="z.B. 4W10" />
+                </UFormField>
+                <UFormField v-if="editDraft.kind === 'armor'" label="Schutz (RW)">
+                  <UInput v-model.number="editDraft.armor" type="number" min="0" />
+                </UFormField>
+                <UFormField v-if="editDraft.kind === 'consumable'" label="Heilung (HP)">
+                  <UInput v-model.number="editDraft.healAmount" type="number" min="0" />
+                </UFormField>
+                <UFormField v-if="editDraft.kind === 'consumable'" label="Mana">
+                  <UInput v-model.number="editDraft.manaAmount" type="number" min="0" />
                 </UFormField>
                 <UFormField label="Eigenschaften" class="sm:col-span-2">
                   <UInput v-model="editDraft.properties" :maxlength="400" placeholder="z.B. +10 Parade / +5 Durchschlag" />
@@ -566,11 +623,16 @@ const showReference = ref(false)
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 flex-wrap">
                     <h2 class="font-serif text-lg break-words">{{ r.name }}</h2>
-                    <span v-if="r.price" class="text-[11px] text-ink-300">{{ r.price }}</span>
+                    <span class="text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
+                      {{ kindLabel(r.kind) }}
+                    </span>
+                    <span v-if="priceLabel(r)" class="text-[11px] text-ink-300">{{ priceLabel(r) }}</span>
                   </div>
                   <div class="text-sm text-ink-400 flex flex-wrap gap-x-4 gap-y-0.5">
-                    <span v-if="r.damage">Schaden: <strong class="font-mono">{{ r.damage }}</strong></span>
-                    <span v-if="r.armor !== null">Schutz: <strong class="font-mono">{{ r.armor }}</strong></span>
+                    <span v-if="r.kind === 'weapon' && r.damage">Schaden: <strong class="font-mono">{{ r.damage }}</strong></span>
+                    <span v-if="r.kind === 'armor' && r.armor !== null">Schutz: <strong class="font-mono">{{ r.armor }}</strong></span>
+                    <span v-if="r.kind === 'consumable' && r.healAmount">+{{ r.healAmount }} HP</span>
+                    <span v-if="r.kind === 'consumable' && r.manaAmount">+{{ r.manaAmount }} Mana</span>
                     <span v-if="r.properties">{{ r.properties }}</span>
                   </div>
                   <p v-if="r.note.trim()" class="text-xs text-ink-300 whitespace-pre-wrap mt-1">{{ r.note }}</p>
@@ -598,14 +660,27 @@ const showReference = ref(false)
               <UFormField label="Name" required>
                 <UInput v-model="newItem.name" placeholder="z.B. Langschwert" :maxlength="120" />
               </UFormField>
-              <UFormField label="Preis">
-                <UInput v-model="newItem.price" placeholder="z.B. 150 S" :maxlength="40" />
+              <UFormField label="Typ">
+                <USelect v-model="newItem.kind" :items="KIND_OPTIONS" value-key="value" />
               </UFormField>
-              <UFormField label="Schaden">
+              <UFormField label="Preis (Gold / Silber / Kupfer)" class="sm:col-span-2">
+                <div class="grid grid-cols-3 gap-2">
+                  <UInput v-model.number="newItem.priceGold" type="number" min="0" placeholder="G" />
+                  <UInput v-model.number="newItem.priceSilver" type="number" min="0" placeholder="S" />
+                  <UInput v-model.number="newItem.priceCopper" type="number" min="0" placeholder="K" />
+                </div>
+              </UFormField>
+              <UFormField v-if="newItem.kind === 'weapon'" label="Schaden">
                 <UInput v-model="newItem.damage" placeholder="z.B. 5W10" :maxlength="40" />
               </UFormField>
-              <UFormField label="Schutz (Rüstung)">
-                <UInput v-model.number="newItem.armor" type="number" min="0" placeholder="leer = Waffe" />
+              <UFormField v-if="newItem.kind === 'armor'" label="Schutz (RW)">
+                <UInput v-model.number="newItem.armor" type="number" min="0" />
+              </UFormField>
+              <UFormField v-if="newItem.kind === 'consumable'" label="Heilung (HP)">
+                <UInput v-model.number="newItem.healAmount" type="number" min="0" />
+              </UFormField>
+              <UFormField v-if="newItem.kind === 'consumable'" label="Mana">
+                <UInput v-model.number="newItem.manaAmount" type="number" min="0" />
               </UFormField>
               <UFormField label="Eigenschaften" class="sm:col-span-2">
                 <UInput v-model="newItem.properties" placeholder="z.B. +10 Parade / +5 Durchschlag" :maxlength="400" />
