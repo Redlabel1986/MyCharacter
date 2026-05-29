@@ -1011,6 +1011,13 @@ const postRollToGroup = async () => {
       >
         <StatBlock label="LP" :value="`${sheet.hp.current}/${sheet.hp.max}`" />
         <StatBlock
+          v-if="sheet.battlebuben"
+          label="Initiative"
+          value="1W20"
+          sublabel="fest (Battlebuben)"
+        />
+        <StatBlock
+          v-else
           label="Initiative"
           :value="`${htbahInitiativeBonus(sheet) >= 0 ? '+' : ''}${htbahInitiativeBonus(sheet)}`"
           sublabel="W10 + Handeln − RW/10"
@@ -1309,7 +1316,7 @@ const postRollToGroup = async () => {
           <span>Parade:</span>
           <span class="font-mono">+{{ htbahArmorParadeBonus(sheet) }}</span>
         </div>
-        <div class="flex justify-between">
+        <div v-if="!sheet.battlebuben" class="flex justify-between">
           <span>Initiative:</span>
           <span class="font-mono">{{ htbahArmorInitPenalty(sheet) }}</span>
         </div>
