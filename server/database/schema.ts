@@ -777,12 +777,22 @@ export const groupArmoryItems = pgTable(
       onDelete: 'cascade',
     }),
     name: text('name').notNull(),
+    /** Gegenstands-Typ — bestimmt das Ziel-Inventarfeld beim Shop-Kauf. */
+    kind: text('kind').notNull().$type<'weapon' | 'armor' | 'consumable'>().default('weapon'),
     /** Preis als Freitext, z.B. "70 S" oder "??". Leer = unbekannt/kostenlos. */
     price: text('price').notNull().default(''),
+    /** Strukturierter Preis (fuer Shop-Berechnung): 100 K = 1 S, 100 S = 1 G. */
+    priceGold: integer('price_gold').notNull().default(0),
+    priceSilver: integer('price_silver').notNull().default(0),
+    priceCopper: integer('price_copper').notNull().default(0),
     /** Schadensformel (Waffen), z.B. "4W10", "5W10+5". Leer bei Ruestung. */
     damage: text('damage').notNull().default(''),
     /** Schutzwert (Ruestung/Schild). null bei Waffen. */
     armor: integer('armor'),
+    /** Heilwert (Verbrauchsgegenstand). null sonst. */
+    healAmount: integer('heal_amount'),
+    /** Mana-Wert (Verbrauchsgegenstand). null sonst. */
+    manaAmount: integer('mana_amount'),
     /** Eigenschaften als Freitext, z.B. "+10 Parade / +5 Durchschlag". */
     properties: text('properties').notNull().default(''),
     /** Freie Notiz. */

@@ -200,6 +200,20 @@ const htbahData = computed<HtbahCharacterData | null>(() =>
 // Battlebuben-Hausregel aktiv? Schaltet Zwei-Waffen-Manoever, Parade-QS-
 // Hinweis und Regenerations-/Heilkunde-Quickrolls frei.
 const isBattlebuben = computed(() => htbahData.value?.battlebuben === true)
+
+// --- Shop / Einkaufen beim NPC-Haendler ---
+const shopOpen = ref(false)
+// Nach einem Kauf: Charakter neu laden, damit Inventar + Geldbeutel stimmen.
+const onShopBought = async () => {
+  if (!character.value) return
+  try {
+    const res = await $fetch<{ character: CharacterFull }>(`/api/characters/${character.value.id}`)
+    character.value = res.character
+  } catch {
+    // Reload nicht-kritisch — Server ist die Wahrheit, naechster Poll holt es nach.
+  }
+  emit('token-updated')
+}
 const dndData = computed<DnDCharacterData | null>(() =>
   isDnd.value && character.value ? (character.value.data as DnDCharacterData) : null,
 )
@@ -2326,6 +2340,16 @@ const onImageError = (tokenId: number) => {
           Manöver
         </UButton>
         <UButton
+          color="warning"
+          variant="soft"
+          icon="i-lucide-store"
+          size="sm"
+          title="Beim NPC-Händler einkaufen — Kosten werden vom Geld abgezogen, Gegenstand wandert ins Inventar"
+          @click="shopOpen = true"
+        >
+          Einkaufen
+        </UButton>
+        <UButton
           v-if="isBattlebuben"
           color="success"
           variant="soft"
@@ -2358,6 +2382,17 @@ const onImageError = (tokenId: number) => {
         </div>
         <div v-if="initError" class="text-xs text-red-700 self-center">{{ initError }}</div>
       </div>
+
+      <!-- Shop-Modal: Einkaufen beim NPC-Haendler (kauft fuer den aktiven
+           Charakter; Geld wird abgezogen, Gegenstand wandert ins Inventar). -->
+      <ShopModal
+        v-if="character"
+        v-model:open="shopOpen"
+        :group-id="groupId"
+        :buyer-character-id="character.id"
+        @bought="onShopBought"
+      />
+
       <!-- Parade-Auswahl-Popup: Handeln-Begabung + alle Skills, die nach Parade
            riechen. Direkt unter den Quick-Actions, damit der Klickfluss kurz ist. -->
       <div

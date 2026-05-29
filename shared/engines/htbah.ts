@@ -160,7 +160,83 @@ export interface HtbahCharacterData {
    * (siehe HtbahRuleset + die ruleset-abhaengigen Helfer weiter unten).
    */
   battlebuben?: boolean
+  /**
+   * Optionaler NPC-Haendler. Wenn `merchant.active`, bietet dieser Charakter
+   * einen Shop an, aus dem Spieler Gegenstaende kaufen koennen (Geld wird vom
+   * Geldbeutel abgezogen, der Gegenstand wandert ins passende Inventar-Feld).
+   * Wird vom SL im Charakterbogen gepflegt.
+   */
+  merchant?: HtbahMerchant
   notes: string
+}
+
+/** Ein Angebot im Shop eines NPC-Haendlers. */
+export interface HtbahShopItem {
+  id: string
+  /** Bestimmt, in welches Inventar-Feld der Kauf wandert. */
+  kind: 'weapon' | 'armor' | 'consumable'
+  name: string
+  /** Stueckpreis. */
+  priceGold: number
+  priceSilver: number
+  priceCopper: number
+  /** Vorrat. null = unbegrenzt. */
+  stock: number | null
+  /* Waffe */
+  damageFormula?: string
+  weaponCategory?: HtbahWeaponCategory
+  /* Ruestung */
+  armorValue?: number
+  armorSlot?: HtbahArmorSlot
+  armorTag?: HtbahArmorTag
+  /* Verbrauchsgegenstand */
+  healAmount?: number
+  manaAmount?: number
+  /* Gemeinsam */
+  properties?: string
+  note?: string
+}
+
+/** Haendler-Konfiguration eines Charakters. */
+export interface HtbahMerchant {
+  active: boolean
+  shopName?: string
+  items: HtbahShopItem[]
+}
+
+/* Geld-Umrechnung: 100 Kupfer = 1 Silber, 100 Silber = 1 Gold. */
+export function htbahPurseToCopper(p: HtbahPurse): number {
+  const g = Math.max(0, Math.floor(p.gold || 0))
+  const s = Math.max(0, Math.floor(p.silver || 0))
+  const c = Math.max(0, Math.floor(p.copper || 0))
+  return g * 10000 + s * 100 + c
+}
+
+export function htbahCopperToPurse(totalCopper: number): HtbahPurse {
+  let rest = Math.max(0, Math.floor(totalCopper || 0))
+  const gold = Math.floor(rest / 10000)
+  rest %= 10000
+  const silver = Math.floor(rest / 100)
+  const copper = rest % 100
+  return { copper, silver, gold }
+}
+
+/** Stueckpreis eines Shop-Items in Kupfer. */
+export function htbahShopItemCopper(item: HtbahShopItem): number {
+  return htbahPurseToCopper({
+    gold: item.priceGold || 0,
+    silver: item.priceSilver || 0,
+    copper: item.priceCopper || 0,
+  })
+}
+
+/** Kompakte Preis-Anzeige, z.B. "1 G 50 S". Leerer String bei 0. */
+export function htbahFormatPrice(gold: number, silver: number, copper: number): string {
+  const parts: string[] = []
+  if (gold) parts.push(`${gold} G`)
+  if (silver) parts.push(`${silver} S`)
+  if (copper) parts.push(`${copper} K`)
+  return parts.length ? parts.join(' ') : '0 K'
 }
 
 /**

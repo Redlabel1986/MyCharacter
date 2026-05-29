@@ -553,6 +553,16 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_group_armory_items_tab ON group_armory_items(tab_id)
   `)
+  // Erweiterung der Waffenkammer zur allgemeinen Gegenstandsbibliothek:
+  // Item-Typ, Verbrauchs-Felder und strukturierter Preis (fuer NPC-Shops).
+  await db.execute(sql`ALTER TABLE group_armory_items ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'weapon'`)
+  await db.execute(sql`ALTER TABLE group_armory_items ADD COLUMN IF NOT EXISTS price_gold INTEGER NOT NULL DEFAULT 0`)
+  await db.execute(sql`ALTER TABLE group_armory_items ADD COLUMN IF NOT EXISTS price_silver INTEGER NOT NULL DEFAULT 0`)
+  await db.execute(sql`ALTER TABLE group_armory_items ADD COLUMN IF NOT EXISTS price_copper INTEGER NOT NULL DEFAULT 0`)
+  await db.execute(sql`ALTER TABLE group_armory_items ADD COLUMN IF NOT EXISTS heal_amount INTEGER`)
+  await db.execute(sql`ALTER TABLE group_armory_items ADD COLUMN IF NOT EXISTS mana_amount INTEGER`)
+  // Bestehende Eintraege mit Schutzwert sind Ruestung.
+  await db.execute(sql`UPDATE group_armory_items SET kind = 'armor' WHERE armor IS NOT NULL AND kind = 'weapon'`)
 
   await db.execute(sql`
     UPDATE users SET role = 'admin' WHERE email = ${ADMIN_EMAIL} AND role <> 'admin'

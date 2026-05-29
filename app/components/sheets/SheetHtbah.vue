@@ -68,6 +68,8 @@ import {
   type HtbahSpellEntry,
   type HtbahSpellLevel,
   type HtbahUsableItem,
+  type HtbahMerchant,
+  type HtbahShopItem,
 } from '~~/shared/engines/htbah'
 import { htbahSpellsByLehre } from '~~/shared/engines/htbah-spell-catalog'
 import type { GameSystem } from '~~/shared/systems'
@@ -225,6 +227,13 @@ const sheet = computed<HtbahCharacterData>(() => {
       : undefined,
     combatModule: incoming.combatModule === 'universal' ? 'universal' : 'standard',
     battlebuben: incoming.battlebuben === true,
+    merchant: incoming.merchant && typeof incoming.merchant === 'object'
+      ? {
+          active: !!incoming.merchant.active,
+          shopName: typeof incoming.merchant.shopName === 'string' ? incoming.merchant.shopName : '',
+          items: Array.isArray(incoming.merchant.items) ? incoming.merchant.items : [],
+        }
+      : undefined,
     notes: incoming.notes ?? '',
   }
 })
@@ -638,6 +647,66 @@ const setCombatModule = (v: 'standard' | 'universal') => {
 const setBattlebuben = (v: boolean) => {
   const n = clone()
   n.battlebuben = v
+  update(n)
+}
+
+// --- NPC-Haendler / Shop ---
+const ensureMerchant = (n: HtbahCharacterData): HtbahMerchant => {
+  if (!n.merchant) n.merchant = { active: true, shopName: '', items: [] }
+  if (!Array.isArray(n.merchant.items)) n.merchant.items = []
+  return n.merchant
+}
+const toggleMerchant = () => {
+  const n = clone()
+  const m = ensureMerchant(n)
+  m.active = !m.active
+  update(n)
+}
+const setShopName = (v: string) => {
+  const n = clone()
+  ensureMerchant(n).shopName = v
+  update(n)
+}
+const addShopItem = (kind: HtbahShopItem['kind']) => {
+  const n = clone()
+  const m = ensureMerchant(n)
+  m.items.push({
+    id: crypto.randomUUID(),
+    kind,
+    name: '',
+    priceGold: 0,
+    priceSilver: 0,
+    priceCopper: 0,
+    stock: null,
+    damageFormula: kind === 'weapon' ? '' : undefined,
+    armorValue: kind === 'armor' ? 0 : undefined,
+    healAmount: kind === 'consumable' ? 0 : undefined,
+    manaAmount: undefined,
+    properties: '',
+    note: '',
+  })
+  update(n)
+}
+const setShopStock = (id: string, raw: unknown) => {
+  const s = raw === '' || raw === null || raw === undefined ? null : Number(raw)
+  updateShopItem(id, { stock: s !== null && Number.isFinite(s) ? Math.max(0, Math.floor(s)) : null })
+}
+const setShopItemKind = (id: string, kind: string) => {
+  const k: HtbahShopItem['kind'] =
+    kind === 'armor' ? 'armor' : kind === 'consumable' ? 'consumable' : 'weapon'
+  updateShopItem(id, { kind: k })
+}
+const updateShopItem = (id: string, patch: Partial<HtbahShopItem>) => {
+  const n = clone()
+  const m = ensureMerchant(n)
+  const it = m.items.find((x) => x.id === id)
+  if (it) Object.assign(it, patch)
+  update(n)
+}
+const removeShopItem = (id: string) => {
+  const n = clone()
+  const m = ensureMerchant(n)
+  m.items = m.items.filter((x) => x.id !== id)
   update(n)
 }
 
@@ -2733,6 +2802,124 @@ const postRollToGroup = async () => {
           @update:model-value="setText('magic', String($event))"
         />
       </UFormField>
+    </SheetSection>
+
+    <SheetSection title="NPC-Händler / Shop" class="lg:col-span-3">
+      <div class="flex items-center gap-2 mb-2">
+        <UButton
+          size="xs"
+          :variant="sheet.merchant?.active ? 'solid' : 'outline'"
+          :color="sheet.merchant?.active ? 'primary' : 'neutral'"
+          :icon="sheet.merchant?.active ? 'i-lucide-store' : 'i-lucide-store'"
+          @click="toggleMerchant"
+        >
+          {{ sheet.merchant?.active ? 'Händler aktiv' : 'Als Händler aktivieren' }}
+        </UButton>
+        <span class="text-[11px] text-ink-300">
+          Aktiviert einen Shop, aus dem Spieler kaufen können (Geld wird automatisch verrechnet).
+        </span>
+      </div>
+
+      <div v-if="sheet.merchant?.active" class="space-y-3">
+        <UFormField label="Shop-Name (optional)">
+          <UInput
+            :model-value="sheet.merchant.shopName"
+            placeholder="z.B. „Krämerladen zum schiefen Helm“"
+            :maxlength="80"
+            @update:model-value="setShopName(String($event))"
+          />
+        </UFormField>
+
+        <div class="space-y-2">
+          <div
+            v-for="it in sheet.merchant.items"
+            :key="it.id"
+            class="p-2 rounded border border-parchment-700/30 bg-white/50 space-y-2"
+          >
+            <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+              <UFormField label="Typ" class="sm:col-span-3">
+                <USelect
+                  :model-value="it.kind"
+                  :items="[
+                    { label: 'Waffe', value: 'weapon' },
+                    { label: 'Rüstung', value: 'armor' },
+                    { label: 'Verbrauch', value: 'consumable' },
+                  ]"
+                  value-key="value"
+                  size="sm"
+                  @update:model-value="setShopItemKind(it.id, String($event))"
+                />
+              </UFormField>
+              <UFormField label="Name" class="sm:col-span-6">
+                <UInput
+                  :model-value="it.name"
+                  :maxlength="120"
+                  size="sm"
+                  @update:model-value="updateShopItem(it.id, { name: String($event) })"
+                />
+              </UFormField>
+              <UFormField label="Vorrat (leer = ∞)" class="sm:col-span-3">
+                <UInput
+                  :model-value="it.stock ?? undefined"
+                  type="number"
+                  min="0"
+                  placeholder="∞"
+                  size="sm"
+                  @update:model-value="setShopStock(it.id, $event)"
+                />
+              </UFormField>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2">
+              <UFormField label="Preis Gold">
+                <UInput :model-value="it.priceGold" type="number" min="0" size="sm" @update:model-value="updateShopItem(it.id, { priceGold: Number($event) || 0 })" />
+              </UFormField>
+              <UFormField label="Silber">
+                <UInput :model-value="it.priceSilver" type="number" min="0" size="sm" @update:model-value="updateShopItem(it.id, { priceSilver: Number($event) || 0 })" />
+              </UFormField>
+              <UFormField label="Kupfer">
+                <UInput :model-value="it.priceCopper" type="number" min="0" size="sm" @update:model-value="updateShopItem(it.id, { priceCopper: Number($event) || 0 })" />
+              </UFormField>
+            </div>
+
+            <!-- Typ-spezifische Felder -->
+            <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+              <UFormField v-if="it.kind === 'weapon'" label="Schadensformel" class="sm:col-span-6">
+                <UInput :model-value="it.damageFormula" placeholder="z.B. 4W10" size="sm" @update:model-value="updateShopItem(it.id, { damageFormula: String($event) })" />
+              </UFormField>
+              <UFormField v-if="it.kind === 'armor'" label="Schutzwert (RW)" class="sm:col-span-6">
+                <UInput :model-value="it.armorValue" type="number" min="0" size="sm" @update:model-value="updateShopItem(it.id, { armorValue: Number($event) || 0 })" />
+              </UFormField>
+              <UFormField v-if="it.kind === 'consumable'" label="Heilung (HP)" class="sm:col-span-3">
+                <UInput :model-value="it.healAmount" type="number" min="0" size="sm" @update:model-value="updateShopItem(it.id, { healAmount: Number($event) || 0 })" />
+              </UFormField>
+              <UFormField v-if="it.kind === 'consumable'" label="Mana" class="sm:col-span-3">
+                <UInput :model-value="it.manaAmount" type="number" min="0" size="sm" @update:model-value="updateShopItem(it.id, { manaAmount: Number($event) || 0 })" />
+              </UFormField>
+              <UFormField label="Eigenschaften / Notiz" class="sm:col-span-6">
+                <UInput :model-value="it.properties" placeholder="z.B. +10 Parade" :maxlength="200" size="sm" @update:model-value="updateShopItem(it.id, { properties: String($event) })" />
+              </UFormField>
+              <div class="sm:col-span-12 flex justify-end">
+                <UButton size="xs" color="error" variant="ghost" icon="i-lucide-trash-2" @click="removeShopItem(it.id)">
+                  Entfernen
+                </UButton>
+              </div>
+            </div>
+          </div>
+          <p v-if="!sheet.merchant.items.length" class="text-[11px] text-ink-300 italic">
+            Noch keine Waren. Füge unten welche hinzu.
+          </p>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          <UButton size="xs" variant="outline" icon="i-lucide-plus" @click="addShopItem('weapon')">Waffe</UButton>
+          <UButton size="xs" variant="outline" icon="i-lucide-plus" @click="addShopItem('armor')">Rüstung</UButton>
+          <UButton size="xs" variant="outline" icon="i-lucide-plus" @click="addShopItem('consumable')">Verbrauchsgegenstand</UButton>
+        </div>
+        <p class="text-[11px] text-ink-300/80">
+          Tipp: In der Waffenkammer (Gruppen-Menü) pflegst du eine Gegenstandsbibliothek als Vorlage.
+        </p>
+      </div>
     </SheetSection>
 
     <SheetSection title="Anmerkungen">
