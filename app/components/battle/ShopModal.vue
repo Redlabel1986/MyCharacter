@@ -13,6 +13,13 @@ import {
   type HtbahShopItem,
   type HtbahPurse,
 } from '~~/shared/engines/htbah'
+import { chebyshevTiles } from '~~/shared/distance'
+
+/** Token-Position auf der Karte (fuer die Umkreis-Pruefung). */
+interface ShopToken { characterId: number | null; x: number; y: number }
+
+/** Max. Abstand Kaeufer↔Haendler in Feldern (muss zum Server passen). */
+const MAX_TILES = 2
 
 const props = defineProps<{
   open: boolean
@@ -24,6 +31,12 @@ const props = defineProps<{
   buyerCharacterId?: number
   /** Optional: direkt diesen Haendler oeffnen. */
   merchantCharacterId?: number
+  /** Aktuelle Karte — gekauft wird nur im Umkreis des Haendlers auf dieser Karte. */
+  mapId: number
+  /** Pixel pro Rasterzelle (fuer die Feld-Distanz). */
+  gridSize: number
+  /** Tokens auf der Karte (Positionen) — fuer Umkreis + Praesenz-Pruefung. */
+  tokens: ShopToken[]
 }>()
 const emit = defineEmits<{
   (e: 'update:open', v: boolean): void
@@ -49,10 +62,31 @@ const error = ref<string | null>(null)
 const buyingId = ref<string | null>(null)
 const flash = ref<string | null>(null)
 
+// Erstes Token eines Charakters auf dieser Karte (oder null).
+const tokenForChar = (charId: number | undefined | null): ShopToken | null => {
+  if (!charId) return null
+  return props.tokens.find((t) => t.characterId === charId) ?? null
+}
+const charOnMap = (charId: number | undefined | null) => !!tokenForChar(charId)
+
+// Nur Haendler/Kaeufer, die tatsaechlich ein Token auf der Karte haben.
+const onMapMerchants = computed(() => merchants.value.filter((m) => charOnMap(m.characterId)))
+const onMapBuyers = computed(() => buyers.value.filter((b) => charOnMap(b.id)))
+
 const activeMerchant = computed(
   () => merchants.value.find((m) => m.characterId === activeMerchantId.value) ?? null,
 )
 const haveCopper = computed(() => htbahPurseToCopper(purse.value))
+
+// Feld-Abstand zwischen gewaehltem Kaeufer und gewaehltem Haendler. null, wenn
+// eines der Tokens nicht auf der Karte ist.
+const tilesToMerchant = computed<number | null>(() => {
+  const bt = tokenForChar(buyerId.value)
+  const mt = tokenForChar(activeMerchantId.value)
+  if (!bt || !mt) return null
+  return chebyshevTiles({ x: bt.x, y: bt.y }, { x: mt.x, y: mt.y }, props.gridSize)
+})
+const inRange = computed(() => tilesToMerchant.value !== null && tilesToMerchant.value <= MAX_TILES)
 
 const kindLabel = (k: HtbahShopItem['kind']) =>
   k === 'weapon' ? 'Waffe' : k === 'armor' ? 'Rüstung' : 'Verbrauch'
@@ -85,18 +119,19 @@ const load = async () => {
     merchants.value = mRes.merchants ?? []
     // Nur HtbaH-Charaktere koennen kaufen (Geldbeutel + Inventar).
     buyers.value = (cRes.characters ?? []).filter((c) => c.system === 'htbah')
-    // Kaeufer vorwaehlen: uebergebener Charakter, sonst der erste eigene.
+    // Kaeufer vorwaehlen: uebergebener Charakter, sonst der erste EIGENE der
+    // auf der Karte steht (nur die koennen kaufen).
     if (props.buyerCharacterId && buyers.value.some((b) => b.id === props.buyerCharacterId)) {
       buyerId.value = props.buyerCharacterId
-    } else if (buyers.value.length) {
-      buyerId.value = buyers.value[0]!.id
+    } else {
+      buyerId.value = onMapBuyers.value[0]?.id
     }
     await loadBuyerPurse()
-    // Vorauswahl Haendler: gewuenschter, sonst der erste.
+    // Vorauswahl Haendler: gewuenschter, sonst der erste auf der Karte.
     if (props.merchantCharacterId && merchants.value.some((m) => m.characterId === props.merchantCharacterId)) {
       activeMerchantId.value = props.merchantCharacterId
-    } else if (!activeMerchantId.value && merchants.value.length) {
-      activeMerchantId.value = merchants.value[0]!.characterId
+    } else if (!activeMerchantId.value) {
+      activeMerchantId.value = onMapMerchants.value[0]?.characterId
     }
   } catch (e: unknown) {
     error.value = (e as { statusMessage?: string }).statusMessage ?? 'Händler konnten nicht geladen werden.'
@@ -117,7 +152,7 @@ const canAfford = (it: HtbahShopItem) => haveCopper.value >= htbahShopItemCopper
 const soldOut = (it: HtbahShopItem) => it.stock !== null && it.stock !== undefined && it.stock <= 0
 
 const buy = async (it: HtbahShopItem) => {
-  if (!activeMerchant.value || !buyerId.value) return
+  if (!activeMerchant.value || !buyerId.value || !inRange.value) return
   buyingId.value = it.id
   error.value = null
   flash.value = null
@@ -131,6 +166,7 @@ const buy = async (it: HtbahShopItem) => {
           merchantCharacterId: activeMerchant.value.characterId,
           itemId: it.id,
           quantity: 1,
+          mapId: props.mapId,
         },
       },
     )
@@ -157,31 +193,31 @@ const buy = async (it: HtbahShopItem) => {
     <template #body>
       <div class="space-y-3">
         <div v-if="loading" class="text-sm text-ink-400">Lade …</div>
-        <div v-else-if="!merchants.length" class="text-sm text-ink-300 italic">
-          Aktuell sind keine Händler in dieser Gruppe verfügbar.
+        <div v-else-if="!onMapMerchants.length" class="text-sm text-ink-300 italic">
+          Kein Händler auf dieser Karte. Ein Händler-NPC muss als Token platziert sein.
         </div>
         <template v-else>
-          <!-- Haendler-Auswahl -->
-          <UFormField v-if="merchants.length > 1" label="Händler">
+          <!-- Haendler-Auswahl (nur Haendler mit Token auf der Karte) -->
+          <UFormField v-if="onMapMerchants.length > 1" label="Händler">
             <USelect
               v-model="activeMerchantId"
-              :items="merchants.map((m) => ({ label: m.shopName, value: m.characterId }))"
+              :items="onMapMerchants.map((m) => ({ label: m.shopName, value: m.characterId }))"
               value-key="value"
               size="sm"
             />
           </UFormField>
 
-          <!-- Kaeufer-Auswahl (wenn der User mehrere Charaktere hat) -->
-          <UFormField v-if="buyers.length > 1" label="Käufer (dein Charakter)">
+          <!-- Kaeufer-Auswahl: nur eigene Charaktere mit Token auf der Karte -->
+          <UFormField v-if="onMapBuyers.length > 1" label="Käufer (dein Charakter)">
             <USelect
               v-model="buyerId"
-              :items="buyers.map((b) => ({ label: b.name, value: b.id }))"
+              :items="onMapBuyers.map((b) => ({ label: b.name, value: b.id }))"
               value-key="value"
               size="sm"
             />
           </UFormField>
-          <p v-else-if="!buyers.length" class="text-xs text-amber-700">
-            Du hast keinen HtbaH-Charakter zum Einkaufen.
+          <p v-else-if="!onMapBuyers.length" class="text-xs text-amber-700">
+            Nur Charaktere, die als Token auf dieser Karte stehen, können einkaufen.
           </p>
 
           <!-- Geldbeutel -->
@@ -190,6 +226,20 @@ const buy = async (it: HtbahShopItem) => {
             <span class="font-semibold">Dein Geld:</span>
             <span class="font-mono">{{ htbahFormatPrice(purse.gold, purse.silver, purse.copper) }}</span>
           </div>
+
+          <!-- Umkreis-Hinweis: Kauf nur im Umkreis von MAX_TILES Feldern -->
+          <p
+            v-if="onMapBuyers.length && !inRange"
+            class="text-xs text-amber-700 flex items-center gap-1"
+          >
+            <UIcon name="i-lucide-footprints" class="size-3.5" />
+            <template v-if="tilesToMerchant === null">
+              Geh mit deinem Token zum Händler — Kauf nur im Umkreis von {{ MAX_TILES }} Feldern.
+            </template>
+            <template v-else>
+              {{ tilesToMerchant }} Felder entfernt — geh näher heran (max. {{ MAX_TILES }} Felder zum Händler).
+            </template>
+          </p>
 
           <p v-if="flash" class="text-xs text-emerald-700">✓ {{ flash }}</p>
           <p v-if="error" class="text-xs text-red-700">{{ error }}</p>
@@ -223,13 +273,13 @@ const buy = async (it: HtbahShopItem) => {
                 <div class="font-mono text-sm">{{ htbahFormatPrice(it.priceGold, it.priceSilver, it.priceCopper) }}</div>
                 <UButton
                   size="xs"
-                  :color="canAfford(it) && !soldOut(it) ? 'primary' : 'neutral'"
+                  :color="inRange && canAfford(it) && !soldOut(it) ? 'primary' : 'neutral'"
                   icon="i-lucide-shopping-cart"
                   :loading="buyingId === it.id"
-                  :disabled="!buyerId || !canAfford(it) || soldOut(it) || buyingId !== null || !it.name"
+                  :disabled="!buyerId || !inRange || !canAfford(it) || soldOut(it) || buyingId !== null || !it.name"
                   @click="buy(it)"
                 >
-                  {{ soldOut(it) ? 'Ausverkauft' : canAfford(it) ? 'Kaufen' : 'Zu teuer' }}
+                  {{ soldOut(it) ? 'Ausverkauft' : !inRange ? 'Zu weit weg' : canAfford(it) ? 'Kaufen' : 'Zu teuer' }}
                 </UButton>
               </div>
             </div>

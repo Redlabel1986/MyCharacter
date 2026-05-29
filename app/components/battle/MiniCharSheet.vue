@@ -2395,6 +2395,9 @@ const onImageError = (tokenId: number) => {
         v-model:open="shopOpen"
         :group-id="groupId"
         :buyer-character-id="character.id"
+        :map-id="mapId"
+        :grid-size="gridSize ?? 0"
+        :tokens="damageTargetTokens"
         @bought="onShopBought"
       />
 

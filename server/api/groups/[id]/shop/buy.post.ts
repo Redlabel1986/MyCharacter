@@ -18,8 +18,9 @@ import { randomUUID } from 'node:crypto'
 import { and, eq, inArray } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
-import { characters, groupMembers, messages } from '~~/server/database/schema'
+import { battleMaps, battleTokens, characters, groupMembers, messages } from '~~/server/database/schema'
 import { pushGroupChanged } from '~~/server/utils/pusher'
+import { chebyshevTiles } from '~~/shared/distance'
 import {
   htbahPurseToCopper,
   htbahCopperToPurse,
@@ -39,7 +40,12 @@ const bodySchema = z.object({
   merchantCharacterId: z.number().int().positive(),
   itemId: z.string().min(1),
   quantity: z.number().int().min(1).max(99).default(1),
+  /** Karte, auf der gekauft wird — fuer die Umkreis-Pruefung (max. 2 Felder). */
+  mapId: z.number().int().positive(),
 })
+
+/** Maximaler Abstand (Felder) zwischen Kaeufer- und Haendler-Token. */
+const SHOP_MAX_TILES = 2
 
 export default defineEventHandler(async (event) => {
   const { user } = await requireUserSession(event)
@@ -88,6 +94,40 @@ export default defineEventHandler(async (event) => {
   }
   const item = (merchantCfg.items || []).find((it) => it.id === body.itemId) as HtbahShopItem | undefined
   if (!item) throw createError({ statusCode: 404, statusMessage: 'Gegenstand ist nicht im Angebot.' })
+
+  // Umkreis-Pruefung: Kaeufer- und Haendler-Token muessen auf derselben Karte
+  // sein und der Kaeufer hoechstens SHOP_MAX_TILES Felder vom Haendler entfernt.
+  const [map] = await db
+    .select({ id: battleMaps.id, gridSize: battleMaps.gridSize })
+    .from(battleMaps)
+    .where(and(eq(battleMaps.id, body.mapId), eq(battleMaps.groupId, groupId)))
+    .limit(1)
+  if (!map) throw createError({ statusCode: 404, statusMessage: 'Karte nicht gefunden.' })
+  const mapToks = await db
+    .select({ characterId: battleTokens.characterId, x: battleTokens.x, y: battleTokens.y })
+    .from(battleTokens)
+    .where(eq(battleTokens.mapId, body.mapId))
+  const buyerToks = mapToks.filter((t) => t.characterId === buyer.id)
+  const merchantToks = mapToks.filter((t) => t.characterId === merchant.id)
+  if (!buyerToks.length) {
+    throw createError({ statusCode: 400, statusMessage: 'Dein Charakter ist nicht auf der Karte.' })
+  }
+  if (!merchantToks.length) {
+    throw createError({ statusCode: 400, statusMessage: 'Der Händler ist nicht auf dieser Karte.' })
+  }
+  let minTiles = Number.POSITIVE_INFINITY
+  for (const b of buyerToks) {
+    for (const m of merchantToks) {
+      const d = chebyshevTiles({ x: b.x, y: b.y }, { x: m.x, y: m.y }, map.gridSize)
+      if (d < minTiles) minTiles = d
+    }
+  }
+  if (minTiles > SHOP_MAX_TILES) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: `Du bist zu weit vom Händler entfernt (${minTiles} Felder, max. ${SHOP_MAX_TILES}).`,
+    })
+  }
 
   const qty = body.quantity
   // Vorrat pruefen.

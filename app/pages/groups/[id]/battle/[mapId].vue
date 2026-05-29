@@ -4982,6 +4982,10 @@ const endResize = () => {
       v-model:open="shopOpen"
       :group-id="groupId"
       :merchant-character-id="shopMerchantId"
+      :map-id="mapId"
+      :grid-size="map?.gridSize ?? 0"
+      :tokens="tokens"
+      @bought="loadMerchants"
     />
 
     <!-- Objekt-Picker: Bibliothek aus Built-ins + Custom-Templates des DM -->
