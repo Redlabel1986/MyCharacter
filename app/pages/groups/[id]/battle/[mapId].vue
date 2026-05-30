@@ -65,6 +65,9 @@ interface BattleMap {
   fogBlackout: Array<[number, number]>
   walls: Wall[]
   timeOfDay: TimeOfDay
+  /** DM-Spawn-Punkt fuer neue Charakter-Tokens (Pixel am Originalbild). */
+  spawnX: number | null
+  spawnY: number | null
 }
 interface Token {
   id: number
@@ -1167,9 +1170,15 @@ const addToken = async () => {
   addingToken.value = true
   addTokenError.value = null
   try {
-    // Initiale Token-Position auf den Mittelpunkt der naechstgelegenen Zelle
-    // snappen, damit auch neu erzeugte Tokens schon zentriert sitzen.
-    const initial = snap(imgW.value / 2, imgH.value / 2)
+    // Charakter-Tokens erscheinen am DM-Spawn-Punkt, sofern gesetzt. Sonst
+    // (und fuer NPCs) faellt die Position auf die Kartenmitte zurueck und wird
+    // auf den Mittelpunkt der naechstgelegenen Zelle gesnappt.
+    const hasSpawn =
+      !!map.value && map.value.spawnX !== null && map.value.spawnY !== null
+    const useSpawn = addTokenSource.value === 'character' && hasSpawn
+    const initial = useSpawn
+      ? { x: map.value!.spawnX as number, y: map.value!.spawnY as number }
+      : snap(imgW.value / 2, imgH.value / 2)
     const body: Record<string, unknown> = {
       x: Math.round(initial.x),
       y: Math.round(initial.y),
@@ -2181,7 +2190,46 @@ type ToolMode =
   | 'fog-unblackout'
   | 'wall-draw'
   | 'wall-erase'
+  | 'spawn-set'
 const toolMode = ref<ToolMode>('select')
+
+// --- Spawn-Punkt (DM legt fest, wo neue Charakter-Tokens erscheinen) ---
+const spawnSaving = ref(false)
+const setSpawnPoint = async (px: number, py: number) => {
+  if (!map.value) return
+  const s = snap(px, py)
+  const next = { x: Math.round(s.x), y: Math.round(s.y) }
+  // Optimistisch — Marker sofort versetzen, Server folgt nach.
+  map.value = { ...map.value, spawnX: next.x, spawnY: next.y }
+  spawnSaving.value = true
+  try {
+    await $fetch(`/api/groups/${groupId}/maps/${mapId}`, {
+      method: 'PUT',
+      body: { spawnX: next.x, spawnY: next.y },
+    })
+    await fetchMap()
+  } catch (e) {
+    console.error('Spawn-Punkt speichern fehlgeschlagen', e)
+  } finally {
+    spawnSaving.value = false
+  }
+}
+const clearSpawnPoint = async () => {
+  if (!map.value) return
+  map.value = { ...map.value, spawnX: null, spawnY: null }
+  spawnSaving.value = true
+  try {
+    await $fetch(`/api/groups/${groupId}/maps/${mapId}`, {
+      method: 'PUT',
+      body: { spawnX: null, spawnY: null },
+    })
+    await fetchMap()
+  } catch (e) {
+    console.error('Spawn-Punkt loeschen fehlgeschlagen', e)
+  } finally {
+    spawnSaving.value = false
+  }
+}
 
 // --- Sichtblocker-Mauern (DM zeichnet, blocken die dynamische Beleuchtung) ---
 const walls = computed<Wall[]>(() => map.value?.walls ?? [])
@@ -2863,6 +2911,15 @@ const onStagePointerDown = (e: PointerEvent) => {
     const localY = (e.clientY - rect.top) / zoom.value
     eraseWallAt(localX, localY)
     e.preventDefault()
+  } else if (toolMode.value === 'spawn-set') {
+    if (!stageEl.value || !isDm.value) return
+    const rect = stageEl.value.getBoundingClientRect()
+    const localX = (e.clientX - rect.left) / zoom.value
+    const localY = (e.clientY - rect.top) / zoom.value
+    setSpawnPoint(localX, localY)
+    // Nach dem Setzen zurueck in den Auswahl-Modus — ein Klick = ein Punkt.
+    toolMode.value = 'select'
+    e.preventDefault()
   } else if (toolMode.value === 'select') {
     startPan(e)
   }
@@ -2941,6 +2998,7 @@ const stageCursor = computed(() => {
   if (toolMode.value === 'fog-blackout' || toolMode.value === 'fog-unblackout') return 'crosshair'
   if (toolMode.value === 'wall-draw') return 'crosshair'
   if (toolMode.value === 'wall-erase') return 'cell'
+  if (toolMode.value === 'spawn-set') return 'crosshair'
   return pan.active ? 'grabbing' : 'grab'
 })
 
@@ -3246,6 +3304,30 @@ const endResize = () => {
           >
             Radieren
           </UButton>
+          <template v-if="isDm">
+            <UButton
+              size="xs"
+              :variant="toolMode === 'spawn-set' ? 'solid' : 'outline'"
+              :color="toolMode === 'spawn-set' ? 'primary' : 'neutral'"
+              icon="i-lucide-map-pin"
+              title="Spawn-Punkt setzen: klicke auf die Karte. Neue Charakter-Tokens erscheinen dort."
+              :loading="spawnSaving"
+              @click="toolMode = toolMode === 'spawn-set' ? 'select' : 'spawn-set'"
+            >
+              Spawn
+            </UButton>
+            <UButton
+              v-if="map && (map.spawnX !== null || map.spawnY !== null)"
+              size="xs"
+              variant="ghost"
+              color="error"
+              icon="i-lucide-map-pin-off"
+              title="Spawn-Punkt entfernen (Tokens spawnen dann wieder in der Mitte)"
+              @click="clearSpawnPoint"
+            >
+              Spawn weg
+            </UButton>
+          </template>
           <template v-if="isDm && map?.fogEnabled">
             <UButton
               size="xs"
@@ -4025,6 +4107,24 @@ const endResize = () => {
                 stroke="#fbbf24" stroke-width="2.5" stroke-linecap="round"
                 stroke-dasharray="6 4"
               />
+            </svg>
+
+            <!-- Spawn-Punkt-Marker: nur der DM sieht, wo neue Charakter-Tokens
+                 erscheinen. Pulsierender Ring + Pin. -->
+            <svg
+              v-if="isDm && imgW && imgH && map && map.spawnX !== null && map.spawnY !== null"
+              class="absolute inset-0 pointer-events-none"
+              :width="imgW"
+              :height="imgH"
+              :viewBox="`0 0 ${imgW} ${imgH}`"
+            >
+              <g :transform="`translate(${map.spawnX}, ${map.spawnY})`">
+                <circle r="16" fill="rgba(16,185,129,0.18)" stroke="#10b981" stroke-width="2">
+                  <animate attributeName="r" values="14;20;14" dur="1.8s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="0.9;0.3;0.9" dur="1.8s" repeatCount="indefinite" />
+                </circle>
+                <circle r="4" fill="#10b981" stroke="#fff" stroke-width="1.5" />
+              </g>
             </svg>
           </div>
           </div>

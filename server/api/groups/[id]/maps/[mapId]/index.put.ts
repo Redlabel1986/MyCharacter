@@ -33,6 +33,9 @@ const bodySchema = z.object({
   // Cap auf 5000 Mauer-Segmente — mehr braucht keine sinnvolle Karte.
   walls: z.array(wallSchema).max(5000).optional(),
   timeOfDay: z.enum(TIMES_OF_DAY).optional(),
+  // Spawn-Punkt fuer neue Charakter-Tokens. null setzt ihn zurueck.
+  spawnX: z.number().int().min(-50000).max(50000).nullable().optional(),
+  spawnY: z.number().int().min(-50000).max(50000).nullable().optional(),
 })
 
 export default defineEventHandler(async (event) => {

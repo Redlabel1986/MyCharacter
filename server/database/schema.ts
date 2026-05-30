@@ -361,6 +361,13 @@ export const battleMaps = pgTable(
      * NPC-Faehigkeiten Boni oder Malus ergeben.
      */
     timeOfDay: text('time_of_day').notNull().$type<TimeOfDay>().default('noon'),
+    /**
+     * Vom DM festgelegter Spawn-Punkt (Pixel-Koordinaten am Originalbild), an
+     * dem neue Charakter-Tokens platziert werden. null = kein Punkt gesetzt,
+     * dann spawnen Tokens wie bisher in der Kartenmitte.
+     */
+    spawnX: integer('spawn_x'),
+    spawnY: integer('spawn_y'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
