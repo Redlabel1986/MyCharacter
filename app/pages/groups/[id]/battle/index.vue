@@ -2,6 +2,10 @@
 /**
  * Karten-Uebersicht einer Gruppe. Spieler sehen nur freigegebene Karten,
  * Gruppen-Owner (DM) sieht alle und kann hochladen.
+ *
+ * Der DM kann Karten in Ordnern (Tabs) gruppieren — z.B. alle Karten eines
+ * Dorfes in einem Reiter — fuer mehr Uebersicht. Ein geloeschter Ordner
+ * loescht NIE die Karten darin; sie fallen auf „Ohne Ordner" zurueck.
  */
 import { subscribeGroup, type RealtimeSubscription } from '~/composables/usePusher'
 
@@ -10,6 +14,7 @@ definePageMeta({ middleware: ['auth'] })
 interface BattleMap {
   id: number
   groupId: number
+  tabId: number | null
   name: string
   imageUrl: string
   gridType: 'square' | 'hex'
@@ -19,21 +24,30 @@ interface BattleMap {
   createdAt: string
   updatedAt: string
 }
+interface MapTab {
+  id: number
+  groupId: number
+  name: string
+  orderIdx: number
+}
 
 const route = useRoute()
 const groupId = Number(route.params.id)
 
 const { data, refresh, pending } = await useFetch<{
   maps: BattleMap[]
+  tabs: MapTab[]
   isDm: boolean
   activeMapId: number | null
 }>(
   `/api/groups/${groupId}/maps`,
-  { default: () => ({ maps: [], isDm: false, activeMapId: null }) },
+  { default: () => ({ maps: [], tabs: [], isDm: false, activeMapId: null }) },
 )
 
 const isDm = computed(() => !!data.value?.isDm)
 const activeMapId = computed(() => data.value?.activeMapId ?? null)
+const tabs = computed<MapTab[]>(() => data.value?.tabs ?? [])
+const allMaps = computed<BattleMap[]>(() => data.value?.maps ?? [])
 
 // Auto-Redirect fuer Spieler: wenn der DM eine Karte aktiv gesetzt hat,
 // direkt dorthin springen — kein „Liste"-Schritt fuer den Spieler. Mit
@@ -82,13 +96,111 @@ const clearActive = async () => {
   await refresh()
 }
 
-// Upload-Form
+// --- Ordner (Tabs) ---
+// Ausgewaehlter Reiter: 'all' = alle Karten, 'none' = nur ordnerlose,
+// number = ein konkreter Ordner.
+type TabFilter = 'all' | 'none' | number
+const selectedTab = ref<TabFilter>('all')
+
+const countAll = computed(() => allMaps.value.length)
+const countNone = computed(() => allMaps.value.filter((m) => m.tabId === null).length)
+const countFor = (tabId: number) => allMaps.value.filter((m) => m.tabId === tabId).length
+
+const filteredMaps = computed<BattleMap[]>(() => {
+  if (selectedTab.value === 'all') return allMaps.value
+  if (selectedTab.value === 'none') return allMaps.value.filter((m) => m.tabId === null)
+  return allMaps.value.filter((m) => m.tabId === selectedTab.value)
+})
+
+// Items fuer die Ordner-Auswahl (Upload + Verschieben). 0 = „Ohne Ordner".
+const tabSelectItems = computed(() => [
+  { label: '— Ohne Ordner —', value: 0 },
+  ...tabs.value.map((t) => ({ label: t.name, value: t.id })),
+])
+
+const newTabName = ref('')
+const creatingTab = ref(false)
+const tabError = ref<string | null>(null)
+const createTab = async () => {
+  const name = newTabName.value.trim()
+  if (!name) return
+  creatingTab.value = true
+  tabError.value = null
+  try {
+    const res = await $fetch<{ tab: MapTab }>(`/api/groups/${groupId}/map-tabs`, {
+      method: 'POST',
+      body: { name },
+    })
+    newTabName.value = ''
+    await refresh()
+    if (res.tab) selectedTab.value = res.tab.id
+  } catch (e: unknown) {
+    tabError.value = (e as { statusMessage?: string }).statusMessage ?? 'Ordner konnte nicht angelegt werden.'
+  } finally {
+    creatingTab.value = false
+  }
+}
+
+const renameTab = async (tab: MapTab) => {
+  const name = window.prompt('Ordner umbenennen:', tab.name)?.trim()
+  if (!name || name === tab.name) return
+  await $fetch(`/api/groups/${groupId}/map-tabs/${tab.id}`, {
+    method: 'PUT',
+    body: { name },
+  })
+  await refresh()
+}
+
+const deleteTab = async (tab: MapTab) => {
+  const n = countFor(tab.id)
+  const msg =
+    n > 0
+      ? `Ordner „${tab.name}" löschen?\n\nDie ${n} Karte(n) darin werden NICHT gelöscht — sie landen wieder unter „Ohne Ordner".`
+      : `Ordner „${tab.name}" löschen?`
+  if (!window.confirm(msg)) return
+  await $fetch(`/api/groups/${groupId}/map-tabs/${tab.id}`, { method: 'DELETE' })
+  if (selectedTab.value === tab.id) selectedTab.value = 'all'
+  await refresh()
+}
+
+// Aktionen fuer den aktuell gewaehlten Ordner (nur wenn ein echter Tab aktiv ist).
+const renameSelectedTab = () => {
+  const t = tabs.value.find((x) => x.id === selectedTab.value)
+  if (t) renameTab(t)
+}
+const deleteSelectedTab = () => {
+  const t = tabs.value.find((x) => x.id === selectedTab.value)
+  if (t) deleteTab(t)
+}
+const onMoveMap = (map: BattleMap, value: number | string) => {
+  moveMap(map, Number(value))
+}
+
+// Karte in einen anderen Ordner verschieben (0 = herausloesen).
+const moveMap = async (map: BattleMap, value: number) => {
+  const tabId = value > 0 ? value : null
+  if (tabId === map.tabId) return
+  await $fetch(`/api/groups/${groupId}/maps/${map.id}`, {
+    method: 'PUT',
+    body: { tabId },
+  })
+  await refresh()
+}
+
+// --- Upload-Form ---
 const uploadFile = ref<File | null>(null)
 const uploadName = ref('')
 const uploadGridType = ref<'square' | 'hex'>('square')
 const uploadGridSize = ref(50)
+const uploadTabId = ref(0)
 const uploading = ref(false)
 const uploadError = ref<string | null>(null)
+
+// Beim Wechsel in einen konkreten Ordner den Upload-Default mitziehen, damit
+// neu hochgeladene Karten gleich im richtigen Ordner landen.
+watch(selectedTab, (t) => {
+  uploadTabId.value = typeof t === 'number' ? t : 0
+})
 
 const onFile = (e: Event) => {
   const t = e.target as HTMLInputElement
@@ -108,6 +220,7 @@ const upload = async () => {
     fd.append('name', uploadName.value || 'Neue Karte')
     fd.append('gridType', uploadGridType.value)
     fd.append('gridSize', String(uploadGridSize.value))
+    if (uploadTabId.value > 0) fd.append('tabId', String(uploadTabId.value))
     await $fetch(`/api/groups/${groupId}/maps`, { method: 'POST', body: fd })
     uploadFile.value = null
     uploadName.value = ''
@@ -148,7 +261,7 @@ const removeMap = async (map: BattleMap) => {
     <section v-if="isDm" class="parchment-card p-5 space-y-3">
       <h2 class="font-serif text-xl">Neue Karte hochladen</h2>
       <div class="grid sm:grid-cols-12 gap-3 items-end">
-        <UFormField label="Bilddatei" class="sm:col-span-6">
+        <UFormField label="Bilddatei" class="sm:col-span-5">
           <input
             type="file"
             accept="image/jpeg,image/png,image/webp"
@@ -159,7 +272,10 @@ const removeMap = async (map: BattleMap) => {
         <UFormField label="Name" class="sm:col-span-3">
           <UInput v-model="uploadName" placeholder="z.B. Verwunschene Mühle" />
         </UFormField>
-        <UFormField label="Raster" class="sm:col-span-2">
+        <UFormField label="Ordner" class="sm:col-span-2">
+          <USelect v-model="uploadTabId" :items="tabSelectItems" value-key="value" />
+        </UFormField>
+        <UFormField label="Raster" class="sm:col-span-1">
           <USelect
             v-model="uploadGridType"
             :items="[
@@ -169,7 +285,7 @@ const removeMap = async (map: BattleMap) => {
             value-key="value"
           />
         </UFormField>
-        <UFormField label="Größe (px)" class="sm:col-span-1">
+        <UFormField label="px" class="sm:col-span-1">
           <UInput v-model.number="uploadGridSize" type="number" min="10" max="500" />
         </UFormField>
       </div>
@@ -187,10 +303,92 @@ const removeMap = async (map: BattleMap) => {
       </div>
     </section>
 
+    <!-- Ordner-Verwaltung (Tabs) -->
+    <section v-if="isDm" class="parchment-card p-3 space-y-3">
+      <div class="flex items-center gap-2 flex-wrap">
+        <UButton
+          size="xs"
+          :variant="selectedTab === 'all' ? 'solid' : 'outline'"
+          :color="selectedTab === 'all' ? 'primary' : 'neutral'"
+          icon="i-lucide-layers"
+          @click="selectedTab = 'all'"
+        >
+          Alle <span class="opacity-60">({{ countAll }})</span>
+        </UButton>
+        <UButton
+          v-for="t in tabs"
+          :key="t.id"
+          size="xs"
+          :variant="selectedTab === t.id ? 'solid' : 'outline'"
+          :color="selectedTab === t.id ? 'primary' : 'neutral'"
+          icon="i-lucide-folder"
+          @click="selectedTab = t.id"
+        >
+          {{ t.name }} <span class="opacity-60">({{ countFor(t.id) }})</span>
+        </UButton>
+        <UButton
+          v-if="countNone > 0"
+          size="xs"
+          :variant="selectedTab === 'none' ? 'solid' : 'outline'"
+          :color="selectedTab === 'none' ? 'primary' : 'neutral'"
+          icon="i-lucide-folder-minus"
+          @click="selectedTab = 'none'"
+        >
+          Ohne Ordner <span class="opacity-60">({{ countNone }})</span>
+        </UButton>
+
+        <!-- Aktionen fuer den gerade gewaehlten Ordner -->
+        <template v-if="typeof selectedTab === 'number'">
+          <span class="text-ink-300">·</span>
+          <UButton
+            size="xs"
+            variant="ghost"
+            icon="i-lucide-pencil"
+            title="Ordner umbenennen"
+            @click="renameSelectedTab"
+          >
+            Umbenennen
+          </UButton>
+          <UButton
+            size="xs"
+            variant="ghost"
+            color="error"
+            icon="i-lucide-folder-x"
+            title="Ordner löschen (Karten bleiben erhalten)"
+            @click="deleteSelectedTab"
+          >
+            Löschen
+          </UButton>
+        </template>
+      </div>
+
+      <!-- Neuen Ordner anlegen -->
+      <div class="flex items-center gap-2">
+        <UInput
+          v-model="newTabName"
+          size="sm"
+          placeholder="Neuer Ordner, z.B. „Dorf Eichwald“"
+          class="max-w-xs"
+          @keyup.enter="createTab"
+        />
+        <UButton
+          size="sm"
+          variant="outline"
+          icon="i-lucide-folder-plus"
+          :loading="creatingTab"
+          :disabled="!newTabName.trim()"
+          @click="createTab"
+        >
+          Ordner anlegen
+        </UButton>
+        <span v-if="tabError" class="text-sm text-red-700">{{ tabError }}</span>
+      </div>
+    </section>
+
     <!-- Karten-Liste -->
     <section class="space-y-3">
-      <div v-if="pending && !data?.maps.length" class="text-ink-400 italic">Lade Karten …</div>
-      <div v-else-if="!data?.maps.length" class="parchment-card p-6 text-center text-ink-400">
+      <div v-if="pending && !allMaps.length" class="text-ink-400 italic">Lade Karten …</div>
+      <div v-else-if="!allMaps.length" class="parchment-card p-6 text-center text-ink-400">
         <template v-if="isDm">
           Noch keine Karten vorhanden — lade oben eine hoch und markiere sie als aktiv, damit deine Spieler sie sehen.
         </template>
@@ -198,9 +396,15 @@ const removeMap = async (map: BattleMap) => {
           Der Spielleiter hat aktuell keine Karte aktiv geschaltet. Sobald er eine startet, landest du automatisch hier drauf.
         </template>
       </div>
+      <div
+        v-else-if="isDm && !filteredMaps.length"
+        class="parchment-card p-6 text-center text-ink-400"
+      >
+        In diesem Ordner liegen noch keine Karten.
+      </div>
       <ul v-else class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <li
-          v-for="m in data.maps"
+          v-for="m in filteredMaps"
           :key="m.id"
           class="parchment-card p-3 flex flex-col"
           :class="m.id === activeMapId ? 'ring-2 ring-[var(--color-accent)]' : ''"
@@ -237,7 +441,7 @@ const removeMap = async (map: BattleMap) => {
           <div class="text-xs text-ink-300 mt-1">
             {{ m.gridType === 'hex' ? 'Hex' : 'Quadrat' }} · {{ m.gridSize }} px
           </div>
-          <div v-if="isDm" class="flex flex-wrap gap-2 mt-3">
+          <div v-if="isDm" class="flex flex-wrap gap-2 mt-3 items-center">
             <UButton
               v-if="m.id !== activeMapId"
               size="xs"
@@ -262,6 +466,16 @@ const removeMap = async (map: BattleMap) => {
             <UButton size="xs" variant="ghost" color="error" icon="i-lucide-trash-2" @click="removeMap(m)">
               Löschen
             </UButton>
+            <!-- Ordner-Zuweisung der Karte -->
+            <USelect
+              :model-value="m.tabId ?? 0"
+              :items="tabSelectItems"
+              value-key="value"
+              size="xs"
+              class="ml-auto min-w-[8rem]"
+              title="Ordner dieser Karte"
+              @update:model-value="(v) => onMoveMap(m, v)"
+            />
           </div>
         </li>
       </ul>

@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { and, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupOwner } from '~~/server/utils/group-access'
-import { battleMaps, GRID_TYPES, TIMES_OF_DAY } from '~~/server/database/schema'
+import { battleMapTabs, battleMaps, GRID_TYPES, TIMES_OF_DAY } from '~~/server/database/schema'
 import { pushMapChanged } from '~~/server/utils/pusher'
 
 const cellTupleSchema = z.tuple([z.number().int(), z.number().int()])
@@ -36,6 +36,8 @@ const bodySchema = z.object({
   // Spawn-Punkt fuer neue Charakter-Tokens. null setzt ihn zurueck.
   spawnX: z.number().int().min(-50000).max(50000).nullable().optional(),
   spawnY: z.number().int().min(-50000).max(50000).nullable().optional(),
+  // Ordner/Tab der Karte. null = aus dem Ordner herausloesen („Ohne Ordner").
+  tabId: z.number().int().positive().nullable().optional(),
 })
 
 export default defineEventHandler(async (event) => {
@@ -49,6 +51,20 @@ export default defineEventHandler(async (event) => {
   await requireGroupOwner(db, groupId, user.id)
 
   const body = await readValidatedBody(event, bodySchema.parse)
+
+  // Wenn die Karte einem Ordner zugewiesen wird, muss dieser zur selben Gruppe
+  // gehoeren — sonst ablehnen (kein Cross-Group-Verschieben).
+  if (body.tabId != null) {
+    const [tab] = await db
+      .select({ id: battleMapTabs.id })
+      .from(battleMapTabs)
+      .where(and(eq(battleMapTabs.id, body.tabId), eq(battleMapTabs.groupId, groupId)))
+      .limit(1)
+    if (!tab) {
+      throw createError({ statusCode: 400, statusMessage: 'Ordner nicht gefunden.' })
+    }
+  }
+
   const [updated] = await db
     .update(battleMaps)
     .set({ ...body, updatedAt: new Date() })

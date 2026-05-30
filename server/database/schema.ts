@@ -296,6 +296,31 @@ export type GridType = (typeof GRID_TYPES)[number]
 export const TIMES_OF_DAY = ['morning', 'noon', 'evening', 'night'] as const
 export type TimeOfDay = (typeof TIMES_OF_DAY)[number]
 
+/**
+ * Karten-Ordner (Tabs): der DM gruppiert Battle-Maps (z.B. ganze Doerfer) in
+ * Reitern fuer mehr Uebersicht. Pro Gruppe beliebig viele Tabs. Beim Loeschen
+ * eines Tabs fallen die Karten auf „Ohne Ordner" zurueck (tab_id SET NULL) —
+ * sie werden NICHT mitgeloescht.
+ */
+export const battleMapTabs = pgTable(
+  'battle_map_tabs',
+  {
+    id: serial('id').primaryKey(),
+    groupId: integer('group_id')
+      .notNull()
+      .references(() => groups.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    orderIdx: integer('order_idx').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    groupIdx: index('idx_battle_map_tabs_group').on(table.groupId),
+  }),
+)
+export type BattleMapTab = typeof battleMapTabs.$inferSelect
+export type NewBattleMapTab = typeof battleMapTabs.$inferInsert
+
 export const battleMaps = pgTable(
   'battle_maps',
   {
@@ -304,6 +329,12 @@ export const battleMaps = pgTable(
       .notNull()
       .references(() => groups.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
+    /**
+     * Optionaler Ordner/Tab, in dem die Karte einsortiert ist. NULL = „Ohne
+     * Ordner". ON DELETE SET NULL: ein geloeschter Ordner loescht NIE die
+     * Karten darin.
+     */
+    tabId: integer('tab_id'),
     /** Vercel-Blob-URL des hochgeladenen Hintergrundbilds (privat). */
     imageUrl: text('image_url').notNull(),
     gridType: text('grid_type').notNull().$type<GridType>().default('square'),

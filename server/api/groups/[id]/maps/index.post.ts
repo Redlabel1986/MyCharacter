@@ -4,9 +4,15 @@
  */
 import { put } from '@vercel/blob'
 import { randomBytes } from 'node:crypto'
+import { and, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupOwner } from '~~/server/utils/group-access'
-import { battleMaps, GRID_TYPES, type GridType } from '~~/server/database/schema'
+import {
+  battleMapTabs,
+  battleMaps,
+  GRID_TYPES,
+  type GridType,
+} from '~~/server/database/schema'
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 const MAX_BYTES = 15 * 1024 * 1024 // 15 MB pro Karte
@@ -50,6 +56,9 @@ export default defineEventHandler(async (event) => {
     : 'square'
   const gridSize = pickInt(form, 'gridSize', 50)
   const gridColor = pickStr(form, 'gridColor') || 'rgba(0,0,0,0.35)'
+  // Optionaler Ordner/Tab. Leer oder 0 = „Ohne Ordner" (tab_id bleibt NULL).
+  const tabIdRaw = Number.parseInt(pickStr(form, 'tabId'), 10)
+  const tabId = Number.isFinite(tabIdRaw) && tabIdRaw > 0 ? tabIdRaw : null
 
   if (!file?.data || !file.filename) {
     throw createError({ statusCode: 400, statusMessage: 'Keine Bilddatei übermittelt.' })
@@ -73,10 +82,22 @@ export default defineEventHandler(async (event) => {
     allowOverwrite: true,
   })
 
+  // Tab muss zur selben Gruppe gehoeren — sonst ignorieren (NULL).
+  let safeTabId: number | null = null
+  if (tabId !== null) {
+    const [tab] = await db
+      .select({ id: battleMapTabs.id })
+      .from(battleMapTabs)
+      .where(and(eq(battleMapTabs.id, tabId), eq(battleMapTabs.groupId, groupId)))
+      .limit(1)
+    safeTabId = tab ? tab.id : null
+  }
+
   const [inserted] = await db
     .insert(battleMaps)
     .values({
       groupId,
+      tabId: safeTabId,
       name,
       imageUrl: blob.url,
       gridType,

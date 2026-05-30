@@ -2,10 +2,16 @@
  * GET /api/groups/:id/maps — Liste aller Battle-Maps in dieser Gruppe.
  * Spieler sehen nur visible=true; Gruppen-Owner (DM) sieht alles.
  */
-import { and, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
-import { battleMaps, groups, type BattleMap } from '~~/server/database/schema'
+import {
+  battleMapTabs,
+  battleMaps,
+  groups,
+  type BattleMap,
+  type BattleMapTab,
+} from '~~/server/database/schema'
 
 export default defineEventHandler(async (event) => {
   const { user } = await requireUserSession(event)
@@ -39,5 +45,16 @@ export default defineEventHandler(async (event) => {
       .limit(1)
   }
 
-  return { maps: list, isDm, activeMapId: activeId }
+  // Karten-Ordner (Tabs) nur dem DM mitgeben — Spieler werden ohnehin auf die
+  // aktive Karte umgeleitet und brauchen die Ordner-Struktur nicht.
+  let tabs: BattleMapTab[] = []
+  if (isDm) {
+    tabs = await db
+      .select()
+      .from(battleMapTabs)
+      .where(eq(battleMapTabs.groupId, groupId))
+      .orderBy(asc(battleMapTabs.orderIdx), asc(battleMapTabs.id))
+  }
+
+  return { maps: list, tabs, isDm, activeMapId: activeId }
 })

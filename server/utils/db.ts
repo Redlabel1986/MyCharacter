@@ -310,6 +310,39 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     ALTER TABLE battle_maps ADD COLUMN IF NOT EXISTS time_of_day TEXT NOT NULL DEFAULT 'noon'
   `)
+  // Battle-Map: DM-Spawn-Punkt fuer neue Charakter-Tokens (Pixel am Original-
+  // bild). NULL = kein Punkt gesetzt -> Tokens spawnen in der Kartenmitte.
+  await db.execute(sql`
+    ALTER TABLE battle_maps ADD COLUMN IF NOT EXISTS spawn_x INTEGER
+  `)
+  await db.execute(sql`
+    ALTER TABLE battle_maps ADD COLUMN IF NOT EXISTS spawn_y INTEGER
+  `)
+  // Karten-Ordner (Tabs): der DM gruppiert Karten (z.B. ganze Doerfer) in
+  // Reitern fuer mehr Uebersicht. Eigene Tabelle wie group_rule_tabs.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS battle_map_tabs (
+      id SERIAL PRIMARY KEY,
+      group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      order_idx INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_battle_map_tabs_group ON battle_map_tabs(group_id)
+  `)
+  // Zuordnung Karte -> Ordner. ON DELETE SET NULL: ein geloeschter Ordner
+  // loescht NIE die Karten darin — sie fallen nur zurueck auf „Ohne Ordner".
+  await db.execute(sql`
+    ALTER TABLE battle_maps
+    ADD COLUMN IF NOT EXISTS tab_id INTEGER
+      REFERENCES battle_map_tabs(id) ON DELETE SET NULL
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_battle_maps_tab ON battle_maps(tab_id)
+  `)
   // Battle-Token: Sichtweite + per-Token-HP-Sichtbarkeit fuer Spieler.
   await db.execute(sql`
     ALTER TABLE battle_tokens ADD COLUMN IF NOT EXISTS vision_radius INTEGER NOT NULL DEFAULT 1
