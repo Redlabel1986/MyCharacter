@@ -6,14 +6,20 @@
  * Beim Wechsel auf eine neue Map werden Charakter-gebundene Tokens (also die
  * Spieler-Charaktere) von der bisher aktiven Map automatisch auf die neue Map
  * uebernommen, sofern dort noch kein Token fuer denselben Charakter existiert.
- * NPC- und Karten-spezifische Tokens bleiben map-lokal.
+ * NPC- und Karten-spezifische Tokens bleiben map-lokal. Haendler-Charaktere
+ * (HtbaH mit data.merchant.active) werden NICHT mitgenommen — sie gehoeren zu
+ * ihrer Karte (Laden) und reisen nicht mit der Gruppe mit.
+ *
+ * Hat die Zielkarte einen Spawn-Punkt gesetzt, erscheinen die mitgenommenen
+ * Tokens dort (leicht gestaffelt). Sonst landen sie gestaffelt oben links.
  */
 import { z } from 'zod'
 import { and, eq, isNotNull, inArray } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupOwner } from '~~/server/utils/group-access'
-import { battleMaps, battleTokens, groups } from '~~/server/database/schema'
+import { battleMaps, battleTokens, characters, groups } from '~~/server/database/schema'
 import { pushGroupChanged, pushMapChanged } from '~~/server/utils/pusher'
+import type { HtbahCharacterData } from '~~/shared/engines/htbah'
 
 const bodySchema = z.object({
   mapId: z.number().int().positive().nullable(),
@@ -70,6 +76,22 @@ export default defineEventHandler(async (event) => {
       const charIds = sourceTokens
         .map((t) => t.characterId)
         .filter((x): x is number => x !== null)
+
+      // Haendler-Charaktere ermitteln (HtbaH mit data.merchant.active) — diese
+      // werden NICHT mitgenommen, sie bleiben an ihrer Laden-Karte.
+      const merchantCharIds = new Set<number>()
+      if (charIds.length) {
+        const sourceChars = await db
+          .select({ id: characters.id, system: characters.system, data: characters.data })
+          .from(characters)
+          .where(inArray(characters.id, charIds))
+        for (const c of sourceChars) {
+          if (c.system !== 'htbah') continue
+          const merchant = (c.data as HtbahCharacterData)?.merchant
+          if (merchant?.active) merchantCharIds.add(c.id)
+        }
+      }
+
       const existing = charIds.length
         ? await db
             .select({ characterId: battleTokens.characterId })
@@ -84,18 +106,30 @@ export default defineEventHandler(async (event) => {
       const alreadyOnTarget = new Set(
         existing.map((e) => e.characterId).filter((x): x is number => x !== null),
       )
-      // Default-Position: Bildmitte ist nicht zuverlaessig bestimmbar (wir
-      // kennen die Pixelgroesse der Map nicht). Stattdessen platzieren wir die
-      // Tokens leicht gestaffelt in einem Raster nahe der oberen linken Ecke,
-      // damit Spieler ihre Tokens sofort finden.
+      // Platzierung: Hat die Zielkarte einen Spawn-Punkt, erscheinen die Tokens
+      // dort (leicht gestaffelt, damit sie nicht exakt aufeinander liegen).
+      // Sonst — Bildmitte kennen wir nicht — gestaffelt nahe der oberen linken
+      // Ecke, damit die Spieler ihre Tokens sofort finden.
       const g = newMap.gridSize || 50
+      const hasSpawn = newMap.spawnX !== null && newMap.spawnY !== null
       let placed = 0
       const inserts = sourceTokens
-        .filter((t) => t.characterId !== null && !alreadyOnTarget.has(t.characterId))
+        .filter(
+          (t) =>
+            t.characterId !== null &&
+            !alreadyOnTarget.has(t.characterId) &&
+            !merchantCharIds.has(t.characterId),
+        )
         .map((t) => {
           const col = placed % 6
           const row = Math.floor(placed / 6)
           placed += 1
+          const x = hasSpawn
+            ? Math.round(newMap!.spawnX! + col * g)
+            : Math.round(g * (1 + col * 1.2))
+          const y = hasSpawn
+            ? Math.round(newMap!.spawnY! + row * g)
+            : Math.round(g * (1 + row * 1.2))
           return {
             mapId: newMap!.id,
             ownerUserId: t.ownerUserId,
@@ -103,8 +137,8 @@ export default defineEventHandler(async (event) => {
             name: t.name,
             imageUrl: t.imageUrl,
             images: t.images ?? [],
-            x: Math.round(g * (1 + col * 1.2)),
-            y: Math.round(g * (1 + row * 1.2)),
+            x,
+            y,
             sizeMultiplier: t.sizeMultiplier,
             hidden: false,
             statusText: '',
