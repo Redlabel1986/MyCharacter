@@ -323,6 +323,11 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     ALTER TABLE battle_maps ADD COLUMN IF NOT EXISTS spawn_y INTEGER
   `)
+  // Battle-Map: vom DM markierte Start-Zellen ([col,row]-Tupel). Neue Tokens
+  // spawnen auf einer freien Zelle dieses Bereichs statt in der Kartenmitte.
+  await db.execute(sql`
+    ALTER TABLE battle_maps ADD COLUMN IF NOT EXISTS start_cells JSONB NOT NULL DEFAULT '[]'::jsonb
+  `)
   // Karten-Ordner (Tabs): der DM gruppiert Karten (z.B. ganze Doerfer) in
   // Reitern fuer mehr Uebersicht. Eigene Tabelle wie group_rule_tabs.
   await db.execute(sql`
