@@ -377,6 +377,15 @@ export const battleMaps = pgTable(
       .$type<Array<[number, number]>>()
       .default([]),
     /**
+     * Vom DM markierte Start-Zellen ([col, row]-Tupel). Neue Charakter-/Token
+     * spawnen auf einer freien Zelle dieses Bereichs statt in der Kartenmitte.
+     * Leer = altes Verhalten (Spawn in der Mitte).
+     */
+    startCells: jsonb('start_cells')
+      .notNull()
+      .$type<Array<[number, number]>>()
+      .default([]),
+    /**
      * Vom DM gezeichnete Sichtblocker-Mauern. Jede Mauer ist ein Linien-
      * segment in Pixel-Koordinaten am Originalbild. Tokens koennen durch
      * sie hindurch nicht sehen — fuer dynamische Beleuchtung mit

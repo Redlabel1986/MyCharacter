@@ -72,6 +72,7 @@ interface BattleMap {
   fogRevealed: Array<[number, number]>
   fogExplored: Array<[number, number]>
   fogBlackout: Array<[number, number]>
+  startCells: Array<[number, number]>
   walls: Wall[]
   timeOfDay: TimeOfDay
   /** DM-Spawn-Punkt fuer neue Charakter-Tokens (Pixel am Originalbild). */
@@ -1264,15 +1265,19 @@ const addToken = async () => {
   addingToken.value = true
   addTokenError.value = null
   try {
-    // Charakter-Tokens erscheinen am DM-Spawn-Punkt, sofern gesetzt. Sonst
-    // (und fuer NPCs) faellt die Position auf die Kartenmitte zurueck und wird
-    // auf den Mittelpunkt der naechstgelegenen Zelle gesnappt.
-    const hasSpawn =
-      !!map.value && map.value.spawnX !== null && map.value.spawnY !== null
+    // Spawn-Position bestimmen (Prioritaet):
+    //  1. Hat der DM einen Startbereich gemalt, landet der Token auf einer
+    //     freien Start-Zelle (gilt fuer alle Token).
+    //  2. Sonst erscheinen Charakter-Tokens am DM-Spawn-Punkt, sofern gesetzt.
+    //  3. Sonst (und fuer NPCs) faellt die Position auf die Kartenmitte zurueck.
+    const hasStartArea = (map.value.startCells?.length ?? 0) > 0
+    const hasSpawn = map.value.spawnX !== null && map.value.spawnY !== null
     const useSpawn = addTokenSource.value === 'character' && hasSpawn
-    const initial = useSpawn
-      ? { x: map.value!.spawnX as number, y: map.value!.spawnY as number }
-      : snap(imgW.value / 2, imgH.value / 2)
+    const initial = hasStartArea
+      ? pickSpawnPosition()
+      : useSpawn
+        ? { x: map.value.spawnX as number, y: map.value.spawnY as number }
+        : snap(imgW.value / 2, imgH.value / 2)
     const body: Record<string, unknown> = {
       x: Math.round(initial.x),
       y: Math.round(initial.y),
@@ -2460,6 +2465,8 @@ type ToolMode =
   | 'fog-conceal'
   | 'fog-blackout'
   | 'fog-unblackout'
+  | 'start-area'
+  | 'start-area-erase'
   | 'wall-draw'
   | 'wall-erase'
   | 'spawn-set'
@@ -2943,6 +2950,94 @@ const clearAllBlackout = async () => {
   await flushBlackoutBrush()
 }
 
+// --- Startbereich (vom DM gemalte Spawn-Zellen) ---
+// Neue Tokens spawnen auf einer freien Zelle dieses Bereichs statt in der
+// Kartenmitte. Lokaler Pinsel-Buffer wie bei Fog/Blackout: waehrend des
+// Zeichnens nur lokal, bei pointerup an den Server gepusht.
+const startAreaDirty = ref(false)
+const startAreaLocal = ref<Array<[number, number]>>([])
+watch(
+  () => map.value?.startCells,
+  (v: Array<[number, number]> | undefined) => {
+    if (!startAreaDirty.value) {
+      startAreaLocal.value = (v ?? []).map((p: [number, number]) => [...p] as [number, number])
+    }
+  },
+  { immediate: true },
+)
+const effectiveStartCells = computed<Array<[number, number]>>(() =>
+  startAreaDirty.value ? startAreaLocal.value : map.value?.startCells ?? [],
+)
+const paintStartCell = (cell: [number, number], add: boolean) => {
+  if (!map.value || !isDm.value) return
+  const key = `${cell[0]}|${cell[1]}`
+  const idx = startAreaLocal.value.findIndex(([c, r]) => `${c}|${r}` === key)
+  if (add && idx === -1) {
+    startAreaLocal.value = [...startAreaLocal.value, cell]
+    startAreaDirty.value = true
+  } else if (!add && idx !== -1) {
+    const next = startAreaLocal.value.slice()
+    next.splice(idx, 1)
+    startAreaLocal.value = next
+    startAreaDirty.value = true
+  }
+}
+const startAreaBrushActive = ref(false)
+const startAreaPaintMode = ref<'add' | 'remove'>('add')
+const flushStartArea = async () => {
+  if (!startAreaDirty.value || !map.value) return
+  const payload = startAreaLocal.value
+  startAreaDirty.value = false
+  try {
+    await $fetch(`/api/groups/${groupId}/maps/${mapId}`, {
+      method: 'PUT',
+      body: { startCells: payload },
+    })
+    await fetchMap()
+  } catch (e) {
+    startAreaDirty.value = true
+    console.error('Startbereich speichern fehlgeschlagen', e)
+  }
+}
+const startAreaCellsList = computed<Array<[number, number]>>(() => {
+  if (!map.value) return []
+  const cols = fogGridCols.value
+  const rows = fogGridRows.value
+  const out: Array<[number, number]> = []
+  for (const [c, r] of effectiveStartCells.value) {
+    if (!Number.isFinite(c) || !Number.isFinite(r)) continue
+    if (c < 0 || r < 0 || c >= cols || r >= rows) continue
+    out.push([c, r])
+  }
+  return out
+})
+const clearStartArea = async () => {
+  if (!map.value || !isDm.value) return
+  if (!confirm('Startbereich entfernen? Tokens spawnen dann wieder in der Mitte.')) return
+  startAreaLocal.value = []
+  startAreaDirty.value = true
+  await flushStartArea()
+}
+
+// Spawn-Position fuer einen neuen Token: bevorzugt eine freie (nicht von einem
+// Token belegte) Zelle des Startbereichs, sonst irgendeine Start-Zelle, sonst
+// die Kartenmitte. Ergebnis ist auf das Raster gesnappt.
+const pickSpawnPosition = (): { x: number; y: number } => {
+  const g = map.value?.gridSize || 50
+  const cells = map.value?.startCells ?? []
+  if (cells.length) {
+    const occupied = new Set<string>()
+    for (const t of tokens.value) {
+      occupied.add(`${Math.floor(t.x / g)}|${Math.floor(t.y / g)}`)
+    }
+    const free = cells.filter(([c, r]) => !occupied.has(`${c}|${r}`))
+    const pool = free.length ? free : cells
+    const [c, r] = pool[Math.floor(Math.random() * pool.length)]!
+    return snap(c * g + g / 2, r * g + g / 2)
+  }
+  return snap(imgW.value / 2, imgH.value / 2)
+}
+
 const flushFogBrush = async () => {
   if (!fogBrushDirty.value || !map.value) return
   const payload = fogLocalRevealed.value
@@ -3231,6 +3326,17 @@ const onStagePointerDown = (e: PointerEvent) => {
     if (cell) paintBlackoutCell(cell, blackoutPaintMode.value === 'blackout')
     ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
     e.preventDefault()
+  } else if (toolMode.value === 'start-area' || toolMode.value === 'start-area-erase') {
+    if (!stageEl.value || !isDm.value) return
+    startAreaBrushActive.value = true
+    startAreaPaintMode.value = toolMode.value === 'start-area' ? 'add' : 'remove'
+    const rect = stageEl.value.getBoundingClientRect()
+    const localX = (e.clientX - rect.left) / zoom.value
+    const localY = (e.clientY - rect.top) / zoom.value
+    const cell = cellAtPixel(localX, localY)
+    if (cell) paintStartCell(cell, startAreaPaintMode.value === 'add')
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    e.preventDefault()
   } else if (toolMode.value === 'wall-draw') {
     if (!stageEl.value || !isDm.value) return
     const rect = stageEl.value.getBoundingClientRect()
@@ -3291,6 +3397,15 @@ const onStagePointerMove = (e: PointerEvent) => {
     if (cell) paintBlackoutCell(cell, blackoutPaintMode.value === 'blackout')
     return
   }
+  if (startAreaBrushActive.value) {
+    if (!stageEl.value) return
+    const rect = stageEl.value.getBoundingClientRect()
+    const localX = (e.clientX - rect.left) / zoom.value
+    const localY = (e.clientY - rect.top) / zoom.value
+    const cell = cellAtPixel(localX, localY)
+    if (cell) paintStartCell(cell, startAreaPaintMode.value === 'add')
+    return
+  }
   if (wallDrawing.value && wallDraft.value) {
     if (!stageEl.value) return
     const rect = stageEl.value.getBoundingClientRect()
@@ -3320,6 +3435,11 @@ const onStagePointerUp = (e: PointerEvent) => {
     flushBlackoutBrush()
     return
   }
+  if (startAreaBrushActive.value) {
+    startAreaBrushActive.value = false
+    flushStartArea()
+    return
+  }
   if (wallDrawing.value && wallDraft.value) {
     wallDrawing.value = false
     const draft = wallDraft.value
@@ -3339,6 +3459,7 @@ const stageCursor = computed(() => {
   if (toolMode.value === 'erase') return 'cell'
   if (toolMode.value === 'fog-reveal' || toolMode.value === 'fog-conceal') return 'crosshair'
   if (toolMode.value === 'fog-blackout' || toolMode.value === 'fog-unblackout') return 'crosshair'
+  if (toolMode.value === 'start-area' || toolMode.value === 'start-area-erase') return 'crosshair'
   if (toolMode.value === 'wall-draw') return 'crosshair'
   if (toolMode.value === 'wall-erase') return 'cell'
   if (toolMode.value === 'spawn-set') return 'crosshair'
@@ -3783,6 +3904,40 @@ const endResize = () => {
               @click="clearAllWalls"
             >
               Mauern leeren ({{ walls.length }})
+            </UButton>
+          </template>
+          <template v-if="isDm">
+            <UButton
+              size="xs"
+              :variant="toolMode === 'start-area' ? 'solid' : 'outline'"
+              :color="toolMode === 'start-area' ? 'primary' : 'neutral'"
+              icon="i-lucide-flag"
+              title="Startbereich malen — neue Tokens spawnen hier statt in der Mitte"
+              @click="toolMode = 'start-area'"
+            >
+              Startbereich
+            </UButton>
+            <UButton
+              v-if="startAreaCellsList.length"
+              size="xs"
+              :variant="toolMode === 'start-area-erase' ? 'solid' : 'outline'"
+              :color="toolMode === 'start-area-erase' ? 'primary' : 'neutral'"
+              icon="i-lucide-eraser"
+              title="Startbereich-Zellen wegradieren"
+              @click="toolMode = 'start-area-erase'"
+            >
+              Start weg
+            </UButton>
+            <UButton
+              v-if="startAreaCellsList.length"
+              size="xs"
+              variant="ghost"
+              color="error"
+              icon="i-lucide-trash-2"
+              title="Startbereich komplett entfernen"
+              @click="clearStartArea"
+            >
+              Start leeren ({{ startAreaCellsList.length }})
             </UButton>
           </template>
         </div>
@@ -4458,6 +4613,28 @@ const endResize = () => {
                 height="100%"
                 :fill="nightDarkColor"
                 :mask="`url(#${nightMaskId})`"
+              />
+            </svg>
+
+            <!-- Startbereich: vom DM markierte Spawn-Zellen. Nur fuer den DM
+                 sichtbar (gruen getoent), Spieler sehen davon nichts. -->
+            <svg
+              v-if="isDm && imgW && imgH && startAreaCellsList.length"
+              class="absolute inset-0 pointer-events-none"
+              :width="imgW"
+              :height="imgH"
+              :viewBox="`0 0 ${imgW} ${imgH}`"
+            >
+              <rect
+                v-for="cell in startAreaCellsList"
+                :key="`start-${cell[0]}|${cell[1]}`"
+                :x="cell[0] * map.gridSize"
+                :y="cell[1] * map.gridSize"
+                :width="map.gridSize"
+                :height="map.gridSize"
+                fill="rgba(34,197,94,0.28)"
+                stroke="rgba(34,197,94,0.85)"
+                stroke-width="2"
               />
             </svg>
 

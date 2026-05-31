@@ -30,6 +30,7 @@ const bodySchema = z.object({
   fogRevealed: z.array(cellTupleSchema).max(50000).optional(),
   fogExplored: z.array(cellTupleSchema).max(50000).optional(),
   fogBlackout: z.array(cellTupleSchema).max(50000).optional(),
+  startCells: z.array(cellTupleSchema).max(50000).optional(),
   // Cap auf 5000 Mauer-Segmente — mehr braucht keine sinnvolle Karte.
   walls: z.array(wallSchema).max(5000).optional(),
   timeOfDay: z.enum(TIMES_OF_DAY).optional(),
