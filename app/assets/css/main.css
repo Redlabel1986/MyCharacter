@@ -538,3 +538,22 @@ html.app-mode-active .battle-stage-wrap {
     font-size: 16px; /* verhindert iOS-Zoom beim Focus */
   }
 }
+
+/* Karten-Wechsel auf der Battle-Map: weicher Cross-Fade statt hartem Schnitt.
+   Wird ueber definePageMeta({ pageTransition: { name: 'map-fade' } }) der
+   Battle-Map-Seite aktiviert (global, weil Transition-Klassen am Seiten-Root
+   haengen und scoped Styles sie nicht treffen). */
+.map-fade-enter-active,
+.map-fade-leave-active {
+  transition: opacity 0.28s ease;
+}
+.map-fade-enter-from,
+.map-fade-leave-to {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .map-fade-enter-active,
+  .map-fade-leave-active {
+    transition: none;
+  }
+}

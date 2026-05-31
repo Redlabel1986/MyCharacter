@@ -46,7 +46,15 @@ import {
   type TimeOfDay,
 } from '~~/shared/time-of-day'
 
-definePageMeta({ middleware: ['auth'], layout: 'wide' })
+definePageMeta({
+  middleware: ['auth'],
+  layout: 'wide',
+  // Jede Karte ist eine eigene Seiten-Instanz → beim Wechsel mountet die Seite
+  // neu (mapId wird im Setup erfasst) und die Fade-Transition greift.
+  key: (route) => route.fullPath,
+  // Sanfter Uebergang beim Karten-Wechsel: alte Karte faded raus, neue rein.
+  pageTransition: { name: 'map-fade', mode: 'out-in' },
+})
 
 interface BattleMap {
   id: number
@@ -212,6 +220,57 @@ const editingTokenId = ref<number | null>(null)
 const draggingObjectId = ref<number | null>(null)
 const editingObjectId = ref<number | null>(null)
 
+// --- Treffer-/Heilungs-Effekte ----------------------------------------------
+// Schaden = Token wackelt + Slice + rote Schadenszahl; Heilung = gruenes
+// Glitzern + Heilkreuz + gruene Zahl. Der Effekt wird aus der HP-Differenz beim
+// Map-Refresh abgeleitet — egal woher die Aenderung stammt (Wurf, Item, manuell).
+interface HitFx {
+  key: number
+  x: number
+  y: number
+  kind: 'damage' | 'heal'
+  amount: number
+}
+const floatingFx = ref<HitFx[]>([])
+const tokenFx = reactive<Record<number, { kind: 'damage' | 'heal'; nonce: number }>>({})
+let fxSeq = 0
+
+const spawnHpFx = (t: Token, kind: 'damage' | 'heal', amount: number) => {
+  const key = fxSeq++
+  floatingFx.value.push({ key, x: t.x, y: t.y, kind, amount })
+  setTimeout(() => {
+    floatingFx.value = floatingFx.value.filter((f) => f.key !== key)
+  }, 1200)
+  // Token-Effekt neu antriggern: erst entfernen (erzwingt Reflow), dann im
+  // naechsten Frame setzen — so startet die CSS-Animation auch bei Folge-
+  // treffern zuverlaessig neu.
+  delete tokenFx[t.id]
+  const nonce = fxSeq
+  requestAnimationFrame(() => {
+    tokenFx[t.id] = { kind, nonce }
+    setTimeout(
+      () => {
+        if (tokenFx[t.id]?.nonce === nonce) delete tokenFx[t.id]
+      },
+      kind === 'damage' ? 650 : 1150,
+    )
+  })
+}
+
+// Vergleicht alte vs. neue Token-HP und loest pro veraendertem Token den
+// passenden Effekt aus. Erster Aufruf (tokens.value leer) loest nichts aus.
+const triggerHpFx = (oldTokens: Token[], newTokens: Token[]) => {
+  for (const nt of newTokens) {
+    const ot = oldTokens.find((o) => o.id === nt.id)
+    if (!ot) continue
+    if (ot.hp === null || ot.hp === undefined || nt.hp === null || nt.hp === undefined) continue
+    const delta = nt.hp - ot.hp
+    if (delta === 0) continue
+    if (delta < 0) spawnHpFx(nt, 'damage', -delta)
+    else spawnHpFx(nt, 'heal', delta)
+  }
+}
+
 const fetchMap = async () => {
   try {
     const res = await $fetch<{
@@ -253,6 +312,9 @@ const fetchMap = async () => {
       return
     }
     activeMapId.value = res.activeMapId
+    // Treffer-/Heilungs-Effekte aus der HP-Differenz ableiten, bevor die neuen
+    // Token-Werte uebernommen werden.
+    triggerHpFx(tokens.value, res.tokens)
     // Tokens, die ich gerade bearbeite/ziehe, NICHT aus dem Server-Snapshot
     // ueberschreiben — sonst verliert der User waehrend des Tippens seine
     // Aenderungen alle 2 Sekunden.
@@ -3866,6 +3928,7 @@ const endResize = () => {
                 :class="[
                   t.hidden ? 'opacity-60 border-amber-500' : 'border-[var(--color-accent)]',
                   t.characterId !== null && !t.hidden ? 'token-player-glow' : '',
+                  tokenFx[t.id]?.kind === 'damage' ? 'fx-shake' : (tokenFx[t.id]?.kind === 'heal' ? 'fx-heal-glow' : ''),
                 ]"
                 :style="{ clipPath: tokenSliceClip(t) }"
               >
@@ -3896,6 +3959,22 @@ const endResize = () => {
                 >
                   <UIcon name="i-lucide-x" class="size-1/2 opacity-80" />
                 </div>
+              </div>
+              <!-- Treffer-/Heilungs-Effekt-Overlay. :key=nonce sorgt dafuer, dass
+                   die Animation bei jedem neuen Treffer neu startet. -->
+              <div
+                v-if="tokenFx[t.id]"
+                :key="tokenFx[t.id]?.nonce"
+                class="absolute inset-0 pointer-events-none flex items-center justify-center overflow-visible"
+              >
+                <div v-if="tokenFx[t.id]?.kind === 'damage'" class="fx-slice" />
+                <template v-else>
+                  <UIcon name="i-lucide-plus" class="fx-heal-cross" />
+                  <span class="fx-spark fx-spark-1">✦</span>
+                  <span class="fx-spark fx-spark-2">✦</span>
+                  <span class="fx-spark fx-spark-3">✦</span>
+                  <span class="fx-spark fx-spark-4">✦</span>
+                </template>
               </div>
               <div
                 v-if="t.hp !== null && t.hpMax"
@@ -3971,6 +4050,24 @@ const endResize = () => {
                 >
                   {{ word }}
                 </div>
+              </div>
+            </div>
+
+            <!-- Schwebende Schadens-/Heilungszahlen: steigen auf und faden aus.
+                 Eigene Schicht ueber den Tokens, in Karten-Pixel-Koordinaten. -->
+            <div
+              v-if="floatingFx.length"
+              class="absolute inset-0 pointer-events-none overflow-visible"
+              style="z-index: 30"
+            >
+              <div
+                v-for="f in floatingFx"
+                :key="f.key"
+                class="absolute font-serif font-extrabold tabular-nums select-none"
+                :class="f.kind === 'damage' ? 'fx-float-dmg' : 'fx-float-heal'"
+                :style="{ left: f.x + 'px', top: f.y + 'px' }"
+              >
+                {{ f.kind === 'damage' ? '−' + f.amount : '+' + f.amount }}
               </div>
             </div>
 
@@ -5462,6 +5559,119 @@ const endResize = () => {
 @media (prefers-reduced-motion: reduce) {
   .token-walk { transition: none; }
 }
+/* ===== Treffer-/Heilungs-Effekte =========================================== */
+/* Schaden: Token wackelt kurz. */
+@keyframes fx-shake {
+  0%   { transform: translate(0, 0) rotate(0); }
+  15%  { transform: translate(-2px, 1px) rotate(-5deg); }
+  30%  { transform: translate(3px, -1px) rotate(5deg); }
+  45%  { transform: translate(-3px, 1px) rotate(-4deg); }
+  60%  { transform: translate(2px, -1px) rotate(3deg); }
+  75%  { transform: translate(-1px, 1px) rotate(-1deg); }
+  100% { transform: translate(0, 0) rotate(0); }
+}
+.fx-shake { animation: fx-shake 0.6s cubic-bezier(0.36, 0.07, 0.19, 0.97); }
+
+/* Schaden: diagonaler „Slice", der ueber das Token zieht. */
+.fx-slice {
+  position: absolute;
+  top: 50%;
+  left: -20%;
+  width: 140%;
+  height: 14%;
+  transform: translateY(-50%) rotate(-35deg);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.95) 45%,
+    rgba(239, 68, 68, 0.95) 55%,
+    transparent 100%
+  );
+  filter: drop-shadow(0 0 3px rgba(255, 0, 0, 0.6));
+  border-radius: 9999px;
+  opacity: 0;
+  animation: fx-slice 0.45s ease-out;
+}
+@keyframes fx-slice {
+  0%   { opacity: 0; clip-path: inset(0 100% 0 0); }
+  25%  { opacity: 1; }
+  60%  { opacity: 1; clip-path: inset(0 0 0 0); }
+  100% { opacity: 0; clip-path: inset(0 0 0 0); }
+}
+
+/* Heilung: gruener Glow-Puls um das Token. */
+@keyframes fx-heal-glow {
+  0%   { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+  30%  { box-shadow: 0 0 16px 6px rgba(34, 197, 94, 0.75); }
+  100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+.fx-heal-glow { animation: fx-heal-glow 1.1s ease-out; }
+
+/* Heilung: gruenes Heilkreuz, das ein-/ausfadet (per Flex zentriert). */
+.fx-heal-cross {
+  width: 58%;
+  height: 58%;
+  color: #16a34a;
+  filter: drop-shadow(0 0 6px rgba(34, 197, 94, 0.9));
+  opacity: 0;
+  animation: fx-heal-cross 1.1s ease-out;
+}
+@keyframes fx-heal-cross {
+  0%   { opacity: 0; transform: scale(0.4); }
+  25%  { opacity: 1; transform: scale(1.08); }
+  70%  { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.12) translateY(-22%); }
+}
+
+/* Heilung: gruene Funken, die vom Zentrum nach aussen treiben. */
+.fx-spark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  color: #4ade80;
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0;
+  text-shadow: 0 0 4px rgba(34, 197, 94, 0.9);
+  animation: fx-spark 1.1s ease-out;
+}
+@keyframes fx-spark {
+  0%   { opacity: 0; transform: translate(0, 0) scale(0.5); }
+  30%  { opacity: 1; }
+  100% { opacity: 0; transform: var(--spark-end) scale(1.1); }
+}
+.fx-spark-1 { --spark-end: translate(-15px, -13px); }
+.fx-spark-2 { --spark-end: translate(14px, -15px); }
+.fx-spark-3 { --spark-end: translate(-13px, 13px); }
+.fx-spark-4 { --spark-end: translate(15px, 12px); }
+
+/* Schwebende Schadens-/Heilungszahl: steigt auf und fadet aus. */
+.fx-float-dmg,
+.fx-float-heal {
+  font-size: 20px;
+  animation: fx-float 1.2s ease-out forwards;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7), 0 0 6px rgba(0, 0, 0, 0.5);
+}
+.fx-float-dmg { color: #ef4444; }
+.fx-float-heal { color: #22c55e; }
+@keyframes fx-float {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+  20%  { opacity: 1; transform: translate(-50%, -120%) scale(1.15); }
+  100% { opacity: 0; transform: translate(-50%, -260%) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fx-shake,
+  .fx-slice,
+  .fx-heal-glow,
+  .fx-heal-cross,
+  .fx-spark,
+  .fx-float-dmg,
+  .fx-float-heal {
+    animation: none;
+  }
+}
+
 /* Schachbrett-Hintergrund: macht transparente Bereiche eines PNG sichtbar,
    damit man im Picker und Edit-Modal sofort sieht, dass das Bild keinen
    eigenen Hintergrund hat. */
