@@ -451,6 +451,13 @@ export const battleTokens = pgTable(
       .$type<import('~~/shared/npc').NpcAbility[]>()
       .default([]),
     /**
+     * Optionale Haendler-Konfiguration dieses Tokens (Shop-Name + Angebote).
+     * Wird beim Platzieren aus dem NPC-Bibliothekseintrag kopiert und kann pro
+     * Token vom DM angepasst werden. Wenn merchant.active, koennen Spieler aus
+     * den Angeboten kaufen. NULL = kein Haendler.
+     */
+    merchant: jsonb('merchant').$type<import('~~/shared/engines/htbah').HtbahMerchant | null>(),
+    /**
      * Sichtweite in Rasterzellen, mit der dieser Token Fog of War aufdeckt.
      * Default 1 = Spieler/NPC sieht eine Zelle um sich herum (Nacht / Fog of War).
      * 0 = kein Beitrag zur Sicht (z.B. fuer komplett blinde Token).
@@ -658,6 +665,13 @@ export const npcLibrary = pgTable(
       .notNull()
       .$type<import('~~/shared/npc').NpcAbility[]>()
       .default([]),
+    /**
+     * Optionale Haendler-Konfiguration (Shop-Name + Angebote). Wenn
+     * merchant.active, wird der NPC beim Platzieren zu einem Shop-Token —
+     * Spieler koennen aus den Angeboten kaufen (siehe shared/engines/htbah,
+     * HtbahMerchant). NULL = kein Haendler.
+     */
+    merchant: jsonb('merchant').$type<import('~~/shared/engines/htbah').HtbahMerchant | null>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

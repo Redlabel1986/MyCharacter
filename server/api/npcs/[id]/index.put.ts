@@ -11,6 +11,7 @@ import { useDb } from '~~/server/utils/db'
 import { groups, npcLibrary } from '~~/server/database/schema'
 import { loadNpcAccessibleOrThrow } from '~~/server/utils/npc-access'
 import { DSA_ABILITIES } from '~~/shared/engines/dsa5'
+import { merchantSchema, toHtbahMerchant } from '~~/server/utils/merchant-schema'
 
 const timeBonusesSchema = z
   .object({
@@ -64,6 +65,8 @@ const bodySchema = z.object({
   defaultVisionRadius: z.number().int().min(0).max(60).optional(),
   defaultMoveRange: z.number().int().min(0).max(200).optional(),
   npcAbilities: z.array(npcAbilitySchema).max(40).optional(),
+  /** Optionale Haendler-Konfiguration (Shop-Name + Angebote). null loescht sie. */
+  merchant: merchantSchema.optional(),
 })
 
 export default defineEventHandler(async (event) => {
@@ -118,6 +121,7 @@ export default defineEventHandler(async (event) => {
     patch.defaultMoveRange = body.defaultMoveRange
   }
   if (body.npcAbilities !== undefined) patch.npcAbilities = body.npcAbilities
+  if (body.merchant !== undefined) patch.merchant = toHtbahMerchant(body.merchant)
   if (body.groupId !== undefined) patch.groupId = body.groupId
 
   const [updated] = await db

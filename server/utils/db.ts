@@ -258,6 +258,11 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     ALTER TABLE battle_tokens ADD COLUMN IF NOT EXISTS npc_abilities JSONB NOT NULL DEFAULT '[]'::jsonb
   `)
+  // Haendler-Konfiguration (Shop-Name + Angebote) am NPC-Bibliothekseintrag und
+  // am platzierten Token. NULL = kein Haendler. Siehe shared/engines/htbah.
+  await db.execute(sql`
+    ALTER TABLE battle_tokens ADD COLUMN IF NOT EXISTS merchant JSONB
+  `)
 
   // Flag fuer erzwungene Passwort-Aenderung nach Admin-Reset (idempotent).
   await db.execute(sql`
@@ -454,6 +459,11 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   `)
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_npc_library_group ON npc_library(group_id)
+  `)
+  // Haendler-Konfiguration am NPC-Eintrag (idempotent). Wird beim Platzieren
+  // auf das Token kopiert.
+  await db.execute(sql`
+    ALTER TABLE npc_library ADD COLUMN IF NOT EXISTS merchant JSONB
   `)
 
   // Glossar / Bestiarium pro Gruppe — sammelt jeden Token, der je auf einer

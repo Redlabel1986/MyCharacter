@@ -2,6 +2,11 @@
  * POST /api/groups/:id/shop/buy — Spieler kauft einen Gegenstand bei einem
  * NPC-Haendler.
  *
+ * Der Haendler ist entweder
+ *   - ein HtbaH-Charakter (data.merchant.active) — `merchantCharacterId`, oder
+ *   - ein platziertes NPC-Token mit Haendler-Konfig — `merchantTokenId`.
+ * Genau eines von beiden muss gesetzt sein.
+ *
  * Atomar (eine Transaktion-artige Sequenz):
  *  1. Preis pruefen gegen den Geldbeutel des Kaeufers.
  *  2. Vorrat pruefen/reduzieren (falls begrenzt).
@@ -11,7 +16,8 @@
  *  5. Chat-Nachricht + Pusher-Event.
  *
  * Berechtigung: Kaeufer-Charakter muss dem eingeloggten User gehoeren,
- * Haendler muss ein Gruppenmitglied-Charakter mit aktivem Shop sein.
+ * Haendler muss ein Gruppenmitglied-Charakter mit aktivem Shop ODER ein
+ * Token-Haendler auf einer Karte dieser Gruppe sein.
  */
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
@@ -19,7 +25,7 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
 import { battleMaps, battleTokens, characters, groupMembers, messages } from '~~/server/database/schema'
-import { pushGroupChanged } from '~~/server/utils/pusher'
+import { pushGroupChanged, pushMapChanged } from '~~/server/utils/pusher'
 import { chebyshevTiles } from '~~/shared/distance'
 import {
   htbahPurseToCopper,
@@ -35,14 +41,21 @@ import {
   type HtbahUsableItem,
 } from '~~/shared/engines/htbah'
 
-const bodySchema = z.object({
-  buyerCharacterId: z.number().int().positive(),
-  merchantCharacterId: z.number().int().positive(),
-  itemId: z.string().min(1),
-  quantity: z.number().int().min(1).max(99).default(1),
-  /** Karte, auf der gekauft wird — fuer die Umkreis-Pruefung (max. 2 Felder). */
-  mapId: z.number().int().positive(),
-})
+const bodySchema = z
+  .object({
+    buyerCharacterId: z.number().int().positive(),
+    /** Haendler-Charakter (klassischer Bogen-Haendler). */
+    merchantCharacterId: z.number().int().positive().optional(),
+    /** Haendler-Token (NPC-Haendler auf der Karte). */
+    merchantTokenId: z.number().int().positive().optional(),
+    itemId: z.string().min(1),
+    quantity: z.number().int().min(1).max(99).default(1),
+    /** Karte, auf der gekauft wird — fuer die Umkreis-Pruefung (max. 2 Felder). */
+    mapId: z.number().int().positive(),
+  })
+  .refine((b) => !!b.merchantCharacterId !== !!b.merchantTokenId, {
+    message: 'Genau einen Haendler angeben (Charakter ODER Token).',
+  })
 
 /** Maximaler Abstand (Felder) zwischen Kaeufer- und Haendler-Token. */
 const SHOP_MAX_TILES = 2
@@ -71,53 +84,110 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Kaufen ist nur für HtbaH-Charaktere möglich.' })
   }
 
-  // Haendler laden — muss ein Charakter eines Gruppenmitglieds sein.
-  const [merchant] = await db
-    .select()
-    .from(characters)
-    .where(eq(characters.id, body.merchantCharacterId))
-    .limit(1)
-  if (!merchant) throw createError({ statusCode: 404, statusMessage: 'Händler nicht gefunden.' })
-  const membership = await db
-    .select({ userId: groupMembers.userId })
-    .from(groupMembers)
-    .where(and(eq(groupMembers.groupId, groupId), inArray(groupMembers.userId, [merchant.userId])))
-    .limit(1)
-  if (!membership.length) {
-    throw createError({ statusCode: 403, statusMessage: 'Händler gehört nicht zu dieser Gruppe.' })
-  }
-
-  const merchantData = merchant.data as HtbahCharacterData
-  const merchantCfg = merchantData.merchant as HtbahMerchant | undefined
-  if (!merchantCfg || !merchantCfg.active) {
-    throw createError({ statusCode: 400, statusMessage: 'Dieser Charakter ist kein aktiver Händler.' })
-  }
-  const item = (merchantCfg.items || []).find((it) => it.id === body.itemId) as HtbahShopItem | undefined
-  if (!item) throw createError({ statusCode: 404, statusMessage: 'Gegenstand ist nicht im Angebot.' })
-
-  // Umkreis-Pruefung: Kaeufer- und Haendler-Token muessen auf derselben Karte
-  // sein und der Kaeufer hoechstens SHOP_MAX_TILES Felder vom Haendler entfernt.
+  // Karte laden (fuer Umkreis-Pruefung + Token-Positionen).
   const [map] = await db
     .select({ id: battleMaps.id, gridSize: battleMaps.gridSize })
     .from(battleMaps)
     .where(and(eq(battleMaps.id, body.mapId), eq(battleMaps.groupId, groupId)))
     .limit(1)
   if (!map) throw createError({ statusCode: 404, statusMessage: 'Karte nicht gefunden.' })
+
   const mapToks = await db
     .select({ characterId: battleTokens.characterId, x: battleTokens.x, y: battleTokens.y })
     .from(battleTokens)
     .where(eq(battleTokens.mapId, body.mapId))
   const buyerToks = mapToks.filter((t) => t.characterId === buyer.id)
-  const merchantToks = mapToks.filter((t) => t.characterId === merchant.id)
   if (!buyerToks.length) {
     throw createError({ statusCode: 400, statusMessage: 'Dein Charakter ist nicht auf der Karte.' })
   }
-  if (!merchantToks.length) {
-    throw createError({ statusCode: 400, statusMessage: 'Der Händler ist nicht auf dieser Karte.' })
+
+  // --- Haendler aufloesen (Charakter ODER Token) ---------------------------
+  // Ergebnis: das gekaufte Item, der Anzeige-Name (Shop), die Positionen des
+  // Haendlers auf der Karte (fuer Umkreis), und ein Stock-Reduzierer.
+  let item: HtbahShopItem | undefined
+  let shopLabel: string
+  let merchantPositions: { x: number; y: number }[] = []
+  // Reduziert den Vorrat des gekauften Items am richtigen Ort (Charakter/Token).
+  let reduceStock: ((soldQty: number) => Promise<void>) | null = null
+
+  if (body.merchantTokenId) {
+    // Token-Haendler: muss auf der aktuellen Karte liegen.
+    const [mtok] = await db
+      .select()
+      .from(battleTokens)
+      .where(and(eq(battleTokens.id, body.merchantTokenId), eq(battleTokens.mapId, body.mapId)))
+      .limit(1)
+    if (!mtok) {
+      throw createError({ statusCode: 400, statusMessage: 'Der Händler ist nicht auf dieser Karte.' })
+    }
+    const cfg = (mtok.merchant ?? null) as HtbahMerchant | null
+    if (!cfg || !cfg.active) {
+      throw createError({ statusCode: 400, statusMessage: 'Dieser NPC ist kein aktiver Händler.' })
+    }
+    item = (cfg.items || []).find((it) => it.id === body.itemId)
+    shopLabel = cfg.shopName || mtok.name
+    merchantPositions = [{ x: mtok.x, y: mtok.y }]
+    reduceStock = async (soldQty) => {
+      const next: HtbahMerchant = JSON.parse(JSON.stringify(cfg))
+      const mItem = next.items.find((it) => it.id === body.itemId)
+      if (mItem && mItem.stock !== null && mItem.stock !== undefined) {
+        mItem.stock = Math.max(0, mItem.stock - soldQty)
+        await db
+          .update(battleTokens)
+          .set({ merchant: next, updatedAt: new Date() })
+          .where(eq(battleTokens.id, mtok.id))
+        await pushMapChanged(body.mapId, 'token-updated')
+      }
+    }
+  } else {
+    // Charakter-Haendler: muss ein Charakter eines Gruppenmitglieds sein.
+    const [merchant] = await db
+      .select()
+      .from(characters)
+      .where(eq(characters.id, body.merchantCharacterId!))
+      .limit(1)
+    if (!merchant) throw createError({ statusCode: 404, statusMessage: 'Händler nicht gefunden.' })
+    const membership = await db
+      .select({ userId: groupMembers.userId })
+      .from(groupMembers)
+      .where(and(eq(groupMembers.groupId, groupId), inArray(groupMembers.userId, [merchant.userId])))
+      .limit(1)
+    if (!membership.length) {
+      throw createError({ statusCode: 403, statusMessage: 'Händler gehört nicht zu dieser Gruppe.' })
+    }
+    const merchantData = merchant.data as HtbahCharacterData
+    const merchantCfg = merchantData.merchant as HtbahMerchant | undefined
+    if (!merchantCfg || !merchantCfg.active) {
+      throw createError({ statusCode: 400, statusMessage: 'Dieser Charakter ist kein aktiver Händler.' })
+    }
+    item = (merchantCfg.items || []).find((it) => it.id === body.itemId)
+    shopLabel = merchantCfg.shopName || merchant.name
+    merchantPositions = mapToks
+      .filter((t) => t.characterId === merchant.id)
+      .map((t) => ({ x: t.x, y: t.y }))
+    if (!merchantPositions.length) {
+      throw createError({ statusCode: 400, statusMessage: 'Der Händler ist nicht auf dieser Karte.' })
+    }
+    reduceStock = async (soldQty) => {
+      if (item!.stock === null || item!.stock === undefined) return
+      const next: HtbahCharacterData = JSON.parse(JSON.stringify(merchantData))
+      const mItem = next.merchant?.items.find((it) => it.id === item!.id)
+      if (mItem && mItem.stock !== null && mItem.stock !== undefined) {
+        mItem.stock = Math.max(0, mItem.stock - soldQty)
+        await db
+          .update(characters)
+          .set({ data: next as unknown as Record<string, unknown>, updatedAt: new Date() })
+          .where(eq(characters.id, merchant.id))
+      }
+    }
   }
+
+  if (!item) throw createError({ statusCode: 404, statusMessage: 'Gegenstand ist nicht im Angebot.' })
+
+  // Umkreis-Pruefung: Kaeufer hoechstens SHOP_MAX_TILES Felder vom Haendler entfernt.
   let minTiles = Number.POSITIVE_INFINITY
   for (const b of buyerToks) {
-    for (const m of merchantToks) {
+    for (const m of merchantPositions) {
       const d = chebyshevTiles({ x: b.x, y: b.y }, { x: m.x, y: m.y }, map.gridSize)
       if (d < minTiles) minTiles = d
     }
@@ -185,7 +255,7 @@ export default defineEventHandler(async (event) => {
     const heal = Math.max(0, Math.floor(item.healAmount ?? 0))
     const mana = Math.max(0, Math.floor(item.manaAmount ?? 0))
     const existing = list.find(
-      (u) => u.name === item.name && (u.healAmount ?? 0) === heal && (u.manaAmount ?? 0) === mana,
+      (u) => u.name === item!.name && (u.healAmount ?? 0) === heal && (u.manaAmount ?? 0) === mana,
     )
     if (existing) {
       existing.quantity = Math.max(0, Math.floor(existing.quantity || 0)) + qty
@@ -208,21 +278,11 @@ export default defineEventHandler(async (event) => {
     .where(eq(characters.id, buyer.id))
 
   // Vorrat des Haendlers reduzieren (falls begrenzt).
-  if (item.stock !== null && item.stock !== undefined) {
-    const nextMerchant: HtbahCharacterData = JSON.parse(JSON.stringify(merchantData))
-    const mItem = nextMerchant.merchant?.items.find((it) => it.id === item.id)
-    if (mItem && mItem.stock !== null && mItem.stock !== undefined) {
-      mItem.stock = Math.max(0, mItem.stock - qty)
-      await db
-        .update(characters)
-        .set({ data: nextMerchant as unknown as Record<string, unknown>, updatedAt: new Date() })
-        .where(eq(characters.id, merchant.id))
-    }
-  }
+  if (reduceStock) await reduceStock(qty)
 
   // Chat-Nachricht.
   const priceLabel = `${htbahFormatPrice(item.priceGold, item.priceSilver, item.priceCopper)}${qty > 1 ? ` × ${qty}` : ''}`
-  const content = `🛍 ${buyer.name} kauft ${qty > 1 ? `${qty}× ` : ''}${item.name} bei ${merchantCfg.shopName || merchant.name} für ${priceLabel}.`
+  const content = `🛍 ${buyer.name} kauft ${qty > 1 ? `${qty}× ` : ''}${item.name} bei ${shopLabel} für ${priceLabel}.`
   await db.insert(messages).values({
     groupId,
     userId: user.id,

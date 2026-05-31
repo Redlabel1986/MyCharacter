@@ -11,6 +11,7 @@
 import MiniCharSheet from '~/components/battle/MiniCharSheet.vue'
 import { subscribeMap, subscribeGroup, type RealtimeSubscription } from '~/composables/usePusher'
 import type { NpcAbility } from '~~/shared/npc'
+import type { HtbahMerchant } from '~~/shared/engines/htbah'
 import type { TimeOfDay } from '~~/shared/time-of-day'
 
 definePageMeta({ middleware: ['auth'], layout: false })
@@ -33,6 +34,7 @@ interface Token {
   description: string
   system: 'htbah' | 'dnd' | 'dsa5' | null
   npcAbilities: NpcAbility[]
+  merchant?: HtbahMerchant | null
   visionRadius: number
   hpVisibleToPlayers: boolean
   moveRange: number

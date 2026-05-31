@@ -18,6 +18,8 @@ import { loadNpcAccessibleOrThrow } from '~~/server/utils/npc-access'
 import { pushMapChanged } from '~~/server/utils/pusher'
 import { upsertGlossaryFromToken } from '~~/server/utils/glossary'
 import { DSA_ABILITIES } from '~~/shared/engines/dsa5'
+import { merchantSchema, toHtbahMerchant } from '~~/server/utils/merchant-schema'
+import type { HtbahMerchant } from '~~/shared/engines/htbah'
 
 const timeBonusesSchema = z
   .object({
@@ -87,6 +89,8 @@ const bodySchema = z.object({
   npcAbilities: z.array(npcAbilitySchema).max(40).optional(),
   /** Bewegungsfeld in Rasterzellen. Default 8 wird vom DB-Schema vorgegeben. */
   moveRange: z.number().int().min(0).max(200).optional(),
+  /** Haendler-Konfiguration (nur DM, nur fuer NPC-Tokens ohne Charakter). */
+  merchant: merchantSchema.optional(),
 })
 
 export default defineEventHandler(async (event) => {
@@ -124,6 +128,7 @@ export default defineEventHandler(async (event) => {
   let librarySize: number | undefined
   let libraryVision: number | undefined
   let libraryMoveRange: number | undefined
+  let libraryMerchant: HtbahMerchant | null | undefined
   if (body.npcLibraryId) {
     if (!isDm) {
       throw createError({
@@ -148,6 +153,7 @@ export default defineEventHandler(async (event) => {
     librarySize = npc.defaultSizeMultiplier
     libraryVision = npc.defaultVisionRadius
     libraryMoveRange = npc.defaultMoveRange
+    libraryMerchant = npc.merchant ?? null
   }
 
   if (body.characterId) {
@@ -191,6 +197,15 @@ export default defineEventHandler(async (event) => {
   const tokenHp = body.characterId ? null : body.hp ?? libraryHp ?? null
   const tokenHpMax = body.characterId ? null : body.hpMax ?? libraryHpMax ?? null
 
+  // Haendler nur fuer DM und nur fuer NPC-Tokens (ohne Charakter) sinnvoll.
+  // Body schlaegt Library; sonst greift der Library-Default.
+  const effectiveMerchant =
+    isDm && !body.characterId
+      ? body.merchant !== undefined
+        ? toHtbahMerchant(body.merchant)
+        : libraryMerchant ?? null
+      : null
+
   const effectiveSize = body.sizeMultiplier ?? librarySize ?? 1
   const effectiveDescription = body.description ?? libraryDescription ?? ''
   // moveRange / visionRadius nur explizit setzen, wenn Body oder Library einen
@@ -216,6 +231,7 @@ export default defineEventHandler(async (event) => {
       description: effectiveDescription,
       system: npcSystem,
       npcAbilities,
+      merchant: effectiveMerchant,
       ...(effectiveMoveRange !== undefined ? { moveRange: effectiveMoveRange } : {}),
       ...(effectiveVisionRadius !== undefined
         ? { visionRadius: effectiveVisionRadius }

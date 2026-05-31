@@ -8,7 +8,9 @@
  *   - Gruppe X (groupId = X): nur in dieser Kampagne sichtbar
  */
 import NpcAbilitiesEditor from '~/components/battle/NpcAbilitiesEditor.vue'
+import MerchantEditor from '~/components/battle/MerchantEditor.vue'
 import type { NpcAbility } from '~~/shared/npc'
+import type { HtbahMerchant } from '~~/shared/engines/htbah'
 
 definePageMeta({ middleware: ['dm'] })
 
@@ -26,6 +28,7 @@ interface NpcLibraryEntry {
   defaultMoveRange: number
   imageUrl: string | null
   npcAbilities: NpcAbility[]
+  merchant: HtbahMerchant | null
   createdAt: string
   updatedAt: string
 }
@@ -94,6 +97,7 @@ const createDraft = ref({
   defaultVisionRadius: 1,
   defaultMoveRange: 8,
   npcAbilities: [] as NpcAbility[],
+  merchant: null as HtbahMerchant | null,
   imageFile: null as File | null,
 })
 const createError = ref<string | null>(null)
@@ -114,6 +118,7 @@ const openCreate = () => {
     defaultVisionRadius: 1,
     defaultMoveRange: 8,
     npcAbilities: [],
+    merchant: null,
     imageFile: null,
   }
   createError.value = null
@@ -141,6 +146,7 @@ const submitCreate = async () => {
         defaultVisionRadius: d.defaultVisionRadius,
         defaultMoveRange: d.defaultMoveRange,
         npcAbilities: d.npcAbilities,
+        merchant: d.merchant,
       },
     })
     if (d.imageFile && res.npc) {
@@ -170,7 +176,11 @@ const onEditImageFile = (e: Event) => {
 }
 const openEdit = (n: NpcLibraryEntry) => {
   editingId.value = n.id
-  editingDraft.value = { ...n, npcAbilities: [...(n.npcAbilities ?? [])] }
+  editingDraft.value = {
+    ...n,
+    npcAbilities: [...(n.npcAbilities ?? [])],
+    merchant: n.merchant ? JSON.parse(JSON.stringify(n.merchant)) : null,
+  }
   editingImageFile.value = null
   editingError.value = null
 }
@@ -203,6 +213,7 @@ const submitEdit = async () => {
         defaultVisionRadius: d.defaultVisionRadius,
         defaultMoveRange: d.defaultMoveRange,
         npcAbilities: d.npcAbilities,
+        merchant: d.merchant ?? null,
       },
     })
     if (editingImageFile.value) {
@@ -303,6 +314,13 @@ const scopeOptionsForForm = computed(() => [
             >
               {{ scopeLabel(n) }}
             </span>
+            <span
+              v-if="n.merchant?.active"
+              class="text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded font-semibold bg-purple-100 text-purple-800 flex items-center gap-0.5"
+              title="Dieser NPC ist ein Händler"
+            >
+              <UIcon name="i-lucide-store" class="size-2.5" /> Händler
+            </span>
           </div>
           <div class="text-[10px] uppercase tracking-widest text-ink-300 mt-0.5">
             {{ systemLabel(n.system) }}
@@ -385,6 +403,9 @@ const scopeOptionsForForm = computed(() => [
               v-model:abilities="createDraft.npcAbilities"
             />
           </div>
+          <div class="border-t border-parchment-700/30 pt-3">
+            <MerchantEditor v-model:merchant="createDraft.merchant" />
+          </div>
           <p v-if="createError" class="text-sm text-red-700">{{ createError }}</p>
         </div>
       </template>
@@ -454,6 +475,9 @@ const scopeOptionsForForm = computed(() => [
               v-model:system="editingDraft.system"
               v-model:abilities="editingDraft.npcAbilities"
             />
+          </div>
+          <div class="border-t border-parchment-700/30 pt-3">
+            <MerchantEditor v-model:merchant="editingDraft.merchant" />
           </div>
           <p v-if="editingError" class="text-sm text-red-700">{{ editingError }}</p>
         </div>

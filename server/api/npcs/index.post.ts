@@ -13,6 +13,7 @@ import { eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { groups, npcLibrary } from '~~/server/database/schema'
 import { DSA_ABILITIES } from '~~/shared/engines/dsa5'
+import { merchantSchema, toHtbahMerchant } from '~~/server/utils/merchant-schema'
 
 const timeBonusesSchema = z
   .object({
@@ -66,6 +67,8 @@ const bodySchema = z.object({
   defaultVisionRadius: z.number().int().min(0).max(60).optional(),
   defaultMoveRange: z.number().int().min(0).max(200).optional(),
   npcAbilities: z.array(npcAbilitySchema).max(40).optional(),
+  /** Optionale Haendler-Konfiguration (Shop-Name + Angebote). */
+  merchant: merchantSchema.optional(),
 })
 
 export default defineEventHandler(async (event) => {
@@ -105,6 +108,7 @@ export default defineEventHandler(async (event) => {
       defaultVisionRadius: body.defaultVisionRadius ?? 1,
       defaultMoveRange: body.defaultMoveRange ?? 8,
       npcAbilities: body.npcAbilities ?? [],
+      merchant: toHtbahMerchant(body.merchant ?? null),
     })
     .returning()
 

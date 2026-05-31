@@ -38,6 +38,7 @@ import {
   type HtbahUsableItem,
   type HtbahUniversalWeaponKind,
   type HtbahUniversalArmorKind,
+  type HtbahMerchant,
 } from '~~/shared/engines/htbah'
 import { HTBAH_SPELL_BY_KEY } from '~~/shared/engines/htbah-spell-catalog'
 import {
@@ -78,6 +79,8 @@ interface Token {
   npcAbilities: NpcAbility[]
   /** CSV der Conditions am Token (z.B. "prone,frightened") + Frei-Text-Reste. */
   statusText: string
+  /** Haendler-Konfiguration (NPC-Token-Haendler). null = kein Haendler. */
+  merchant?: HtbahMerchant | null
 }
 
 interface CharacterFull {
@@ -695,6 +698,20 @@ const damageApplyResult = ref<string | null>(null)
 // Vollstaendige Token-Liste: bevorzugt die vom Parent gelieferte allTokens-
 // Prop (alle Spieler + NPCs auf der Karte), fallback auf die eigenen Tokens.
 const damageTargetTokens = computed<Token[]>(() => props.allTokens ?? props.tokens)
+// Token-Haendler (NPC-Token mit aktiver Haendler-Konfig) auf der Karte — fuer
+// den Shop. Versteckte Token sind im Snapshot schon ausgefiltert.
+const tokenMerchants = computed(() =>
+  damageTargetTokens.value
+    .filter((t) => t.merchant?.active)
+    .map((t) => ({
+      tokenId: t.id,
+      name: t.name,
+      shopName: t.merchant?.shopName || t.name,
+      items: t.merchant?.items ?? [],
+      x: t.x,
+      y: t.y,
+    })),
+)
 // Distanz vom aktiven (eigenen) Token zum jeweiligen Ziel in Rasterzellen.
 // Null = keine Berechnung moeglich (kein gridSize gepflegt oder Token fehlt).
 const distanceToToken = (target: Token | null): number | null => {
@@ -2398,6 +2415,7 @@ const onImageError = (tokenId: number) => {
         :map-id="mapId"
         :grid-size="gridSize ?? 0"
         :tokens="damageTargetTokens"
+        :token-merchants="tokenMerchants"
         @bought="onShopBought"
       />
 

@@ -21,6 +21,7 @@ import {
 import { audioEmbedUrl, parseAudioUrl, YOUTUBE_NOCOOKIE_HOST } from '~~/shared/audio'
 import { loadYouTubeApi, type YouTubePlayer } from '~/composables/useYouTubeApi'
 import type { NpcAbility } from '~~/shared/npc'
+import type { HtbahMerchant } from '~~/shared/engines/htbah'
 import {
   cellsInTokenVision as computeCellsInVision,
   computeVisibilityPolygon,
@@ -91,6 +92,8 @@ interface Token {
   description: string
   system: 'htbah' | 'dnd' | 'dsa5' | null
   npcAbilities: NpcAbility[]
+  /** Haendler-Konfiguration (NPC-Token-Haendler). null = kein Haendler. */
+  merchant?: HtbahMerchant | null
   visionRadius: number
   hpVisibleToPlayers: boolean
   /** Bewegungsfeld in Rasterzellen (Chebyshev). Default 8. */
@@ -1363,16 +1366,53 @@ const loadMerchants = async () => {
   }
 }
 onMounted(loadMerchants)
-const infoTokenIsMerchant = computed(
-  () => !!infoToken.value?.characterId && merchantCharacterIds.value.has(infoToken.value.characterId),
+// Token-Haendler (NPC-Token mit aktiver Haendler-Konfig) auf dieser Karte.
+// Versteckte Token sind im Spieler-Snapshot schon ausgefiltert.
+const tokenMerchants = computed(() =>
+  tokens.value
+    .filter((t) => t.merchant?.active)
+    .map((t) => ({
+      tokenId: t.id,
+      name: t.name,
+      shopName: t.merchant?.shopName || t.name,
+      items: t.merchant?.items ?? [],
+      x: t.x,
+      y: t.y,
+    })),
 )
+// Info-Card-Token ist Haendler, wenn entweder sein Charakter ein Haendler ist
+// ODER der Token selbst eine aktive Haendler-Konfig traegt (NPC-Haendler).
+const infoTokenIsMerchant = computed(() => {
+  const t = infoToken.value
+  if (!t) return false
+  if (t.merchant?.active) return true
+  return !!t.characterId && merchantCharacterIds.value.has(t.characterId)
+})
 const shopOpen = ref(false)
 const shopMerchantId = ref<number | undefined>(undefined)
+const shopMerchantTokenId = ref<number | undefined>(undefined)
 const openShopForInfo = () => {
-  if (!infoToken.value?.characterId) return
-  shopMerchantId.value = infoToken.value.characterId
+  const t = infoToken.value
+  if (!t) return
+  if (t.merchant?.active) {
+    // NPC-Token-Haendler.
+    shopMerchantTokenId.value = t.id
+    shopMerchantId.value = undefined
+  } else if (t.characterId) {
+    // Klassischer Charakter-Haendler.
+    shopMerchantId.value = t.characterId
+    shopMerchantTokenId.value = undefined
+  } else {
+    return
+  }
   infoTokenId.value = null
   shopOpen.value = true
+}
+// Nach einem Kauf: Haendler-Liste und Karte neu laden (Vorrat am Token kann
+// sich geaendert haben).
+const onShopBought = () => {
+  loadMerchants()
+  fetchMap()
 }
 // Aktuelles Bild in der Info-Galerie (0 = Haupt-/Token-Bild, 1..N = Galerie-Bilder).
 const infoImageIdx = ref(0)
@@ -5082,10 +5122,12 @@ const endResize = () => {
       v-model:open="shopOpen"
       :group-id="groupId"
       :merchant-character-id="shopMerchantId"
+      :merchant-token-id="shopMerchantTokenId"
       :map-id="mapId"
       :grid-size="map?.gridSize ?? 0"
       :tokens="tokens"
-      @bought="loadMerchants"
+      :token-merchants="tokenMerchants"
+      @bought="onShopBought"
     />
 
     <!-- Objekt-Picker: Bibliothek aus Built-ins + Custom-Templates des DM -->

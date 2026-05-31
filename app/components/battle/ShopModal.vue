@@ -2,9 +2,13 @@
 /**
  * Shop-Modal: Spieler kauft Gegenstaende bei einem NPC-Haendler.
  *
- * Laedt die Haendler der Gruppe (GET /merchants) und kauft per
- * POST /shop/buy. Gekaufte Items wandern serverseitig ins passende
- * Inventarfeld des Kaeufers, die Kosten werden vom Geldbeutel abgezogen.
+ * Haendler koennen zwei Quellen haben:
+ *   - Charakter-Haendler (HtbaH-Bogen mit data.merchant.active) — aus /merchants.
+ *   - Token-Haendler (NPC mit Haendler-Konfig, als Token platziert) — per
+ *     `tokenMerchants`-Prop von der Battle-Page hereingereicht.
+ *
+ * Gekaufte Items wandern serverseitig ins passende Inventarfeld des Kaeufers,
+ * die Kosten werden vom Geldbeutel abgezogen (POST /shop/buy).
  */
 import {
   htbahFormatPrice,
@@ -18,6 +22,16 @@ import { chebyshevTiles } from '~~/shared/distance'
 /** Token-Position auf der Karte (fuer die Umkreis-Pruefung). */
 interface ShopToken { characterId: number | null; x: number; y: number }
 
+/** Token-Haendler, von der Battle-Page hereingereicht. */
+interface TokenMerchant {
+  tokenId: number
+  name: string
+  shopName: string
+  items: HtbahShopItem[]
+  x: number
+  y: number
+}
+
 /** Max. Abstand Kaeufer↔Haendler in Feldern (muss zum Server passen). */
 const MAX_TILES = 2
 
@@ -29,31 +43,47 @@ const props = defineProps<{
    * waehlt der Spieler im Modal aus seinen eigenen HtbaH-Charakteren.
    */
   buyerCharacterId?: number
-  /** Optional: direkt diesen Haendler oeffnen. */
+  /** Optional: direkt diesen Charakter-Haendler oeffnen. */
   merchantCharacterId?: number
+  /** Optional: direkt diesen Token-Haendler oeffnen. */
+  merchantTokenId?: number
   /** Aktuelle Karte — gekauft wird nur im Umkreis des Haendlers auf dieser Karte. */
   mapId: number
   /** Pixel pro Rasterzelle (fuer die Feld-Distanz). */
   gridSize: number
   /** Tokens auf der Karte (Positionen) — fuer Umkreis + Praesenz-Pruefung. */
   tokens: ShopToken[]
+  /** Token-Haendler auf der Karte. */
+  tokenMerchants?: TokenMerchant[]
 }>()
 const emit = defineEmits<{
   (e: 'update:open', v: boolean): void
   (e: 'bought'): void
 }>()
 
-interface Merchant {
+/** Roh-Haendler aus /merchants (Charakter-Haendler). */
+interface RawCharMerchant {
   characterId: number
   name: string
   shopName: string
   items: HtbahShopItem[]
 }
 
+/** Vereinheitlichter Haendler (Charakter ODER Token). */
+interface UMerchant {
+  key: string
+  source: 'character' | 'token'
+  refId: number
+  name: string
+  shopName: string
+  items: HtbahShopItem[]
+  pos: { x: number; y: number } | null
+}
+
 interface BuyerChar { id: number; name: string; system: string }
 
-const merchants = ref<Merchant[]>([])
-const activeMerchantId = ref<number | undefined>(undefined)
+const charMerchantsRaw = ref<RawCharMerchant[]>([])
+const activeMerchantKey = ref<string | undefined>(undefined)
 const buyers = ref<BuyerChar[]>([])
 const buyerId = ref<number | undefined>(undefined)
 const purse = ref<HtbahPurse>({ copper: 0, silver: 0, gold: 0 })
@@ -69,12 +99,39 @@ const tokenForChar = (charId: number | undefined | null): ShopToken | null => {
 }
 const charOnMap = (charId: number | undefined | null) => !!tokenForChar(charId)
 
-// Nur Haendler/Kaeufer, die tatsaechlich ein Token auf der Karte haben.
-const onMapMerchants = computed(() => merchants.value.filter((m) => charOnMap(m.characterId)))
+// Vereinheitlichte Haendlerliste: Charakter-Haendler (Position via ihr Token)
+// + Token-Haendler (Position direkt). Reaktiv auf bewegte Tokens.
+const merchants = computed<UMerchant[]>(() => {
+  const charM: UMerchant[] = charMerchantsRaw.value.map((m) => {
+    const tok = tokenForChar(m.characterId)
+    return {
+      key: `character:${m.characterId}`,
+      source: 'character',
+      refId: m.characterId,
+      name: m.name,
+      shopName: m.shopName,
+      items: m.items,
+      pos: tok ? { x: tok.x, y: tok.y } : null,
+    }
+  })
+  const tokM: UMerchant[] = (props.tokenMerchants ?? []).map((t) => ({
+    key: `token:${t.tokenId}`,
+    source: 'token',
+    refId: t.tokenId,
+    name: t.name,
+    shopName: t.shopName,
+    items: t.items,
+    pos: { x: t.x, y: t.y },
+  }))
+  return [...charM, ...tokM]
+})
+
+// Nur Haendler/Kaeufer, die tatsaechlich auf der Karte praesent sind.
+const onMapMerchants = computed(() => merchants.value.filter((m) => m.pos !== null))
 const onMapBuyers = computed(() => buyers.value.filter((b) => charOnMap(b.id)))
 
 const activeMerchant = computed(
-  () => merchants.value.find((m) => m.characterId === activeMerchantId.value) ?? null,
+  () => merchants.value.find((m) => m.key === activeMerchantKey.value) ?? null,
 )
 const haveCopper = computed(() => htbahPurseToCopper(purse.value))
 
@@ -82,9 +139,9 @@ const haveCopper = computed(() => htbahPurseToCopper(purse.value))
 // eines der Tokens nicht auf der Karte ist.
 const tilesToMerchant = computed<number | null>(() => {
   const bt = tokenForChar(buyerId.value)
-  const mt = tokenForChar(activeMerchantId.value)
-  if (!bt || !mt) return null
-  return chebyshevTiles({ x: bt.x, y: bt.y }, { x: mt.x, y: mt.y }, props.gridSize)
+  const mp = activeMerchant.value?.pos ?? null
+  if (!bt || !mp) return null
+  return chebyshevTiles({ x: bt.x, y: bt.y }, { x: mp.x, y: mp.y }, props.gridSize)
 })
 const inRange = computed(() => tilesToMerchant.value !== null && tilesToMerchant.value <= MAX_TILES)
 
@@ -113,10 +170,10 @@ const load = async () => {
   error.value = null
   try {
     const [mRes, cRes] = await Promise.all([
-      $fetch<{ merchants: Merchant[] }>(`/api/groups/${props.groupId}/merchants`),
+      $fetch<{ merchants: RawCharMerchant[] }>(`/api/groups/${props.groupId}/merchants`),
       $fetch<{ characters: BuyerChar[] }>(`/api/characters`),
     ])
-    merchants.value = mRes.merchants ?? []
+    charMerchantsRaw.value = mRes.merchants ?? []
     // Nur HtbaH-Charaktere koennen kaufen (Geldbeutel + Inventar).
     buyers.value = (cRes.characters ?? []).filter((c) => c.system === 'htbah')
     // Kaeufer vorwaehlen: uebergebener Charakter, sonst der erste EIGENE der
@@ -127,11 +184,16 @@ const load = async () => {
       buyerId.value = onMapBuyers.value[0]?.id
     }
     await loadBuyerPurse()
-    // Vorauswahl Haendler: gewuenschter, sonst der erste auf der Karte.
-    if (props.merchantCharacterId && merchants.value.some((m) => m.characterId === props.merchantCharacterId)) {
-      activeMerchantId.value = props.merchantCharacterId
-    } else if (!activeMerchantId.value) {
-      activeMerchantId.value = onMapMerchants.value[0]?.characterId
+    // Vorauswahl Haendler: gewuenschter Token-/Charakter-Haendler, sonst erster auf der Karte.
+    const wantedKey = props.merchantTokenId
+      ? `token:${props.merchantTokenId}`
+      : props.merchantCharacterId
+        ? `character:${props.merchantCharacterId}`
+        : undefined
+    if (wantedKey && merchants.value.some((m) => m.key === wantedKey)) {
+      activeMerchantKey.value = wantedKey
+    } else if (!activeMerchantKey.value || !merchants.value.some((m) => m.key === activeMerchantKey.value)) {
+      activeMerchantKey.value = onMapMerchants.value[0]?.key
     }
   } catch (e: unknown) {
     error.value = (e as { statusMessage?: string }).statusMessage ?? 'Händler konnten nicht geladen werden.'
@@ -152,23 +214,23 @@ const canAfford = (it: HtbahShopItem) => haveCopper.value >= htbahShopItemCopper
 const soldOut = (it: HtbahShopItem) => it.stock !== null && it.stock !== undefined && it.stock <= 0
 
 const buy = async (it: HtbahShopItem) => {
-  if (!activeMerchant.value || !buyerId.value || !inRange.value) return
+  const m = activeMerchant.value
+  if (!m || !buyerId.value || !inRange.value) return
   buyingId.value = it.id
   error.value = null
   flash.value = null
   try {
+    const body: Record<string, unknown> = {
+      buyerCharacterId: buyerId.value,
+      itemId: it.id,
+      quantity: 1,
+      mapId: props.mapId,
+    }
+    if (m.source === 'token') body.merchantTokenId = m.refId
+    else body.merchantCharacterId = m.refId
     const res = await $fetch<{ purse: HtbahPurse; item: { name: string } }>(
       `/api/groups/${props.groupId}/shop/buy`,
-      {
-        method: 'POST',
-        body: {
-          buyerCharacterId: buyerId.value,
-          merchantCharacterId: activeMerchant.value.characterId,
-          itemId: it.id,
-          quantity: 1,
-          mapId: props.mapId,
-        },
-      },
+      { method: 'POST', body },
     )
     purse.value = res.purse
     flash.value = `Gekauft: ${res.item.name}`
@@ -197,11 +259,11 @@ const buy = async (it: HtbahShopItem) => {
           Kein Händler auf dieser Karte. Ein Händler-NPC muss als Token platziert sein.
         </div>
         <template v-else>
-          <!-- Haendler-Auswahl (nur Haendler mit Token auf der Karte) -->
+          <!-- Haendler-Auswahl (nur Haendler auf der Karte) -->
           <UFormField v-if="onMapMerchants.length > 1" label="Händler">
             <USelect
-              v-model="activeMerchantId"
-              :items="onMapMerchants.map((m) => ({ label: m.shopName, value: m.characterId }))"
+              v-model="activeMerchantKey"
+              :items="onMapMerchants.map((m) => ({ label: m.shopName || m.name, value: m.key }))"
               value-key="value"
               size="sm"
             />

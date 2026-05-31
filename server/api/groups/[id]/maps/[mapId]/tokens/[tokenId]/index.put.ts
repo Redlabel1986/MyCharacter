@@ -14,6 +14,7 @@ import { upsertGlossaryFromToken } from '~~/server/utils/glossary'
 import { DSA_ABILITIES } from '~~/shared/engines/dsa5'
 import { readCharacterHp, writeCharacterHp, type CharSystem } from '~~/shared/character-hp'
 import { cellsInTokenVision, uniqueCells, type CellTuple } from '~~/shared/fog'
+import { merchantSchema, toHtbahMerchant } from '~~/server/utils/merchant-schema'
 
 const timeBonusesSchema = z
   .object({
@@ -74,6 +75,8 @@ const bodySchema = z.object({
   visionRadius: z.number().int().min(0).max(60).optional(),
   moveRange: z.number().int().min(0).max(200).optional(),
   hpVisibleToPlayers: z.boolean().optional(),
+  /** Haendler-Konfiguration (nur DM, nur Tokens ohne Charakter). null loescht sie. */
+  merchant: merchantSchema.optional(),
 })
 
 export default defineEventHandler(async (event) => {
@@ -143,11 +146,26 @@ export default defineEventHandler(async (event) => {
       statusMessage: 'NPC-Faehigkeiten gibt es nur fuer Tokens ohne Charakter.',
     })
   }
+  // Haendler nur DM und nur fuer Tokens ohne Charakter.
+  if (body.merchant !== undefined && !isDm) {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'Haendler-Angebote darf nur der DM aendern.',
+    })
+  }
+  if (body.merchant !== undefined && tok.characterId !== null) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Haendler gibt es nur fuer Tokens ohne Charakter.',
+    })
+  }
 
   // x/y vor dem Update auf Integer runden (DB-Spalte ist INTEGER).
   const patch: Record<string, unknown> = { ...body, updatedAt: new Date() }
   if (typeof body.x === 'number') patch.x = Math.round(body.x)
   if (typeof body.y === 'number') patch.y = Math.round(body.y)
+  // merchant typsicher casten (JSONB-Spalte erwartet HtbahMerchant | null).
+  if (body.merchant !== undefined) patch.merchant = toHtbahMerchant(body.merchant)
 
   // HP fuer Charakter-Tokens an den Charakter durchschreiben — Token-Spalten
   // bleiben fuer NPC-Tokens authoritativ.
