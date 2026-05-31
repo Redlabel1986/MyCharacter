@@ -2118,13 +2118,70 @@ const initRequestPlayerRolls = async () => {
     ),
     awaitingFromCharacters: playerCharacterIds,
   })
+  // 1-Minuten-Timer starten: wer bis dahin nicht gewuerfelt hat, wird beim
+  // automatischen Beenden nicht in die Initiative uebernommen.
+  initRequestDeadline.value = Date.now() + INIT_REQUEST_MS
 }
-const initCancelRequest = async () => {
-  if (!initiativeState.value) return
-  await saveInitiative({ ...initiativeState.value, awaitingFromCharacters: undefined })
+// Anfrage beenden: bereits eingegangene Wuerfe bleiben, wer noch nicht
+// gewuerfelt hat (z.B. offline) wird einfach nicht uebernommen. Der Tracker
+// bleibt aktiv und laeuft mit den vorhandenen Eintraegen weiter.
+const initFinishRequest = async () => {
+  const s = initiativeState.value
+  if (!s) return
+  initRequestDeadline.value = null
+  await saveInitiative({ ...s, active: true, awaitingFromCharacters: undefined })
 }
 const initAwaitingCount = computed(
   () => initiativeState.value?.awaitingFromCharacters?.length ?? 0,
+)
+
+// --- 1-Minuten-Timer fuer die Initiative-Anfrage ---
+const INIT_REQUEST_MS = 60_000
+const initRequestDeadline = ref<number | null>(null)
+const nowTick = ref(Date.now())
+const initRequestSecondsLeft = computed(() => {
+  if (initRequestDeadline.value === null) return null
+  return Math.max(0, Math.ceil((initRequestDeadline.value - nowTick.value) / 1000))
+})
+const initCountdownLabel = computed(() => {
+  const s = initRequestSecondsLeft.value
+  if (s === null) return ''
+  const m = Math.floor(s / 60)
+  const sec = s % 60
+  return `${m}:${sec.toString().padStart(2, '0')}`
+})
+let initTimer: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+  initTimer = setInterval(() => {
+    nowTick.value = Date.now()
+    // Deadline erreicht und noch offene Wuerfe → automatisch beenden (nur DM
+    // schreibt; der DM treibt den Kampf, sein Client ist offen).
+    if (
+      isDm.value &&
+      initRequestDeadline.value !== null &&
+      nowTick.value >= initRequestDeadline.value &&
+      initAwaitingCount.value > 0
+    ) {
+      initFinishRequest()
+    }
+  }, 1000)
+})
+onBeforeUnmount(() => {
+  if (initTimer) clearInterval(initTimer)
+})
+// Deadline-Lebenszyklus an den Warte-Status koppeln: keine offenen Wuerfe mehr
+// → Timer aus. Anfrage aktiv (z.B. nach Reload), aber kein Deadline → frische
+// Minute, damit der Countdown weiterlaeuft.
+watch(
+  initAwaitingCount,
+  (n) => {
+    if (n === 0) {
+      initRequestDeadline.value = null
+    } else if (initRequestDeadline.value === null) {
+      initRequestDeadline.value = Date.now() + INIT_REQUEST_MS
+    }
+  },
+  { immediate: true },
 )
 const initSetInitiative = async (id: string, value: number) => {
   if (!initiativeState.value) return
@@ -4258,13 +4315,12 @@ const endResize = () => {
             <UButton
               v-else
               size="xs"
-              color="error"
-              variant="soft"
-              icon="i-lucide-x"
-              :title="`Warte noch auf ${initAwaitingCount} Wurf/Wuerfe — Anfrage abbrechen`"
-              @click="initCancelRequest"
+              color="primary"
+              icon="i-lucide-flag-triangle-right"
+              :title="`Warte noch auf ${initAwaitingCount} Wurf/Wuerfe. Jetzt beenden — wer nicht gewuerfelt hat (z.B. offline), wird nicht in die Initiative uebernommen.`"
+              @click="initFinishRequest"
             >
-              Anfrage abbrechen ({{ initAwaitingCount }})
+              Wurf beenden ({{ initAwaitingCount }} offen<template v-if="initCountdownLabel"> · {{ initCountdownLabel }}</template>)
             </UButton>
             <UButton
               v-if="initiativeState"
