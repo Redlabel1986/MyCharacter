@@ -370,9 +370,10 @@ const fetchMapList = async () => {
 let mapSub: RealtimeSubscription | null = null
 let groupSub: RealtimeSubscription | null = null
 let pollHandle: ReturnType<typeof setInterval> | null = null
-const FALLBACK_POLL_MS = 30_000
 const REALTIME_POLL_MS = 30_000
-const POLLING_ONLY_MS = 5_000
+// Schneller Fallback, wenn Realtime (noch) nicht verbunden ist — damit der
+// Karten-Wechsel beim Spieler nicht erst nach dem langen Backup-Poll ankommt.
+const POLLING_ONLY_MS = 3_000
 onMounted(() => {
   mapSub = subscribeMap(mapId, () => {
     // Lokal gerade gezogene/editierte Resourcen werden in fetchMap durch
@@ -390,17 +391,29 @@ onMounted(() => {
       fetchMap()
     }
   })
-  // Ohne Realtime: dichter pollen, damit Mitspieler nicht zu lange warten.
-  // Mit Realtime: nur als seltener Sicherheits-Refresh.
-  const interval = mapSub ? REALTIME_POLL_MS : POLLING_ONLY_MS
-  pollHandle = setInterval(fetchMap, interval)
+
+  // Polling-Intervall am ECHTEN Verbindungsstatus ausrichten (nicht nur daran,
+  // ob ein Channel-Objekt existiert): Realtime gilt erst als „live", wenn
+  // BEIDE relevanten Channels verbunden sind — der Map-Channel (Token etc.)
+  // UND der Gruppen-Channel (active-map). Solange einer nicht verbunden ist
+  // (Pusher nicht konfiguriert, Auth noch nicht durch, WS weg), pollen wir
+  // dicht, damit der Karten-Wechsel quasi sofort kommt.
+  const reconfigurePoll = () => {
+    if (pollHandle) clearInterval(pollHandle)
+    const live = !!mapSub?.isConnected.value && !!groupSub?.isConnected.value
+    pollHandle = setInterval(fetchMap, live ? REALTIME_POLL_MS : POLLING_ONLY_MS)
+  }
+  reconfigurePoll()
+  // Auf Verbindungs-Statuswechsel reagieren (Auth fertig / Verbindung verloren).
+  watch(
+    () => [mapSub?.isConnected.value ?? false, groupSub?.isConnected.value ?? false],
+    reconfigurePoll,
+  )
 })
 onUnmounted(() => {
   if (pollHandle) clearInterval(pollHandle)
   mapSub?.unsubscribe()
   groupSub?.unsubscribe()
-  // Marker, damit der Bundler die Konstante nicht raus-shaked
-  void FALLBACK_POLL_MS
 })
 
 // --- Bild-Dimensionen ---
@@ -2434,7 +2447,69 @@ type ToolMode =
   | 'wall-draw'
   | 'wall-erase'
   | 'spawn-set'
+  | 'aoe'
 const toolMode = ref<ToolMode>('select')
+
+// --- Zauber-Wirkungsbereich (Area of Effect) ---------------------------------
+// Der Zauberwirker legt ein NxN-Feld auf die Karte; alle Token, deren Mitte im
+// Feld liegt, werden als betroffen markiert und bekommen per Klick Schaden oder
+// Heilung (ueber den bestehenden apply-damage-Endpoint, inkl. Ruestung + FX).
+const aoeSize = ref(3)
+const aoeKind = ref<'damage' | 'heal'>('damage')
+const aoeAmount = ref(0)
+const aoeCenter = ref<{ x: number; y: number } | null>(null)
+const aoeApplying = ref(false)
+// Pixel-Quadrat des AoE (zentriert auf aoeCenter). Kantenlaenge = N * gridSize.
+const aoeRectPx = computed(() => {
+  if (!aoeCenter.value || !map.value) return null
+  const g = map.value.gridSize
+  const side = Math.max(1, aoeSize.value) * g
+  return {
+    x: aoeCenter.value.x - side / 2,
+    y: aoeCenter.value.y - side / 2,
+    side,
+  }
+})
+// Tokens, deren Mittelpunkt im AoE-Quadrat liegt (sichtbare Token).
+const aoeTokens = computed<Token[]>(() => {
+  const r = aoeRectPx.value
+  if (!r) return []
+  return tokens.value.filter(
+    (t) =>
+      isTokenVisibleToViewer(t) &&
+      t.x >= r.x &&
+      t.x <= r.x + r.side &&
+      t.y >= r.y &&
+      t.y <= r.y + r.side,
+  )
+})
+const setAoeCenter = (px: number, py: number) => {
+  const s = snap(px, py)
+  aoeCenter.value = { x: Math.round(s.x), y: Math.round(s.y) }
+}
+const applyAoe = async () => {
+  const targets = aoeTokens.value
+  if (!targets.length || aoeAmount.value <= 0) return
+  aoeApplying.value = true
+  try {
+    // Sequenziell, damit der Server nicht mit parallelen HP-Updates kollidiert.
+    for (const t of targets) {
+      await $fetch(
+        `/api/groups/${groupId}/maps/${mapId}/tokens/${t.id}/apply-damage`,
+        { method: 'POST', body: { amount: Math.round(aoeAmount.value), kind: aoeKind.value } },
+      )
+    }
+    await fetchMap()
+  } catch (e: unknown) {
+    alert((e as { statusMessage?: string }).statusMessage ?? 'AoE konnte nicht angewandt werden.')
+  } finally {
+    aoeApplying.value = false
+  }
+}
+// Beim Verlassen des AoE-Modus das Feld aufraeumen.
+watch(toolMode, (m) => {
+  if (m !== 'aoe') aoeCenter.value = null
+})
 
 // --- Spawn-Punkt (DM legt fest, wo neue Charakter-Tokens erscheinen) ---
 const spawnSaving = ref(false)
@@ -3104,7 +3179,9 @@ const onStagePointerDown = (e: PointerEvent) => {
   // startDrag() ausgefuehrt — wir lassen den Bubble durch, ignorieren ihn aber.
   if (draggingTokenId.value) return
   const target = e.target as HTMLElement
-  if (target.closest('[data-token-id]')) return
+  // Im AoE-Modus darf auch ueber einem Token platziert werden (Bereich auf eine
+  // Token-Gruppe zentrieren) — sonst Klicks auf Token ignorieren.
+  if (target.closest('[data-token-id]') && toolMode.value !== 'aoe') return
   // Alt+Klick = Ping (in jedem Modus)
   if (e.altKey && stageEl.value) {
     const rect = stageEl.value.getBoundingClientRect()
@@ -3162,6 +3239,13 @@ const onStagePointerDown = (e: PointerEvent) => {
     setSpawnPoint(localX, localY)
     // Nach dem Setzen zurueck in den Auswahl-Modus — ein Klick = ein Punkt.
     toolMode.value = 'select'
+    e.preventDefault()
+  } else if (toolMode.value === 'aoe') {
+    if (!stageEl.value) return
+    const rect = stageEl.value.getBoundingClientRect()
+    const localX = (e.clientX - rect.left) / zoom.value
+    const localY = (e.clientY - rect.top) / zoom.value
+    setAoeCenter(localX, localY)
     e.preventDefault()
   } else if (toolMode.value === 'select') {
     startPan(e)
@@ -3242,6 +3326,7 @@ const stageCursor = computed(() => {
   if (toolMode.value === 'wall-draw') return 'crosshair'
   if (toolMode.value === 'wall-erase') return 'cell'
   if (toolMode.value === 'spawn-set') return 'crosshair'
+  if (toolMode.value === 'aoe') return 'crosshair'
   return pan.active ? 'grabbing' : 'grab'
 })
 
@@ -3547,6 +3632,17 @@ const endResize = () => {
           >
             Radieren
           </UButton>
+          <!-- Zauber-Wirkungsbereich (AoE): fuer alle (Zauberwirker). -->
+          <UButton
+            size="xs"
+            :variant="toolMode === 'aoe' ? 'solid' : 'outline'"
+            :color="toolMode === 'aoe' ? 'primary' : 'neutral'"
+            icon="i-lucide-radius"
+            title="Zauber-Wirkungsbereich (AoE): Feldgröße wählen, auf die Karte klicken — alle Token im Bereich bekommen Schaden/Heilung."
+            @click="toolMode = toolMode === 'aoe' ? 'select' : 'aoe'"
+          >
+            AoE
+          </UButton>
           <template v-if="isDm">
             <UButton
               size="xs"
@@ -3693,6 +3789,43 @@ const endResize = () => {
             <UInput v-model.number="drawWidth" type="number" min="1" max="64" class="w-16" size="xs" />
             <span class="text-ink-300">px</span>
           </div>
+        </div>
+
+        <!-- AoE-Konfiguration: Feldgröße, Schaden/Heilung, Menge + Anwenden -->
+        <div v-if="toolMode === 'aoe'" class="flex items-center gap-2 flex-wrap pl-3 border-l border-parchment-700/30">
+          <div class="flex items-center gap-1 text-xs">
+            <span class="text-ink-400">Bereich</span>
+            <UInput v-model.number="aoeSize" type="number" min="1" max="20" class="w-14" size="xs" />
+            <span class="text-ink-300">×{{ aoeSize }} Felder</span>
+          </div>
+          <USelect
+            v-model="aoeKind"
+            :items="[
+              { label: 'Schaden', value: 'damage' },
+              { label: 'Heilung', value: 'heal' },
+            ]"
+            value-key="value"
+            size="xs"
+            class="w-28"
+          />
+          <div class="flex items-center gap-1 text-xs">
+            <span class="text-ink-400">Menge</span>
+            <UInput v-model.number="aoeAmount" type="number" min="0" max="100000" class="w-20" size="xs" />
+          </div>
+          <UButton
+            size="xs"
+            :color="aoeKind === 'heal' ? 'success' : 'error'"
+            icon="i-lucide-sparkles"
+            :loading="aoeApplying"
+            :disabled="!aoeCenter || !aoeTokens.length || aoeAmount <= 0"
+            :title="aoeCenter ? '' : 'Erst auf die Karte klicken, um den Bereich zu platzieren'"
+            @click="applyAoe"
+          >
+            {{ aoeKind === 'heal' ? 'Heilen' : 'Schaden' }} ({{ aoeTokens.length }})
+          </UButton>
+          <span v-if="!aoeCenter" class="text-[11px] text-ink-300 italic">
+            Auf die Karte klicken zum Platzieren …
+          </span>
         </div>
 
         <div class="ml-auto flex items-center gap-2 flex-wrap">
@@ -3911,6 +4044,38 @@ const endResize = () => {
                 stroke-width="2"
                 stroke-dasharray="8 6"
                 rx="4"
+              />
+            </svg>
+
+            <!-- AoE-Wirkungsbereich: Quadrat + Markierung der betroffenen Token. -->
+            <svg
+              v-if="toolMode === 'aoe' && aoeRectPx && imgW && imgH"
+              class="absolute inset-0 pointer-events-none"
+              :width="imgW"
+              :height="imgH"
+              :viewBox="`0 0 ${imgW} ${imgH}`"
+            >
+              <rect
+                :x="aoeRectPx.x"
+                :y="aoeRectPx.y"
+                :width="aoeRectPx.side"
+                :height="aoeRectPx.side"
+                :fill="aoeKind === 'heal' ? 'rgba(34,197,94,0.18)' : 'rgba(239,68,68,0.18)'"
+                :stroke="aoeKind === 'heal' ? '#16a34a' : '#dc2626'"
+                stroke-width="3"
+                stroke-dasharray="10 6"
+                rx="6"
+              />
+              <circle
+                v-for="t in aoeTokens"
+                :key="`aoe-${t.id}`"
+                :cx="t.x"
+                :cy="t.y"
+                :r="(map.gridSize * t.sizeMultiplier) / 2 + 4"
+                fill="none"
+                :stroke="aoeKind === 'heal' ? '#16a34a' : '#dc2626'"
+                stroke-width="3"
+                opacity="0.9"
               />
             </svg>
 
