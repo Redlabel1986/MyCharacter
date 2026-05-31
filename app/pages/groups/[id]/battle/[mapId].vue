@@ -2173,8 +2173,9 @@ const initStartFromTokens = async () => {
   })
 }
 // Alle NPC-Token (ohne Charakter, nicht versteckt), die noch nicht in der
-// Reihenfolge stehen, mit Default-Initiative 10 hinzufuegen. Funktioniert auch
-// bei bereits gewuerfelter Initiative — der SL passt die Werte inline an.
+// Reihenfolge stehen, hinzufuegen. Jeder NPC wuerfelt dabei 1W20 als Initiative
+// (der SL kann die Werte danach inline anpassen). Funktioniert auch bei bereits
+// gewuerfelter Spieler-Initiative.
 const initAddNpcs = async () => {
   const s = initiativeState.value
   if (!s) return
@@ -2194,7 +2195,8 @@ const initAddNpcs = async () => {
   const newEntries: InitiativeEntry[] = npcTokens.map((t) => ({
     id: `tok-${t.id}-${stamp}`,
     name: t.name,
-    initiative: 10,
+    // 1W20 pro NPC.
+    initiative: Math.floor(Math.random() * 20) + 1,
     ownerUserId: t.ownerUserId,
     hasActed: false,
     imageUrl: tokenImageSrc(t) ?? undefined,
@@ -4488,7 +4490,7 @@ const endResize = () => {
               size="xs"
               variant="outline"
               icon="i-lucide-skull"
-              title="Alle sichtbaren NPC-Token, die noch nicht dabei sind, zur Reihenfolge hinzufuegen (Initiative 10, danach anpassbar)"
+              title="Alle sichtbaren NPC-Token, die noch nicht dabei sind, zur Reihenfolge hinzufuegen — jeder NPC wuerfelt 1W20 (danach anpassbar)"
               @click="initAddNpcs"
             >
               NPCs hinzufügen
