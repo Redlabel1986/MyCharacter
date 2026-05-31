@@ -545,7 +545,7 @@ html.app-mode-active .battle-stage-wrap {
    haengen und scoped Styles sie nicht treffen). */
 .map-fade-enter-active,
 .map-fade-leave-active {
-  transition: opacity 5s ease;
+  transition: opacity 3s ease;
 }
 .map-fade-enter-from,
 .map-fade-leave-to {
