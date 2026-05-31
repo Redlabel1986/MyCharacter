@@ -145,7 +145,22 @@ onMounted(async () => {
       fetchNew()
     }
   })
-  pollHandle = setInterval(fetchNew, realtimeSub ? 30_000 : 5_000)
+  // Solange Realtime WIRKLICH verbunden ist, nicht pollen (DB darf einschlafen,
+  // spart Neon-Compute). Nur ohne Verbindung als Fallback pollen; bei Reconnect
+  // einmal frisch ziehen.
+  let wasLive = false
+  const reconfigurePoll = () => {
+    const live = !!realtimeSub?.isConnected.value
+    if (live && !wasLive) fetchNew()
+    wasLive = live
+    if (pollHandle) {
+      clearInterval(pollHandle)
+      pollHandle = null
+    }
+    if (!live) pollHandle = setInterval(fetchNew, 6000)
+  }
+  reconfigurePoll()
+  watch(() => realtimeSub?.isConnected.value ?? false, reconfigurePoll)
 })
 onUnmounted(() => {
   if (pollHandle) clearInterval(pollHandle)

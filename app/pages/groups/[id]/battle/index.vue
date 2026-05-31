@@ -61,19 +61,31 @@ onMounted(() => {
     return
   }
   if (!isDm.value) {
+    const checkActive = async () => {
+      await refresh()
+      if (activeMapId.value) {
+        navigateTo(`/groups/${groupId}/battle/${activeMapId.value}`)
+      }
+    }
     activeSub = subscribeGroup(groupId, async (payload) => {
       if (payload.kind !== 'active-map') return
-      await refresh()
-      if (activeMapId.value) {
-        navigateTo(`/groups/${groupId}/battle/${activeMapId.value}`)
-      }
+      await checkActive()
     })
-    activePoll = setInterval(async () => {
-      await refresh()
-      if (activeMapId.value) {
-        navigateTo(`/groups/${groupId}/battle/${activeMapId.value}`)
+    // Solange Realtime verbunden ist, nicht pollen (DB darf einschlafen). Nur
+    // ohne Verbindung als Fallback; bei (Re-)Connect einmal pruefen.
+    let wasLive = false
+    const reconfigurePoll = () => {
+      const live = !!activeSub?.isConnected.value
+      if (live && !wasLive) checkActive()
+      wasLive = live
+      if (activePoll) {
+        clearInterval(activePoll)
+        activePoll = null
       }
-    }, activeSub ? 30_000 : 5_000)
+      if (!live) activePoll = setInterval(checkActive, 6000)
+    }
+    reconfigurePoll()
+    watch(() => activeSub?.isConnected.value ?? false, reconfigurePoll)
   }
 })
 onUnmounted(() => {

@@ -365,15 +365,19 @@ const fetchMapList = async () => {
 }
 
 // Realtime: Pusher liefert „changed"-Events fuer Map und Gruppe, daraufhin
-// refetchen wir gezielt. Polling bleibt als langsamer Fallback (30s) — falls
-// die WS-Verbindung mal weg ist oder Pusher gar nicht konfiguriert ist.
+// refetchen wir gezielt. WICHTIG fuer die DB-Kosten: Solange Realtime WIRKLICH
+// verbunden ist, pollen wir GAR NICHT — die DB darf einschlafen (Neon skaliert
+// auf null). Nur wenn Pusher nicht konfiguriert/verbunden ist, pollen wir als
+// einzige Update-Quelle. Beim (Re-)Connect und bei Tab-Fokus ziehen wir einmal
+// frisch, um etwaige verpasste Events nachzuholen.
 let mapSub: RealtimeSubscription | null = null
 let groupSub: RealtimeSubscription | null = null
 let pollHandle: ReturnType<typeof setInterval> | null = null
-const REALTIME_POLL_MS = 30_000
-// Schneller Fallback, wenn Realtime (noch) nicht verbunden ist — damit der
-// Karten-Wechsel beim Spieler nicht erst nach dem langen Backup-Poll ankommt.
-const POLLING_ONLY_MS = 3_000
+// Fallback-Poll NUR ohne Realtime-Verbindung.
+const FALLBACK_POLL_MS = 5_000
+const onVisible = () => {
+  if (typeof document !== 'undefined' && document.visibilityState === 'visible') fetchMap()
+}
 onMounted(() => {
   mapSub = subscribeMap(mapId, () => {
     // Lokal gerade gezogene/editierte Resourcen werden in fetchMap durch
@@ -392,16 +396,22 @@ onMounted(() => {
     }
   })
 
-  // Polling-Intervall am ECHTEN Verbindungsstatus ausrichten (nicht nur daran,
-  // ob ein Channel-Objekt existiert): Realtime gilt erst als „live", wenn
-  // BEIDE relevanten Channels verbunden sind — der Map-Channel (Token etc.)
-  // UND der Gruppen-Channel (active-map). Solange einer nicht verbunden ist
-  // (Pusher nicht konfiguriert, Auth noch nicht durch, WS weg), pollen wir
-  // dicht, damit der Karten-Wechsel quasi sofort kommt.
+  // Realtime gilt erst als „live", wenn BEIDE relevanten Channels verbunden
+  // sind (Map-Channel fuer Token etc. UND Gruppen-Channel fuer active-map).
+  let wasLive = false
   const reconfigurePoll = () => {
-    if (pollHandle) clearInterval(pollHandle)
     const live = !!mapSub?.isConnected.value && !!groupSub?.isConnected.value
-    pollHandle = setInterval(fetchMap, live ? REALTIME_POLL_MS : POLLING_ONLY_MS)
+    // Beim Wechsel offline→live einmal frisch ziehen (verpasste Events nach
+    // Verbindungsaufbau / Reconnect nachholen).
+    if (live && !wasLive) fetchMap()
+    wasLive = live
+    if (pollHandle) {
+      clearInterval(pollHandle)
+      pollHandle = null
+    }
+    // Verbunden → kein Dauer-Polling (spart DB-Compute). Nicht verbunden →
+    // Fallback-Poll als einzige Quelle.
+    if (!live) pollHandle = setInterval(fetchMap, FALLBACK_POLL_MS)
   }
   reconfigurePoll()
   // Auf Verbindungs-Statuswechsel reagieren (Auth fertig / Verbindung verloren).
@@ -409,8 +419,14 @@ onMounted(() => {
     () => [mapSub?.isConnected.value ?? false, groupSub?.isConnected.value ?? false],
     reconfigurePoll,
   )
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', onVisible)
+  }
 })
 onUnmounted(() => {
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('visibilitychange', onVisible)
+  }
   if (pollHandle) clearInterval(pollHandle)
   mapSub?.unsubscribe()
   groupSub?.unsubscribe()

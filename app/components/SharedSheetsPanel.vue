@@ -54,8 +54,21 @@ onMounted(async () => {
   realtimeSub = subscribeGroup(props.groupId, (payload) => {
     if (payload.kind === 'shares') fetchShares()
   })
-  // Realtime aktiv → 30s als Sicherheits-Refresh; sonst zuegiger pollen.
-  pollHandle = setInterval(fetchShares, realtimeSub ? 30_000 : 10_000)
+  // Solange Realtime WIRKLICH verbunden ist, nicht pollen (DB darf einschlafen,
+  // spart Neon-Compute). Nur ohne Verbindung als Fallback; bei Reconnect frisch.
+  let wasLive = false
+  const reconfigurePoll = () => {
+    const live = !!realtimeSub?.isConnected.value
+    if (live && !wasLive) fetchShares()
+    wasLive = live
+    if (pollHandle) {
+      clearInterval(pollHandle)
+      pollHandle = null
+    }
+    if (!live) pollHandle = setInterval(fetchShares, 12000)
+  }
+  reconfigurePoll()
+  watch(() => realtimeSub?.isConnected.value ?? false, reconfigurePoll)
 })
 onUnmounted(() => {
   if (pollHandle) clearInterval(pollHandle)

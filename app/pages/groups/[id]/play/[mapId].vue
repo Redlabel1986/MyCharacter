@@ -98,28 +98,45 @@ const myTokensOnMap = computed<Token[]>(() =>
 
 let mapSub: RealtimeSubscription | null = null
 let groupSub: RealtimeSubscription | null = null
+// Polling-Backup NUR, wenn Realtime nicht verbunden ist — sonst schlaeft die DB
+// (spart Neon-Compute). Bei (Re-)Connect + Tab-Fokus einmal frisch ziehen.
+let pollTimer: ReturnType<typeof setInterval> | null = null
+const FALLBACK_POLL_MS = 6000
+const onVisible = () => {
+  if (typeof document !== 'undefined' && document.visibilityState === 'visible') fetchMap()
+}
 onMounted(() => {
   mapSub = subscribeMap(mapId, fetchMap)
   groupSub = subscribeGroup(groupId, (p) => {
     if (p.kind === 'initiative') fetchMap()
   })
-  // Wichtig: KEIN `app-mode-active` hier setzen — das hide-Selektoren
-  // (body > div > header/footer) erwischen sonst Radix-Portal-Container,
-  // die die Selects/Dropdowns rendern, und die werden unklickbar.
-  // layout: false (siehe definePageMeta) sorgt eh fuer keine Header/Footer.
+  let wasLive = false
+  const reconfigurePoll = () => {
+    const live = !!mapSub?.isConnected.value && !!groupSub?.isConnected.value
+    if (live && !wasLive) fetchMap()
+    wasLive = live
+    if (pollTimer) {
+      clearInterval(pollTimer)
+      pollTimer = null
+    }
+    if (!live) pollTimer = setInterval(fetchMap, FALLBACK_POLL_MS)
+  }
+  reconfigurePoll()
+  watch(
+    () => [mapSub?.isConnected.value ?? false, groupSub?.isConnected.value ?? false],
+    reconfigurePoll,
+  )
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', onVisible)
+  }
 })
 onBeforeUnmount(() => {
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('visibilitychange', onVisible)
+  }
+  if (pollTimer) clearInterval(pollTimer)
   mapSub?.unsubscribe()
   groupSub?.unsubscribe()
-})
-
-// Polling-Backup (Mobile/Browser hat manchmal Pusher-Hicks).
-let pollTimer: ReturnType<typeof setInterval> | null = null
-onMounted(() => {
-  pollTimer = setInterval(fetchMap, 8000)
-})
-onBeforeUnmount(() => {
-  if (pollTimer) clearInterval(pollTimer)
 })
 </script>
 
