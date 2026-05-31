@@ -2092,6 +2092,25 @@ const initCurrentEntryId = computed(() => {
   if (!s || !s.active) return null
   return initEntries.value[s.currentIndex]?.id ?? null
 })
+// Token-ID, das gerade an der Reihe ist (fuer das pulsierende Highlight auf der
+// Karte). Charakter-Eintraege ueber characterId, Token-Eintraege ueber die in
+// der Entry-ID kodierte Token-ID (`tok-<id>-...`). Manuelle Eintraege: kein Token.
+const currentTurnTokenId = computed<number | null>(() => {
+  const id = initCurrentEntryId.value
+  if (!id) return null
+  const entry = initEntries.value.find((e) => e.id === id)
+  if (!entry) return null
+  if (entry.characterId != null) {
+    const tok = tokens.value.find((t) => t.characterId === entry.characterId)
+    if (tok) return tok.id
+  }
+  const m = /^tok-(\d+)-/.exec(entry.id)
+  if (m) {
+    const tid = Number(m[1])
+    if (tokens.value.some((t) => t.id === tid)) return tid
+  }
+  return null
+})
 
 const saveInitiative = async (state: InitiativeState | null) => {
   await $fetch(`/api/groups/${groupId}/initiative`, {
@@ -2118,6 +2137,35 @@ const initStartFromTokens = async () => {
     currentIndex: 0,
     entries,
   })
+}
+// Alle NPC-Token (ohne Charakter, nicht versteckt), die noch nicht in der
+// Reihenfolge stehen, mit Default-Initiative 10 hinzufuegen. Funktioniert auch
+// bei bereits gewuerfelter Initiative — der SL passt die Werte inline an.
+const initAddNpcs = async () => {
+  const s = initiativeState.value
+  if (!s) return
+  const existingTokenIds = new Set<number>()
+  for (const e of s.entries) {
+    const m = /^tok-(\d+)-/.exec(e.id)
+    if (m) existingTokenIds.add(Number(m[1]))
+  }
+  const npcTokens = tokens.value.filter(
+    (t) => t.characterId === null && !t.hidden && !existingTokenIds.has(t.id),
+  )
+  if (!npcTokens.length) {
+    alert('Keine weiteren sichtbaren NPC-Token auf der Karte, die noch nicht in der Reihenfolge stehen.')
+    return
+  }
+  const stamp = Date.now()
+  const newEntries: InitiativeEntry[] = npcTokens.map((t) => ({
+    id: `tok-${t.id}-${stamp}`,
+    name: t.name,
+    initiative: 10,
+    ownerUserId: t.ownerUserId,
+    hasActed: false,
+    imageUrl: tokenImageSrc(t) ?? undefined,
+  }))
+  await saveInitiative({ ...s, entries: [...s.entries, ...newEntries] })
 }
 const initAddManual = async () => {
   const name = prompt('Name fuer Initiative-Eintrag?')?.trim()
@@ -3918,6 +3966,9 @@ const endResize = () => {
               @click="toolMode === 'select' && openInfoFromClick(t)"
               @dblclick="toolMode === 'select' && startEdit(t)"
             >
+              <!-- „Am Zug"-Highlight: pulsierender Ring um das Token, das gerade
+                   in der Initiative-Reihenfolge dran ist. -->
+              <div v-if="t.id === currentTurnTokenId" class="token-turn-ring pointer-events-none" />
               <!-- Visueller Kreis: Rand, Bild, Wund-Schleier, Tot-X. Wird per
                    clip-path auf einen vertikalen Streifen reduziert, wenn das
                    Token mit anderen auf demselben Feld stapelt — so bleiben
@@ -4395,6 +4446,18 @@ const endResize = () => {
             </UButton>
             <UButton size="xs" variant="outline" icon="i-lucide-plus" @click="initAddManual">
               Manuell
+            </UButton>
+            <!-- NPCs zur bestehenden Reihenfolge hinzufuegen (auch nach
+                 gewuerfelter Spieler-Initiative). -->
+            <UButton
+              v-if="initiativeState"
+              size="xs"
+              variant="outline"
+              icon="i-lucide-skull"
+              title="Alle sichtbaren NPC-Token, die noch nicht dabei sind, zur Reihenfolge hinzufuegen (Initiative 10, danach anpassbar)"
+              @click="initAddNpcs"
+            >
+              NPCs hinzufügen
             </UButton>
             <!-- Initiative-Anfrage an Spieler: Spieler-Charaktere bekommen im
                  MiniCharSheet einen roten Wuerfel-Button. Wuerfe landen direkt
@@ -5559,6 +5622,26 @@ const endResize = () => {
 @media (prefers-reduced-motion: reduce) {
   .token-walk { transition: none; }
 }
+/* „Am Zug"-Highlight: leuchtender, pulsierender Ring um das aktive Token. */
+.token-turn-ring {
+  position: absolute;
+  inset: -6px;
+  border-radius: 9999px;
+  border: 3px solid #facc15;
+  box-shadow:
+    0 0 14px 4px rgba(250, 204, 21, 0.85),
+    inset 0 0 8px 1px rgba(250, 204, 21, 0.5);
+  animation: token-turn-pulse 1.2s ease-in-out infinite;
+  z-index: 5;
+}
+@keyframes token-turn-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.95; }
+  50%      { transform: scale(1.09); opacity: 0.45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .token-turn-ring { animation: none; }
+}
+
 /* ===== Treffer-/Heilungs-Effekte =========================================== */
 /* Schaden: Token wackelt kurz. */
 @keyframes fx-shake {

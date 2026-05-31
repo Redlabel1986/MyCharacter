@@ -16,7 +16,10 @@ const entrySchema = z.object({
   characterId: z.number().int().positive().optional(),
   ownerUserId: z.number().int().positive().optional(),
   hasActed: z.boolean(),
-  imageUrl: z.string().url().optional(),
+  // App-interne Bild-URL: entweder ein relativer API-Pfad (Token-/Portrait-
+  // Endpoint) oder ein absoluter Blob-URL. Kein url()-Check, weil relative
+  // Pfade (vom DM-Client gesetzt) sonst abgelehnt wuerden.
+  imageUrl: z.string().max(1000).optional(),
 })
 
 const stateSchema = z
