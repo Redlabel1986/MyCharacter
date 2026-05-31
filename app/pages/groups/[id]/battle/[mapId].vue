@@ -2112,6 +2112,40 @@ const currentTurnTokenId = computed<number | null>(() => {
   return null
 })
 
+// Charaktere des eingeloggten Nutzers (Spieler ODER SL), die noch eine
+// Initiative-Anfrage offen haben — fuer den Schnell-Wurf-Button direkt im
+// Initiative-Panel (unabhaengig davon, welcher Token im Mini-Bogen gewaehlt ist).
+const myAwaitingChars = computed<{ characterId: number; name: string }[]>(() => {
+  const awaiting = initiativeState.value?.awaitingFromCharacters ?? []
+  if (!awaiting.length || !user.value) return []
+  const myId = user.value.id
+  const seen = new Set<number>()
+  const out: { characterId: number; name: string }[] = []
+  for (const t of tokens.value) {
+    if (t.ownerUserId !== myId) continue
+    if (t.characterId == null || !awaiting.includes(t.characterId)) continue
+    if (seen.has(t.characterId)) continue
+    seen.add(t.characterId)
+    out.push({ characterId: t.characterId, name: t.name })
+  }
+  return out
+})
+const rollingCharId = ref<number | null>(null)
+const rollInitiativeFor = async (characterId: number) => {
+  rollingCharId.value = characterId
+  try {
+    await $fetch(`/api/groups/${groupId}/initiative/roll`, {
+      method: 'POST',
+      body: { characterId },
+    })
+    await fetchMap()
+  } catch (e: unknown) {
+    alert((e as { statusMessage?: string }).statusMessage ?? 'Initiative-Wurf fehlgeschlagen.')
+  } finally {
+    rollingCharId.value = null
+  }
+}
+
 const saveInitiative = async (state: InitiativeState | null) => {
   await $fetch(`/api/groups/${groupId}/initiative`, {
     method: 'PUT',
@@ -4511,6 +4545,29 @@ const endResize = () => {
               Beenden
             </UButton>
           </div>
+        </div>
+        <!-- Schnell-Wurf: Charaktere des eingeloggten Nutzers (Spieler UND SL),
+             die noch wuerfeln sollen. Direkt im Panel, damit man nicht erst im
+             Mini-Bogen den richtigen Token-Tab waehlen muss. -->
+        <div
+          v-if="myAwaitingChars.length"
+          class="flex flex-wrap items-center gap-2 p-2 rounded bg-[var(--color-accent-soft)] border border-[var(--color-accent)]/40"
+        >
+          <span class="text-xs font-semibold flex items-center gap-1">
+            <UIcon name="i-lucide-dices" class="size-4 text-[var(--color-accent)]" />
+            Initiative würfeln:
+          </span>
+          <UButton
+            v-for="c in myAwaitingChars"
+            :key="c.characterId"
+            size="xs"
+            color="error"
+            icon="i-lucide-dices"
+            :loading="rollingCharId === c.characterId"
+            @click="rollInitiativeFor(c.characterId)"
+          >
+            {{ c.name }}
+          </UButton>
         </div>
         <ol v-if="initEntries.length" class="space-y-1">
           <li
