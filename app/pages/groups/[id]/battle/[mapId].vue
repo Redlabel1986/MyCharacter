@@ -2194,26 +2194,26 @@ const initRemoveEntry = async (id: string) => {
   await saveInitiative({ ...initiativeState.value, entries })
 }
 
-// --- Initiative-Anfrage (SL fordert Spieler-Wuerfe an) ---
-// Sammelt alle Spieler-Token-Charaktere auf der Karte (nicht-NPC, Charakter
-// vorhanden) und legt deren characterId in `awaitingFromCharacters`. Im
-// MiniCharSheet jedes Spielers erscheint dann ein roter "Initiative wuerfeln"-
+// --- Initiative-Anfrage (SL fordert Wuerfe an) ---
+// Sammelt ALLE Token mit Charakter-Bezug auf der Karte (Spieler UND SL-eigene
+// Charaktere/DMPCs) und legt deren characterId in `awaitingFromCharacters`. Im
+// MiniCharSheet erscheint dann pro Charakter ein roter "Initiative wuerfeln"-
 // Button, der server-seitig 1W10 + Handeln wuerfelt und das Ergebnis hier
-// eintraegt.
+// eintraegt. NPC-Token (ohne Charakter) sind nicht dabei — die fuegt der SL
+// ueber „NPCs hinzufuegen" hinzu.
 const initRequestPlayerRolls = async () => {
-  // Alle Token mit Charakter-Bezug, die NICHT dem DM gehoeren → das sind die
-  // Spieler, die wuerfeln sollen. Mehrere Token desselben Charakters werden
-  // deduppt (Set).
-  const dmId = user.value?.id ?? -1
+  // Alle Token mit Charakter-Bezug — unabhaengig vom Besitzer, damit auch die
+  // Charaktere des Spielleiters einen Wuerfel-Button bekommen. Mehrere Token
+  // desselben Charakters werden deduppt (Set).
   const playerCharacterIds: number[] = Array.from(
     new Set<number>(
       tokens.value
-        .filter((t: Token) => t.characterId !== null && t.ownerUserId !== dmId)
+        .filter((t: Token) => t.characterId !== null)
         .map((t: Token) => t.characterId as number),
     ),
   )
   if (!playerCharacterIds.length) {
-    alert('Keine Spieler-Charaktere auf der Karte. Lege erst Token mit Charakter-Bezug an.')
+    alert('Keine Charaktere auf der Karte. Lege erst Token mit Charakter-Bezug an.')
     return
   }
   const s = initiativeState.value
