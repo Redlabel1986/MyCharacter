@@ -1,5 +1,10 @@
 <script setup lang="ts">
 import GroupChat from '~/components/chat/GroupChat.vue'
+import {
+  subscribePresenceGroup,
+  type PresenceSubscription,
+  type PresenceMember,
+} from '~/composables/usePusher'
 
 definePageMeta({ middleware: ['auth'] })
 
@@ -86,6 +91,45 @@ const sharesPanelEl = ref<{ refresh: () => Promise<void> } | null>(null)
 
 const roleBadge = (r: 'player' | 'dm' | 'admin') =>
   r === 'admin' ? 'Admin' : r === 'dm' ? 'DM' : 'Spieler'
+
+// Online-Anzeige via Pusher-Presence-Channel: wer gerade die Gruppenseite offen
+// hat, taucht in `onlineUserIds` auf. Ohne konfiguriertes Pusher bleibt die
+// Anzeige leer (presenceActive=false) und es werden keine Punkte gezeigt.
+const onlineUserIds = ref<Set<number>>(new Set())
+const presenceActive = ref(false)
+const isOnline = (userId: number) => onlineUserIds.value.has(userId)
+const onlineCount = computed(
+  () => (groupData.value?.members ?? []).filter((m: Member) => isOnline(m.userId)).length,
+)
+
+let presence: PresenceSubscription | null = null
+const stops: Array<() => void> = []
+
+onMounted(() => {
+  presence = subscribePresenceGroup(id)
+  if (!presence) return
+  stops.push(
+    watch(
+      presence.members,
+      (list: PresenceMember[]) => {
+        onlineUserIds.value = new Set(list.map((m) => m.userId))
+      },
+      { immediate: true },
+    ),
+    watch(
+      presence.isConnected,
+      (v: boolean) => {
+        presenceActive.value = v
+      },
+      { immediate: true },
+    ),
+  )
+})
+
+onBeforeUnmount(() => {
+  stops.forEach((stop) => stop())
+  presence?.unsubscribe()
+})
 </script>
 
 <template>
@@ -180,7 +224,17 @@ const roleBadge = (r: 'player' | 'dm' | 'admin') =>
 
     <!-- Mitglieder -->
     <aside class="parchment-card p-5 space-y-3">
-      <h2 class="font-serif text-xl">Mitglieder</h2>
+      <div class="flex items-center justify-between gap-2">
+        <h2 class="font-serif text-xl">Mitglieder</h2>
+        <span
+          v-if="presenceActive"
+          class="inline-flex items-center gap-1.5 text-[11px] text-ink-300"
+          title="Mitglieder, die gerade die Gruppe geöffnet haben"
+        >
+          <span class="inline-block w-2 h-2 rounded-full bg-green-500" />
+          {{ onlineCount }} online
+        </span>
+      </div>
       <div class="accent-rule" />
 
       <ul class="space-y-1">
@@ -189,6 +243,13 @@ const roleBadge = (r: 'player' | 'dm' | 'admin') =>
           :key="m.id"
           class="flex items-center gap-2 text-sm py-1"
         >
+          <span
+            class="inline-block w-2.5 h-2.5 rounded-full shrink-0 transition-colors"
+            :class="isOnline(m.userId)
+              ? 'bg-green-500 ring-2 ring-green-500/25'
+              : 'bg-ink-300/40'"
+            :title="isOnline(m.userId) ? 'Online' : 'Offline'"
+          />
           <div class="flex-1">
             <div class="font-semibold">{{ m.username }}</div>
             <div class="text-[11px] text-ink-300">{{ roleBadge(m.role) }}</div>

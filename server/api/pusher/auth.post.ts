@@ -34,7 +34,21 @@ export default defineEventHandler(async (event) => {
 
   const db = useDb()
 
-  if (channelName.startsWith('private-group-')) {
+  // Presence-Daten nur fuer presence-* Channels gesetzt — Pusher signiert damit
+  // user_id + user_info, die alle Channel-Mitglieder als Online-Liste erhalten.
+  let presenceData: import('~~/server/utils/pusher').PresenceData | undefined
+
+  if (channelName.startsWith('presence-group-')) {
+    const groupId = Number(channelName.slice('presence-group-'.length))
+    if (!Number.isFinite(groupId)) {
+      throw createError({ statusCode: 400, statusMessage: 'Ungueltige Gruppen-Channel.' })
+    }
+    await requireGroupMember(db, groupId, user.id)
+    presenceData = {
+      user_id: String(user.id),
+      user_info: { username: user.username, role: user.role },
+    }
+  } else if (channelName.startsWith('private-group-')) {
     const groupId = Number(channelName.slice('private-group-'.length))
     if (!Number.isFinite(groupId)) {
       throw createError({ statusCode: 400, statusMessage: 'Ungueltige Gruppen-Channel.' })
@@ -58,7 +72,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 403, statusMessage: 'Channel-Typ nicht erlaubt.' })
   }
 
-  const auth = authorizeChannel(socketId, channelName)
+  const auth = authorizeChannel(socketId, channelName, presenceData)
   if (!auth) {
     const env = pusherEnvStatus()
     const missing = [

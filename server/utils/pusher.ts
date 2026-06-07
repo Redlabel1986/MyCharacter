@@ -93,14 +93,30 @@ function getClient(): Pusher | null {
 }
 
 /**
- * Ruft Pusher#authorizeChannel auf — Server signiert das Subscribe-Token
- * fuer einen privaten Channel. Wird vom /api/pusher/auth-Endpoint nach der
- * Mitgliedschaftspruefung aufgerufen.
+ * Daten, die Pusher fuer einen Presence-Channel signiert. `user_id` muss pro
+ * User eindeutig sein; `user_info` wird an alle Channel-Mitglieder verteilt.
  */
-export function authorizeChannel(socketId: string, channelName: string) {
+export interface PresenceData {
+  user_id: string
+  user_info?: Record<string, unknown>
+}
+
+/**
+ * Ruft Pusher#authorizeChannel auf — Server signiert das Subscribe-Token
+ * fuer einen privaten ODER Presence-Channel. Wird vom /api/pusher/auth-Endpoint
+ * nach der Mitgliedschaftspruefung aufgerufen. Fuer Presence-Channels muss
+ * `presenceData` gesetzt sein.
+ */
+export function authorizeChannel(
+  socketId: string,
+  channelName: string,
+  presenceData?: PresenceData,
+) {
   const c = getClient()
   if (!c) return null
-  return c.authorizeChannel(socketId, channelName)
+  return presenceData
+    ? c.authorizeChannel(socketId, channelName, presenceData)
+    : c.authorizeChannel(socketId, channelName)
 }
 
 /**

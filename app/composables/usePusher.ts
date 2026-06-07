@@ -114,3 +114,93 @@ export function subscribeGroup(
 ): RealtimeSubscription | null {
   return subscribeChanged(`private-group-${groupId}`, onChange)
 }
+
+/** Ein gerade online (= im Presence-Channel verbundenes) Gruppenmitglied. */
+export interface PresenceMember {
+  userId: number
+  username?: string
+  role?: string
+}
+
+export interface PresenceSubscription {
+  /** Reaktive Liste der aktuell verbundenen Mitglieder (inkl. einem selbst). */
+  members: Ref<PresenceMember[]>
+  /** true, sobald der Presence-Channel erfolgreich abonniert wurde. */
+  isConnected: Ref<boolean>
+  unsubscribe: () => void
+}
+
+// Schmale Sicht auf die pusher-js Presence-API (vermeidet harte Kopplung an
+// deren interne Typen). `info` traegt das vom Server signierte user_info.
+interface RawMember {
+  id: string
+  info?: { username?: string; role?: string }
+}
+interface RawMembers {
+  each: (cb: (m: RawMember) => void) => void
+}
+
+/**
+ * Abonniert den Presence-Channel einer Gruppe und haelt die Online-Mitglieder
+ * reaktiv aktuell (subscription_succeeded + member_added/removed). Liefert
+ * `null`, wenn Realtime nicht konfiguriert ist — dann gibt es schlicht keine
+ * Online-Anzeige (kein Polling-Fallback, Presence ohne Pusher unmoeglich).
+ */
+export function subscribePresenceGroup(groupId: number): PresenceSubscription | null {
+  const p = getPusher()
+  if (!p) return null
+  const channelName = `presence-group-${groupId}`
+  const channel = p.subscribe(channelName)
+  const members = ref<PresenceMember[]>([])
+  const isConnected = ref(false)
+
+  const toMember = (m: RawMember): PresenceMember => ({
+    userId: Number(m.id),
+    username: m.info?.username,
+    role: m.info?.role,
+  })
+
+  const onSucceeded = (data: RawMembers) => {
+    const list: PresenceMember[] = []
+    data.each((m) => list.push(toMember(m)))
+    members.value = list
+    isConnected.value = true
+  }
+  const onAdded = (m: RawMember) => {
+    const nm = toMember(m)
+    if (!members.value.some((x) => x.userId === nm.userId)) {
+      members.value = [...members.value, nm]
+    }
+  }
+  const onRemoved = (m: RawMember) => {
+    const uid = Number(m.id)
+    members.value = members.value.filter((x) => x.userId !== uid)
+  }
+  const onError = (status: unknown) => {
+    isConnected.value = false
+    if (typeof window !== 'undefined') {
+      console.warn(`[pusher] presence subscription_error: ${channelName}`, status)
+    }
+  }
+
+  channel.bind('pusher:subscription_succeeded', onSucceeded)
+  channel.bind('pusher:member_added', onAdded)
+  channel.bind('pusher:member_removed', onRemoved)
+  channel.bind('pusher:subscription_error', onError)
+
+  return {
+    members,
+    isConnected,
+    unsubscribe: () => {
+      try {
+        channel.unbind('pusher:subscription_succeeded', onSucceeded)
+        channel.unbind('pusher:member_added', onAdded)
+        channel.unbind('pusher:member_removed', onRemoved)
+        channel.unbind('pusher:subscription_error', onError)
+        p.unsubscribe(channelName)
+      } catch {
+        // ignore
+      }
+    },
+  }
+}
