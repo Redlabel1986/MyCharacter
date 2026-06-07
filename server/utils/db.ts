@@ -612,6 +612,25 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   // Bestehende Eintraege mit Schutzwert sind Ruestung.
   await db.execute(sql`UPDATE group_armory_items SET kind = 'armor' WHERE armor IS NOT NULL AND kind = 'weapon'`)
 
+  // Tagebuch / Chronik pro Gruppe — kollaboratives Storyline-Logbuch. Jedes
+  // Mitglied darf Eintraege schreiben; Autor + Owner duerfen aendern/loeschen.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS group_journal_entries (
+      id SERIAL PRIMARY KEY,
+      group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL DEFAULT '',
+      entry_date TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_group_journal_group_created
+      ON group_journal_entries(group_id, created_at)
+  `)
+
   await db.execute(sql`
     UPDATE users SET role = 'admin' WHERE email = ${ADMIN_EMAIL} AND role <> 'admin'
   `)

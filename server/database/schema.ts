@@ -870,6 +870,39 @@ export const groupArmoryItems = pgTable(
 export type GroupArmoryItem = typeof groupArmoryItems.$inferSelect
 export type NewGroupArmoryItem = typeof groupArmoryItems.$inferInsert
 
+// Tagebuch / Chronik der Gruppe — kollaboratives Storyline-Logbuch. Anders als
+// das Regelbuch (nur DM) darf hier JEDES Gruppenmitglied Eintraege schreiben
+// ("was alles passiert ist"). Eigene Eintraege darf der Autor bearbeiten/
+// loeschen; der Gruppen-Owner (DM) darf moderierend alle Eintraege bearbeiten/
+// loeschen. Wird ein User geloescht, fallen seine Eintraege weg (cascade).
+export const groupJournalEntries = pgTable(
+  'group_journal_entries',
+  {
+    id: serial('id').primaryKey(),
+    groupId: integer('group_id')
+      .notNull()
+      .references(() => groups.id, { onDelete: 'cascade' }),
+    /** Autor des Eintrags. */
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    title: text('title').notNull().default(''),
+    /** Frei-Text fuer das In-Game-Datum, z.B. „3. Tag im Herbst". Optional. */
+    entryDate: text('entry_date').notNull().default(''),
+    content: text('content').notNull().default(''),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    groupCreatedIdx: index('idx_group_journal_group_created').on(
+      table.groupId,
+      table.createdAt,
+    ),
+  }),
+)
+export type GroupJournalEntry = typeof groupJournalEntries.$inferSelect
+export type NewGroupJournalEntry = typeof groupJournalEntries.$inferInsert
+
 // App-weite Einstellungen als Key/Value (z. B. library_password_hash).
 export const appSettings = pgTable('app_settings', {
   key: text('key').primaryKey(),

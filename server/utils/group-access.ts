@@ -22,7 +22,8 @@ export async function requireGroupMember(
   if (hit.length === 0) {
     throw createError({ statusCode: 404, statusMessage: 'Gruppe nicht gefunden.' })
   }
-  return hit[0]
+  // length-Check oben garantiert ein Ergebnis — non-null fuer sauberen Aufrufer-Typ.
+  return hit[0]!
 }
 
 export async function requireGroupOwner(
@@ -38,5 +39,5 @@ export async function requireGroupOwner(
   if (hit.length === 0) {
     throw createError({ statusCode: 403, statusMessage: 'Nur der Gruppen-Owner darf das.' })
   }
-  return hit[0]
+  return hit[0]!
 }

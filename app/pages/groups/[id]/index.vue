@@ -123,6 +123,17 @@ const roleBadge = (r: 'player' | 'dm' | 'admin') =>
             Regelbuch
           </UButton>
           <UButton
+            :to="`/groups/${id}/journal`"
+            color="primary"
+            variant="soft"
+            size="lg"
+            icon="i-lucide-notebook-pen"
+            class="font-semibold"
+            title="Tagebuch: kollaborative Chronik — was alles passiert ist"
+          >
+            Tagebuch
+          </UButton>
+          <UButton
             :to="`/groups/${id}/armory`"
             color="primary"
             variant="soft"
