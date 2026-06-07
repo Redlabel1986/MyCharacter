@@ -14,7 +14,10 @@ import type { NpcAbility } from '~~/shared/npc'
 import type { HtbahMerchant } from '~~/shared/engines/htbah'
 import type { TimeOfDay } from '~~/shared/time-of-day'
 
-definePageMeta({ middleware: ['auth'], layout: false })
+// key an die Route binden: bei Karten-Wechsel mountet die Seite neu, mapId wird
+// frisch im Setup erfasst und alte Pusher-Subscriptions/Poll-Timer sauber
+// abgebaut (onBeforeUnmount feuert nur bei echtem Remount).
+definePageMeta({ middleware: ['auth'], layout: false, key: (route) => route.fullPath })
 
 interface Token {
   id: number

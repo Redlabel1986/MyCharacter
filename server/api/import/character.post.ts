@@ -4,9 +4,12 @@ import { z } from 'zod'
 import { useDb } from '~~/server/utils/db'
 import { characters } from '~~/server/database/schema'
 import { GAME_SYSTEMS, createBlankCharacter, type GameSystem } from '~~/shared/systems'
+import { rateLimit } from '~~/server/utils/rate-limit'
 
 const MAX_PDF_BYTES = 10 * 1024 * 1024 // 10 MB
 const MAX_TEXT_CHARS = 50_000
+// KI-Import ist teuer (Claude-Aufruf): pro User max. 5 Importe / 5 Minuten.
+const IMPORT_RATE = { max: 5, windowMs: 5 * 60 * 1000 }
 
 interface ExtractedCharacter {
   system: GameSystem
@@ -26,6 +29,15 @@ export default defineEventHandler(async (event) => {
     throw createError({
       statusCode: 503,
       statusMessage: 'PDF-Import ist nicht konfiguriert (ANTHROPIC_API_KEY fehlt).',
+    })
+  }
+
+  // Missbrauchs-/Kostenschutz: KI-Importe pro User drosseln.
+  const limit = rateLimit(`import:${user.id}`, IMPORT_RATE, Date.now())
+  if (!limit.ok) {
+    throw createError({
+      statusCode: 429,
+      statusMessage: `Zu viele Importe. Bitte in ${limit.retryAfter}s erneut versuchen.`,
     })
   }
 
@@ -289,7 +301,7 @@ HtbaH-SPEZIFISCH:
       console.error('Anthropic API error:', err)
       throw createError({
         statusCode: 502,
-        statusMessage: `KI-Fehler: ${err.message}`,
+        statusMessage: 'KI-Dienst aktuell nicht erreichbar. Bitte später erneut versuchen.',
       })
     }
     console.error('Import unexpected error:', err)

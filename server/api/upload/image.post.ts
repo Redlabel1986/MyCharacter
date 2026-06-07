@@ -58,7 +58,7 @@ export default defineEventHandler(async (event) => {
       console.error('[upload] vercel-blob FAILED', err)
       throw createError({
         statusCode: 502,
-        statusMessage: `Bild-Upload fehlgeschlagen: ${(err as Error).message ?? 'unbekannt'}`,
+        statusMessage: 'Bild-Upload fehlgeschlagen.',
       })
     }
   }

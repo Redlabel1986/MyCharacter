@@ -36,7 +36,7 @@ export default defineEventHandler(async (event) => {
     console.error('[portrait] streamPortrait FAILED', err)
     throw createError({
       statusCode: 502,
-      statusMessage: `Portrait konnte nicht geladen werden: ${(err as Error).message ?? 'unbekannt'}`,
+      statusMessage: 'Portrait konnte nicht geladen werden.',
     })
   }
 })

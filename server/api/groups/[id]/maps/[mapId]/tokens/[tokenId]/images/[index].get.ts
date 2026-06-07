@@ -67,9 +67,10 @@ export default defineEventHandler(async (event) => {
     return buf
   } catch (err) {
     if ((err as { statusCode?: number }).statusCode) throw err
+    console.error('[token image] FAILED', err)
     throw createError({
       statusCode: 502,
-      statusMessage: `Bild fehlgeschlagen: ${(err as Error).message ?? 'unbekannt'}`,
+      statusMessage: 'Bild fehlgeschlagen.',
     })
   }
 })

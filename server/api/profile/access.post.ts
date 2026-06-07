@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { and, eq, or } from 'drizzle-orm'
+import { and, eq, or, sql } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { characters, characterAccess, users } from '~~/server/database/schema'
 
@@ -24,11 +24,13 @@ export default defineEventHandler(async (event) => {
   }
 
   // 2. DM-User auflösen — muss role 'dm' oder 'admin' haben
+  // E-Mail UND Benutzername case-insensitiv vergleichen (E-Mails liegen lower
+  // in der DB; Benutzername wird per lower() verglichen).
   const ident = body.dmIdentifier.toLowerCase()
   const found = await db
     .select({ id: users.id, username: users.username, email: users.email, role: users.role })
     .from(users)
-    .where(or(eq(users.email, ident), eq(users.username, body.dmIdentifier)))
+    .where(or(eq(users.email, ident), eq(sql`lower(${users.username})`, ident)))
     .limit(1)
 
   if (found.length === 0) {

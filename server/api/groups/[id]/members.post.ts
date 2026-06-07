@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { eq, or } from 'drizzle-orm'
+import { eq, or, sql } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
 import { requireGroupOwner } from '~~/server/utils/group-access'
 import { groupMembers, users } from '~~/server/database/schema'
@@ -19,11 +19,12 @@ export default defineEventHandler(async (event) => {
 
   await requireGroupOwner(db, groupId, user.id)
 
+  // E-Mail UND Benutzername case-insensitiv vergleichen.
   const ident = body.identifier.toLowerCase()
   const found = await db
     .select({ id: users.id, username: users.username })
     .from(users)
-    .where(or(eq(users.email, ident), eq(users.username, body.identifier)))
+    .where(or(eq(users.email, ident), eq(sql`lower(${users.username})`, ident)))
     .limit(1)
   if (found.length === 0) {
     throw createError({ statusCode: 404, statusMessage: 'Kein User mit dieser Kennung gefunden.' })

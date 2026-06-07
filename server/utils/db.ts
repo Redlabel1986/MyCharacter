@@ -7,7 +7,9 @@ let _db: ReturnType<typeof drizzle> | null = null
 let _client: NeonQueryFunction<false, false> | null = null
 let _initPromise: Promise<void> | null = null
 
-export const ADMIN_EMAIL = 'jasongehrts@gmail.com'
+// Admin-Account per ENV konfigurierbar (Fallback fuer bestehendes Single-Admin-
+// Setup). Wird beim Schema-Init zur Admin-Rolle hochgestuft.
+export const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'jasongehrts@gmail.com'
 
 export function useDb() {
   if (_db) return _db
@@ -117,6 +119,10 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_messages_group_created ON messages(group_id, created_at)
   `)
+  // Index fuer User-bezogene Abfragen (z.B. Whisper-Filterung, History).
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id)
+  `)
   // Nachrichten-Typ + Payload (idempotent fuer bestehende Tabellen)
   await db.execute(sql`
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'text'
@@ -180,6 +186,10 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   `)
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_battle_tokens_map ON battle_tokens(map_id)
+  `)
+  // Index fuer Owner-bezogene Permission-Checks.
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_battle_tokens_owner ON battle_tokens(owner_user_id)
   `)
   // Beschreibung fuer NPC-Karten (idempotent)
   await db.execute(sql`
@@ -250,6 +260,10 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   // Whisper-Empfaenger
   await db.execute(sql`
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS target_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+  `)
+  // Index fuer Whisper-Empfaenger-Filterung.
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_messages_target_user ON messages(target_user_id)
   `)
   // NPC-Regelwerk + NPC-Faehigkeiten am Battle-Token (DM-Stat-Block).
   await db.execute(sql`
@@ -437,6 +451,30 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   `)
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_map_objects_map ON map_objects(map_id)
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_map_objects_template ON map_objects(template_id)
+  `)
+  // Foreign Key auf template_id (idempotent). Vorher verwaiste Verweise (Template
+  // bereits geloescht) auf NULL setzen, sonst scheitert das ADD CONSTRAINT an
+  // Altdaten. Danach ON DELETE SET NULL: ein geloeschtes Template laesst die
+  // Objekte stehen, nur der Template-Link wird geleert.
+  await db.execute(sql`
+    UPDATE map_objects o
+    SET template_id = NULL
+    WHERE template_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM map_object_templates t WHERE t.id = o.template_id)
+  `)
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'fk_map_objects_template'
+      ) THEN
+        ALTER TABLE map_objects
+          ADD CONSTRAINT fk_map_objects_template
+          FOREIGN KEY (template_id) REFERENCES map_object_templates(id) ON DELETE SET NULL;
+      END IF;
+    END $$;
   `)
 
   // NPC-Bibliothek des DM. Per-Owner + optional Per-Group.

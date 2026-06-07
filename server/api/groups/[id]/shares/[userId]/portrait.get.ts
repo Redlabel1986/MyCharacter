@@ -40,9 +40,10 @@ export default defineEventHandler(async (event) => {
     return await streamPortrait(event, share.portraitUrl)
   } catch (err) {
     if ((err as { statusCode?: number }).statusCode) throw err
+    console.error('[share portrait] FAILED', err)
     throw createError({
       statusCode: 502,
-      statusMessage: `Portrait konnte nicht geladen werden: ${(err as Error).message ?? 'unbekannt'}`,
+      statusMessage: 'Portrait konnte nicht geladen werden.',
     })
   }
 })

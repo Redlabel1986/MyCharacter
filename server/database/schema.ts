@@ -252,6 +252,8 @@ export const messages = pgTable(
   },
   (table) => ({
     groupCreatedIdx: index('idx_messages_group_created').on(table.groupId, table.createdAt),
+    userIdx: index('idx_messages_user').on(table.userId),
+    targetUserIdx: index('idx_messages_target_user').on(table.targetUserId),
   }),
 )
 
@@ -485,6 +487,7 @@ export const battleTokens = pgTable(
   },
   (table) => ({
     mapIdx: index('idx_battle_tokens_map').on(table.mapId),
+    ownerIdx: index('idx_battle_tokens_owner').on(table.ownerUserId),
   }),
 )
 
@@ -610,7 +613,9 @@ export const mapObjects = pgTable(
     /** Built-in key (z.B. "boot") oder NULL fuer Custom-Templates. */
     templateKey: text('template_key'),
     /** Custom-Template-ID, falls aus map_object_templates. */
-    templateId: integer('template_id'),
+    templateId: integer('template_id').references(() => mapObjectTemplates.id, {
+      onDelete: 'set null',
+    }),
     name: text('name').notNull(),
     imageUrl: text('image_url'),
     width: integer('width').notNull().default(1),
@@ -628,6 +633,7 @@ export const mapObjects = pgTable(
   },
   (table) => ({
     mapIdx: index('idx_map_objects_map').on(table.mapId),
+    templateIdx: index('idx_map_objects_template').on(table.templateId),
   }),
 )
 

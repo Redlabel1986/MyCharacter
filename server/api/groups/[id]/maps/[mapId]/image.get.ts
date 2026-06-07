@@ -57,9 +57,10 @@ export default defineEventHandler(async (event) => {
     return buf
   } catch (err) {
     if ((err as { statusCode?: number }).statusCode) throw err
+    console.error('[map image] FAILED', err)
     throw createError({
       statusCode: 502,
-      statusMessage: `Karten-Bild konnte nicht geladen werden: ${(err as Error).message ?? 'unbekannt'}`,
+      statusMessage: 'Karten-Bild konnte nicht geladen werden.',
     })
   }
 })

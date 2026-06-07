@@ -1,4 +1,4 @@
-import { and, eq, or } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import type { drizzle } from 'drizzle-orm/neon-http'
 import { characters, characterAccess } from '../database/schema'
 import type { UserRole } from '../database/schema'
@@ -71,11 +71,4 @@ export async function loadAccessibleCharacter(
     updatedAt: c.updatedAt,
     accessKind: 'dm',
   }
-}
-
-export function accessibleCharacterCondition(user: { id: number; role: UserRole }) {
-  if (user.role === 'admin' || user.role === 'dm') {
-    return or(eq(characters.userId, user.id))
-  }
-  return eq(characters.userId, user.id)
 }
