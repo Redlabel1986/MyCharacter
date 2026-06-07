@@ -28,7 +28,13 @@ import {
   type Wall,
 } from '~~/shared/fog'
 import { computeDamageLevel, damageLevelColor } from '~~/shared/damage-level'
-import { subscribeMap, subscribeGroup, type RealtimeSubscription } from '~/composables/usePusher'
+import {
+  subscribeMap,
+  subscribeGroup,
+  subscribePresenceGroup,
+  type RealtimeSubscription,
+  type PresenceSubscription,
+} from '~/composables/usePusher'
 import {
   BUILT_IN_MAP_OBJECTS,
   CATEGORY_LABELS,
@@ -373,6 +379,8 @@ const fetchMapList = async () => {
 // frisch, um etwaige verpasste Events nachzuholen.
 let mapSub: RealtimeSubscription | null = null
 let groupSub: RealtimeSubscription | null = null
+// Praesenz: meldet diesen Tab gruppenweit als „im Spiel" (playing:true).
+let presenceSub: PresenceSubscription | null = null
 let pollHandle: ReturnType<typeof setInterval> | null = null
 // Fallback-Poll NUR ohne Realtime-Verbindung.
 const FALLBACK_POLL_MS = 5_000
@@ -423,6 +431,8 @@ onMounted(() => {
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', onVisible)
   }
+  // Gruppenweit als „im Spiel" anzeigen (Online-Status auf der Gruppenseite).
+  presenceSub = subscribePresenceGroup(groupId, { playing: true })
 })
 onUnmounted(() => {
   if (typeof document !== 'undefined') {
@@ -431,6 +441,7 @@ onUnmounted(() => {
   if (pollHandle) clearInterval(pollHandle)
   mapSub?.unsubscribe()
   groupSub?.unsubscribe()
+  presenceSub?.unsubscribe()
 })
 
 // --- Bild-Dimensionen ---

@@ -96,23 +96,30 @@ const roleBadge = (r: 'player' | 'dm' | 'admin') =>
 // hat, taucht in `onlineUserIds` auf. Ohne konfiguriertes Pusher bleibt die
 // Anzeige leer (presenceActive=false) und es werden keine Punkte gezeigt.
 const onlineUserIds = ref<Set<number>>(new Set())
+const playingUserIds = ref<Set<number>>(new Set())
 const presenceActive = ref(false)
 const isOnline = (userId: number) => onlineUserIds.value.has(userId)
+const isPlaying = (userId: number) => playingUserIds.value.has(userId)
 const onlineCount = computed(
   () => (groupData.value?.members ?? []).filter((m: Member) => isOnline(m.userId)).length,
+)
+const playingCount = computed(
+  () => (groupData.value?.members ?? []).filter((m: Member) => isPlaying(m.userId)).length,
 )
 
 let presence: PresenceSubscription | null = null
 const stops: Array<() => void> = []
 
 onMounted(() => {
-  presence = subscribePresenceGroup(id)
+  // Index ist KEINE Spiel-Seite → playing:false.
+  presence = subscribePresenceGroup(id, { playing: false })
   if (!presence) return
   stops.push(
     watch(
       presence.members,
       (list: PresenceMember[]) => {
         onlineUserIds.value = new Set(list.map((m) => m.userId))
+        playingUserIds.value = new Set(list.filter((m) => m.playing).map((m) => m.userId))
       },
       { immediate: true },
     ),
@@ -228,11 +235,20 @@ onBeforeUnmount(() => {
         <h2 class="font-serif text-xl">Mitglieder</h2>
         <span
           v-if="presenceActive"
-          class="inline-flex items-center gap-1.5 text-[11px] text-ink-300"
-          title="Mitglieder, die gerade die Gruppe geöffnet haben"
+          class="inline-flex items-center gap-2 text-[11px] text-ink-300"
         >
-          <span class="inline-block w-2 h-2 rounded-full bg-green-500" />
-          {{ onlineCount }} online
+          <span class="inline-flex items-center gap-1.5" title="Mitglieder, die gerade die Gruppe geöffnet haben">
+            <span class="inline-block w-2 h-2 rounded-full bg-green-500" />
+            {{ onlineCount }} online
+          </span>
+          <span
+            v-if="playingCount > 0"
+            class="inline-flex items-center gap-1.5 text-violet-600"
+            title="Mitglieder, die gerade auf einer Battle-/Spiel-Karte sind"
+          >
+            <span class="inline-block w-2 h-2 rounded-full bg-violet-500" />
+            {{ playingCount }} im Spiel
+          </span>
         </span>
       </div>
       <div class="accent-rule" />
@@ -245,13 +261,24 @@ onBeforeUnmount(() => {
         >
           <span
             class="inline-block w-2.5 h-2.5 rounded-full shrink-0 transition-colors"
-            :class="isOnline(m.userId)
-              ? 'bg-green-500 ring-2 ring-green-500/25'
-              : 'bg-ink-300/40'"
-            :title="isOnline(m.userId) ? 'Online' : 'Offline'"
+            :class="isPlaying(m.userId)
+              ? 'bg-violet-500 ring-2 ring-violet-500/30'
+              : isOnline(m.userId)
+                ? 'bg-green-500 ring-2 ring-green-500/25'
+                : 'bg-ink-300/40'"
+            :title="isPlaying(m.userId) ? 'Im Spiel' : isOnline(m.userId) ? 'Online' : 'Offline'"
           />
           <div class="flex-1">
-            <div class="font-semibold">{{ m.username }}</div>
+            <div class="flex items-center gap-2">
+              <span class="font-semibold">{{ m.username }}</span>
+              <span
+                v-if="isPlaying(m.userId)"
+                class="inline-flex items-center gap-1 rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-600"
+              >
+                <span class="i-lucide-swords w-2.5 h-2.5" />
+                Im Spiel
+              </span>
+            </div>
             <div class="text-[11px] text-ink-300">{{ roleBadge(m.role) }}</div>
           </div>
           <span

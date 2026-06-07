@@ -12,6 +12,12 @@ import Pusher from 'pusher-js'
 let _client: Pusher | null = null
 let _initialized = false
 
+// Pro Browser-Tab: ist die gerade offene Seite eine Spiel-Seite (Battle/Play)?
+// Wird unmittelbar vor dem Presence-Subscribe gesetzt und vom headersProvider
+// an den Auth-Endpoint gemeldet, der es als user_info.playing signiert. Ein Tab
+// ist immer auf genau einer Seite → kein Race zwischen mehreren Intents.
+const presenceIntent = { playing: false }
+
 function getPusher(): Pusher | null {
   if (_initialized) return _client
   if (typeof window === 'undefined') return null
@@ -27,11 +33,16 @@ function getPusher(): Pusher | null {
   _client = new Pusher(key, {
     cluster,
     forceTLS: true,
-    authEndpoint: '/api/pusher/auth',
     // Standard-AJAX-POST mit Cookies — h3 erkennt form-urlencoded, der
-    // /api/pusher/auth-Handler liest das ueber readBody().
-    auth: {
-      headers: { 'X-Requested-With': 'pusher' },
+    // /api/pusher/auth-Handler liest das ueber readBody(). headersProvider wird
+    // pro Auth-Request ausgewertet, sodass das playing-Flag stets aktuell ist.
+    channelAuthorization: {
+      endpoint: '/api/pusher/auth',
+      transport: 'ajax',
+      headersProvider: () => ({
+        'X-Requested-With': 'pusher',
+        'X-Presence-Playing': presenceIntent.playing ? '1' : '0',
+      }),
     },
   })
   return _client
@@ -120,6 +131,8 @@ export interface PresenceMember {
   userId: number
   username?: string
   role?: string
+  /** true, wenn dieser Tab gerade auf einer Spiel-Seite (Battle/Play) ist. */
+  playing?: boolean
 }
 
 export interface PresenceSubscription {
@@ -134,7 +147,7 @@ export interface PresenceSubscription {
 // deren interne Typen). `info` traegt das vom Server signierte user_info.
 interface RawMember {
   id: string
-  info?: { username?: string; role?: string }
+  info?: { username?: string; role?: string; playing?: boolean }
 }
 interface RawMembers {
   each: (cb: (m: RawMember) => void) => void
@@ -145,10 +158,20 @@ interface RawMembers {
  * reaktiv aktuell (subscription_succeeded + member_added/removed). Liefert
  * `null`, wenn Realtime nicht konfiguriert ist — dann gibt es schlicht keine
  * Online-Anzeige (kein Polling-Fallback, Presence ohne Pusher unmoeglich).
+ *
+ * `opts.playing` meldet diesen Tab als „im Spiel" (Battle/Play-Seite) — der
+ * Wert wird ueber den Auth-Header an den Server gereicht und als
+ * user_info.playing an alle Mitglieder verteilt.
  */
-export function subscribePresenceGroup(groupId: number): PresenceSubscription | null {
+export function subscribePresenceGroup(
+  groupId: number,
+  opts: { playing?: boolean } = {},
+): PresenceSubscription | null {
   const p = getPusher()
   if (!p) return null
+  // VOR dem subscribe setzen: der folgende Auth-Request liest den Wert ueber
+  // headersProvider. Ein Tab subscribed genau einen Presence-Channel.
+  presenceIntent.playing = opts.playing ?? false
   const channelName = `presence-group-${groupId}`
   const channel = p.subscribe(channelName)
   const members = ref<PresenceMember[]>([])
@@ -158,6 +181,7 @@ export function subscribePresenceGroup(groupId: number): PresenceSubscription | 
     userId: Number(m.id),
     username: m.info?.username,
     role: m.info?.role,
+    playing: m.info?.playing === true,
   })
 
   const onSucceeded = (data: RawMembers) => {

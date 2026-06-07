@@ -9,7 +9,13 @@
  * Mobile-first: voller Viewport, keine Header/Footer, App-Modus aktiv.
  */
 import MiniCharSheet from '~/components/battle/MiniCharSheet.vue'
-import { subscribeMap, subscribeGroup, type RealtimeSubscription } from '~/composables/usePusher'
+import {
+  subscribeMap,
+  subscribeGroup,
+  subscribePresenceGroup,
+  type RealtimeSubscription,
+  type PresenceSubscription,
+} from '~/composables/usePusher'
 import type { NpcAbility } from '~~/shared/npc'
 import type { HtbahMerchant } from '~~/shared/engines/htbah'
 import type { TimeOfDay } from '~~/shared/time-of-day'
@@ -101,6 +107,8 @@ const myTokensOnMap = computed<Token[]>(() =>
 
 let mapSub: RealtimeSubscription | null = null
 let groupSub: RealtimeSubscription | null = null
+// Praesenz: meldet diesen Tab gruppenweit als „im Spiel" (playing:true).
+let presenceSub: PresenceSubscription | null = null
 // Polling-Backup NUR, wenn Realtime nicht verbunden ist — sonst schlaeft die DB
 // (spart Neon-Compute). Bei (Re-)Connect + Tab-Fokus einmal frisch ziehen.
 let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -132,6 +140,8 @@ onMounted(() => {
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', onVisible)
   }
+  // Gruppenweit als „im Spiel" anzeigen (Online-Status auf der Gruppenseite).
+  presenceSub = subscribePresenceGroup(groupId, { playing: true })
 })
 onBeforeUnmount(() => {
   if (typeof document !== 'undefined') {
@@ -140,6 +150,7 @@ onBeforeUnmount(() => {
   if (pollTimer) clearInterval(pollTimer)
   mapSub?.unsubscribe()
   groupSub?.unsubscribe()
+  presenceSub?.unsubscribe()
 })
 </script>
 
