@@ -54,7 +54,7 @@ export default defineEventHandler(async (event) => {
   if (char.system !== 'htbah') {
     throw createError({ statusCode: 400, statusMessage: 'Zauberei-Modul nur fuer HtbaH.' })
   }
-  const data = char.data as HtbahCharacterData
+  const data = char.data as unknown as HtbahCharacterData
   if (!data.magicState?.active) {
     throw createError({
       statusCode: 400,
@@ -80,7 +80,7 @@ export default defineEventHandler(async (event) => {
       .where(eq(characters.id, body.targetCharacterId))
       .limit(1)
     if (tc && tc.system === 'htbah') {
-      const tcd = tc.data as HtbahCharacterData
+      const tcd = tc.data as unknown as HtbahCharacterData
       if (tcd.magicState?.active) {
         zielArkanum = tcd.magicState.arkanum
         zielChar = tc
@@ -108,7 +108,7 @@ export default defineEventHandler(async (event) => {
 
   // Ziel-Charakter zahlt auch 1 Mana, wenn vorhanden.
   if (zielChar) {
-    const tcd = zielChar.data as HtbahCharacterData
+    const tcd = zielChar.data as unknown as HtbahCharacterData
     if (tcd.magicState && tcd.magicState.mana >= 1) {
       await db
         .update(characters)

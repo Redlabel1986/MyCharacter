@@ -418,7 +418,7 @@ const scopeOptionsForForm = computed(() => [
     </UModal>
 
     <!-- Bearbeiten-Modal -->
-    <UModal v-model:open="editingId" :title="editingDraft?.name ?? 'NPC'">
+    <UModal :open="editingId !== null" :title="editingDraft?.name ?? 'NPC'" @update:open="(v) => { if (!v) editingId = null }">
       <template #body>
         <div v-if="editingDraft" class="space-y-3">
           <UFormField label="Name">

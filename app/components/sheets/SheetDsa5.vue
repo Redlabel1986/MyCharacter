@@ -13,9 +13,9 @@ import StatBlock from '~/components/ui/StatBlock.vue'
 const props = defineProps<{ data: Record<string, unknown>; system: GameSystem }>()
 const emit = defineEmits<{ (e: 'update:data', v: Record<string, unknown>): void }>()
 
-const sheet = computed<Dsa5CharacterData>(() => props.data as Dsa5CharacterData)
+const sheet = computed<Dsa5CharacterData>(() => props.data as unknown as Dsa5CharacterData)
 const update = (next: Dsa5CharacterData) => emit('update:data', next as unknown as Record<string, unknown>)
-const clone = () => JSON.parse(JSON.stringify(sheet.value)) as Dsa5CharacterData
+const clone = () => JSON.parse(JSON.stringify(sheet.value)) as unknown as Dsa5CharacterData
 
 const derived = computed(() => dsa5Derived(sheet.value))
 
@@ -51,7 +51,7 @@ const addSkill = () => {
   update(n)
 }
 const updateSkill = (idx: number, patch: Partial<Dsa5CharacterData['skills'][number]>) => {
-  const n = clone(); n.skills[idx] = { ...n.skills[idx], ...patch }; update(n)
+  const n = clone(); n.skills[idx] = { ...n.skills[idx]!, ...patch }; update(n)
 }
 const removeSkill = (idx: number) => {
   const n = clone(); n.skills.splice(idx, 1); update(n)
@@ -63,7 +63,7 @@ const addWeapon = () => {
   update(n)
 }
 const updateWeapon = (idx: number, patch: Partial<Dsa5CharacterData['weapons'][number]>) => {
-  const n = clone(); n.weapons[idx] = { ...n.weapons[idx], ...patch }; update(n)
+  const n = clone(); n.weapons[idx] = { ...n.weapons[idx]!, ...patch }; update(n)
 }
 const removeWeapon = (idx: number) => { const n = clone(); n.weapons.splice(idx, 1); update(n) }
 
@@ -76,7 +76,7 @@ const addSpell = () => {
   update(n)
 }
 const updateSpell = (idx: number, patch: Partial<Dsa5CharacterData['spells'][number]>) => {
-  const n = clone(); n.spells[idx] = { ...n.spells[idx], ...patch }; update(n)
+  const n = clone(); n.spells[idx] = { ...n.spells[idx]!, ...patch }; update(n)
 }
 const removeSpell = (idx: number) => { const n = clone(); n.spells.splice(idx, 1); update(n) }
 
@@ -89,7 +89,7 @@ const addLiturgy = () => {
   update(n)
 }
 const updateLiturgy = (idx: number, patch: Partial<Dsa5CharacterData['liturgies'][number]>) => {
-  const n = clone(); n.liturgies[idx] = { ...n.liturgies[idx], ...patch }; update(n)
+  const n = clone(); n.liturgies[idx] = { ...n.liturgies[idx]!, ...patch }; update(n)
 }
 const removeLiturgy = (idx: number) => { const n = clone(); n.liturgies.splice(idx, 1); update(n) }
 
@@ -133,7 +133,7 @@ const skillCategories: Dsa5CharacterData['skills'][number]['category'][] = [
           <USelect
             :model-value="sheet.identity.experienceLevel"
             :items="experienceLevels"
-            @update:model-value="setIdentity('experienceLevel', $event as Dsa5CharacterData['identity']['experienceLevel'])"
+            @update:model-value="setIdentity('experienceLevel', $event as unknown as Dsa5CharacterData['identity']['experienceLevel'])"
           />
         </UFormField>
         <UFormField label="AP gesamt">
@@ -255,9 +255,9 @@ const skillCategories: Dsa5CharacterData['skills'][number]['category'][] = [
         <div v-for="(s, idx) in sheet.skills" :key="s.id" class="grid grid-cols-12 gap-2 items-center">
           <UInput class="col-span-3" :model-value="s.name" @update:model-value="updateSkill(idx, { name: String($event) })" />
           <USelect class="col-span-2" :model-value="s.category" :items="skillCategories"
-            @update:model-value="updateSkill(idx, { category: $event as Dsa5CharacterData['skills'][number]['category'] })" />
+            @update:model-value="updateSkill(idx, { category: $event as unknown as Dsa5CharacterData['skills'][number]['category'] })" />
           <div class="col-span-3 grid grid-cols-3 gap-1">
-            <USelect v-for="i in 3" :key="i" :model-value="s.probe[i - 1]" :items="DSA_ABILITIES"
+            <USelect v-for="i in 3" :key="i" :model-value="s.probe[i - 1]" :items="[...DSA_ABILITIES]"
               @update:model-value="updateSkill(idx, { probe: s.probe.map((p, j) => j === i - 1 ? ($event as DsaAbility) : p) as [DsaAbility, DsaAbility, DsaAbility] })" />
           </div>
           <UInput type="number" class="col-span-1" :model-value="s.fw" @update:model-value="updateSkill(idx, { fw: Number($event) })" />
@@ -290,16 +290,16 @@ const skillCategories: Dsa5CharacterData['skills'][number]['category'][] = [
     </SheetSection>
 
     <SheetSection title="Vor-/Nachteile, SF">
-      <UFormField label="Vorteile"><UTextarea rows="3" :model-value="sheet.advantages" @update:model-value="setText('advantages', String($event))" /></UFormField>
-      <UFormField label="Nachteile" class="mt-2"><UTextarea rows="3" :model-value="sheet.disadvantages" @update:model-value="setText('disadvantages', String($event))" /></UFormField>
-      <UFormField label="Sonderfertigkeiten" class="mt-2"><UTextarea rows="4" :model-value="sheet.specialAbilities" @update:model-value="setText('specialAbilities', String($event))" /></UFormField>
+      <UFormField label="Vorteile"><UTextarea :rows="3" :model-value="sheet.advantages" @update:model-value="setText('advantages', String($event))" /></UFormField>
+      <UFormField label="Nachteile" class="mt-2"><UTextarea :rows="3" :model-value="sheet.disadvantages" @update:model-value="setText('disadvantages', String($event))" /></UFormField>
+      <UFormField label="Sonderfertigkeiten" class="mt-2"><UTextarea :rows="4" :model-value="sheet.specialAbilities" @update:model-value="setText('specialAbilities', String($event))" /></UFormField>
     </SheetSection>
 
     <SheetSection title="Zauber" class="lg:col-span-3">
       <div v-for="(s, idx) in sheet.spells" :key="s.id" class="grid grid-cols-12 gap-2 items-end mb-2">
         <UFormField label="Name" class="col-span-3"><UInput :model-value="s.name" @update:model-value="updateSpell(idx, { name: String($event) })" /></UFormField>
         <div class="col-span-3 grid grid-cols-3 gap-1">
-          <USelect v-for="i in 3" :key="i" :model-value="s.probe[i - 1]" :items="DSA_ABILITIES"
+          <USelect v-for="i in 3" :key="i" :model-value="s.probe[i - 1]" :items="[...DSA_ABILITIES]"
             @update:model-value="updateSpell(idx, { probe: s.probe.map((p, j) => j === i - 1 ? ($event as DsaAbility) : p) as [DsaAbility, DsaAbility, DsaAbility] })" />
         </div>
         <UFormField label="ZfW" class="col-span-1"><UInput type="number" :model-value="s.zfw" @update:model-value="updateSpell(idx, { zfw: Number($event) })" /></UFormField>
@@ -314,7 +314,7 @@ const skillCategories: Dsa5CharacterData['skills'][number]['category'][] = [
       <div v-for="(l, idx) in sheet.liturgies" :key="l.id" class="grid grid-cols-12 gap-2 items-end mb-2">
         <UFormField label="Name" class="col-span-3"><UInput :model-value="l.name" @update:model-value="updateLiturgy(idx, { name: String($event) })" /></UFormField>
         <div class="col-span-3 grid grid-cols-3 gap-1">
-          <USelect v-for="i in 3" :key="i" :model-value="l.probe[i - 1]" :items="DSA_ABILITIES"
+          <USelect v-for="i in 3" :key="i" :model-value="l.probe[i - 1]" :items="[...DSA_ABILITIES]"
             @update:model-value="updateLiturgy(idx, { probe: l.probe.map((p, j) => j === i - 1 ? ($event as DsaAbility) : p) as [DsaAbility, DsaAbility, DsaAbility] })" />
         </div>
         <UFormField label="LkW" class="col-span-1"><UInput type="number" :model-value="l.lkw" @update:model-value="updateLiturgy(idx, { lkw: Number($event) })" /></UFormField>
@@ -326,8 +326,8 @@ const skillCategories: Dsa5CharacterData['skills'][number]['category'][] = [
     </SheetSection>
 
     <SheetSection title="Inventar & Notizen" class="lg:col-span-3">
-      <UFormField label="Inventar"><UTextarea rows="6" :model-value="sheet.inventory" @update:model-value="setText('inventory', String($event))" /></UFormField>
-      <UFormField label="Notizen" class="mt-2"><UTextarea rows="6" :model-value="sheet.notes" @update:model-value="setText('notes', String($event))" /></UFormField>
+      <UFormField label="Inventar"><UTextarea :rows="6" :model-value="sheet.inventory" @update:model-value="setText('inventory', String($event))" /></UFormField>
+      <UFormField label="Notizen" class="mt-2"><UTextarea :rows="6" :model-value="sheet.notes" @update:model-value="setText('notes', String($event))" /></UFormField>
     </SheetSection>
   </div>
 </template>

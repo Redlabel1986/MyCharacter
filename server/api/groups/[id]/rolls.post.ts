@@ -317,7 +317,7 @@ export default defineEventHandler(async (event) => {
     wounds = woundsFromChar(char)
     // Schmerzstufen wirken nur auf koerperliche (Handeln-)Fertigkeiten —
     // dazu zaehlen Angriffs- und Paradewuerfe. Wissen/Soziales bleibt frei.
-    if (!htbahSkillCountsAsPhysical(char.data as HtbahCharacterData, body.skillId)) {
+    if (!htbahSkillCountsAsPhysical(char.data as unknown as HtbahCharacterData, body.skillId)) {
       wounds = NO_WOUNDS
     }
     // Jagdwaffen-Bonus: +15 auf den Trefferwurf, wenn das gewaehlte Ziel-Token
@@ -349,7 +349,7 @@ export default defineEventHandler(async (event) => {
           .where(eq(characters.id, targetTok.characterId))
           .limit(1)
         if (tc && tc.system === 'htbah') {
-          const ta = htbahTotalArmor(tc.data as HtbahCharacterData)
+          const ta = htbahTotalArmor(tc.data as unknown as HtbahCharacterData)
           huntingBonus = htbahJagdwaffeBonus(ta, body.huntingThreshold)
         }
       }
@@ -536,7 +536,7 @@ export default defineEventHandler(async (event) => {
               .where(eq(characters.id, targetTok.characterId))
               .limit(1)
             if (c && c.system === 'htbah') {
-              armor = htbahTotalArmor(c.data as HtbahCharacterData)
+              armor = htbahTotalArmor(c.data as unknown as HtbahCharacterData)
             }
           }
           // Ruestungsbrechend X: reduziert die wirksame Ruestung. Wird in der

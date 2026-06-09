@@ -160,10 +160,10 @@ export function dsa41RollProbe(input: Dsa41ProbeInput): Dsa41ProbeResult {
   let ones = 0
   let twenties = 0
   for (let i = 0; i < 3; i++) {
-    const r = input.rolls[i]
+    const r = input.rolls[i]!
     if (r === 1) ones++
     if (r === 20) twenties++
-    if (r > input.abilities[i]) overflow += r - input.abilities[i]
+    if (r > input.abilities[i]!) overflow += r - input.abilities[i]!
   }
   const effectiveTaw = input.taw - mod
   const tap = effectiveTaw - overflow

@@ -87,7 +87,7 @@ export default defineEventHandler(async (event) => {
           .where(inArray(characters.id, charIds))
         for (const c of sourceChars) {
           if (c.system !== 'htbah') continue
-          const merchant = (c.data as HtbahCharacterData)?.merchant
+          const merchant = (c.data as unknown as HtbahCharacterData)?.merchant
           if (merchant?.active) merchantCharIds.add(c.id)
         }
       }

@@ -236,6 +236,10 @@ const startRenameTab = (t: Tab) => {
 const cancelRenameTab = () => {
   renamingTabId.value = null
 }
+const onRenameTabKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Enter') saveRenameTab()
+  else if (e.key === 'Escape') cancelRenameTab()
+}
 const saveRenameTab = async () => {
   if (renamingTabId.value === null || !renameDraft.value.trim()) return
   renameSaving.value = true
@@ -465,8 +469,7 @@ const tabOptions = computed(() =>
               :maxlength="60"
               class="w-40"
               autofocus
-              @keydown.enter="saveRenameTab"
-              @keydown.escape="cancelRenameTab"
+              @keydown="onRenameTabKeydown"
             />
             <UButton
               size="xs"
@@ -593,9 +596,10 @@ const tabOptions = computed(() =>
               </UFormField>
               <UFormField label="Reiter">
                 <USelect
-                  v-model="editTabId"
+                  :model-value="editTabId ?? undefined"
                   :items="tabOptions"
                   value-key="value"
+                  @update:model-value="(v) => editTabId = Number(v)"
                 />
               </UFormField>
               <p v-if="editError" class="text-xs text-red-700">{{ editError }}</p>

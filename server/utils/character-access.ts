@@ -33,7 +33,7 @@ export async function loadAccessibleCharacter(
     .limit(1)
 
   if (ownerHit.length > 0) {
-    const c = ownerHit[0]
+    const c = ownerHit[0]!
     return {
       id: c.id,
       userId: c.userId,
@@ -59,7 +59,7 @@ export async function loadAccessibleCharacter(
     .limit(1)
 
   if (dmHit.length === 0) return null
-  const c = dmHit[0].char
+  const c = dmHit[0]!.char
   return {
     id: c.id,
     userId: c.userId,

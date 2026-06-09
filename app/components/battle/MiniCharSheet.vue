@@ -205,7 +205,7 @@ const isDnd = computed(
 const isDsa5 = computed(() => character.value?.system === 'dsa5')
 
 const htbahData = computed<HtbahCharacterData | null>(() =>
-  isHtbah.value && character.value ? (character.value.data as HtbahCharacterData) : null,
+  isHtbah.value && character.value ? (character.value.data as unknown as HtbahCharacterData) : null,
 )
 // Battlebuben-Hausregel aktiv? Schaltet Zwei-Waffen-Manoever, Parade-QS-
 // Hinweis und Regenerations-/Heilkunde-Quickrolls frei.
@@ -230,10 +230,10 @@ const onShopBought = async () => {
   emit('token-updated')
 }
 const dndData = computed<DnDCharacterData | null>(() =>
-  isDnd.value && character.value ? (character.value.data as DnDCharacterData) : null,
+  isDnd.value && character.value ? (character.value.data as unknown as DnDCharacterData) : null,
 )
 const dsa5Data = computed<Dsa5CharacterData | null>(() =>
-  isDsa5.value && character.value ? (character.value.data as Dsa5CharacterData) : null,
+  isDsa5.value && character.value ? (character.value.data as unknown as Dsa5CharacterData) : null,
 )
 
 // — HP-Editor: liest vom aktiven Token, ueberschreibt Eingaben aber NICHT
@@ -2103,7 +2103,7 @@ const savePurse = async () => {
   }
   const next: Purse = isHtbah.value ? normalizeHtbahPurse(raw) : raw
   if (isDnd.value) {
-    const oldCur = (nextData.currency as DnDCharacterData['currency']) ?? {
+    const oldCur = (nextData.currency as unknown as DnDCharacterData['currency']) ?? {
       cp: 0,
       sp: 0,
       ep: 0,

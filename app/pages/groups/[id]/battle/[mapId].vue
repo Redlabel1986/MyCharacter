@@ -458,9 +458,9 @@ const ZOOM_MIN = 0.25
 const ZOOM_MAX = 3
 const zoom = ref(1)
 const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, +z.toFixed(3)))
-const zoomIn = () => (zoom.value = clampZoom(zoom.value + 0.1))
-const zoomOut = () => (zoom.value = clampZoom(zoom.value - 0.1))
-const zoomReset = () => (zoom.value = 1)
+const zoomIn = () => { zoom.value = clampZoom(zoom.value + 0.1) }
+const zoomOut = () => { zoom.value = clampZoom(zoom.value - 0.1) }
+const zoomReset = () => { zoom.value = 1 }
 
 // Maus-Rad zoomt zentriert auf die Cursor-Position; der Punkt unter dem Cursor
 // bleibt visuell stehen, indem wir scrollLeft/Top entsprechend nachziehen.
@@ -5520,7 +5520,7 @@ const endResize = () => {
     </UModal>
 
     <!-- Edit-Token-Modal -->
-    <UModal v-model:open="editingTokenId" :title="editing?.name ?? 'Token'">
+    <UModal :open="editingTokenId !== null" :title="editing?.name ?? 'Token'" @update:open="(v) => { if (!v) editingTokenId = null }">
       <template #body>
         <div v-if="editing" class="space-y-3">
           <div class="grid grid-cols-2 gap-3">
@@ -5646,7 +5646,7 @@ const endResize = () => {
     </UModal>
 
     <!-- Info-Karte (NPC-Card) -->
-    <UModal v-model:open="infoTokenId" :title="infoToken?.name ?? ''">
+    <UModal :open="infoTokenId !== null" :title="infoToken?.name ?? ''" @update:open="(v) => { if (!v) infoTokenId = null }">
       <template #body>
         <div v-if="infoToken" class="space-y-3">
           <div v-if="infoTokenImageList.length" class="space-y-2">
@@ -5918,7 +5918,7 @@ const endResize = () => {
     </UModal>
 
     <!-- Objekt-Edit-Modal -->
-    <UModal v-model:open="editingObjectId" :title="editingObject?.name ?? 'Objekt'">
+    <UModal :open="editingObjectId !== null" :title="editingObject?.name ?? 'Objekt'" @update:open="(v) => { if (!v) editingObjectId = null }">
       <template #body>
         <div v-if="editingObject" class="space-y-3">
           <div class="flex justify-center checker rounded p-2">

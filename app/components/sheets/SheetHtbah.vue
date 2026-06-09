@@ -1836,7 +1836,7 @@ const postRollToGroup = async () => {
       </p>
       <UFormField label="Text" class="mt-3">
         <UTextarea
-          rows="9"
+          :rows="9"
           placeholder="Herkunft, prägende Ereignisse, Motivation…"
           :model-value="sheet.backstory.text"
           class="w-full"
@@ -1921,10 +1921,11 @@ const postRollToGroup = async () => {
         <div class="grid sm:grid-cols-12 gap-3 items-end">
           <UFormField label="Gruppe" class="sm:col-span-4">
             <USelect
-              v-model="selectedGroupId"
+              :model-value="selectedGroupId ?? undefined"
               :items="groupOptions"
               value-key="value"
               class="w-full"
+              @update:model-value="(v) => selectedGroupId = Number(v)"
             />
           </UFormField>
           <UFormField
@@ -2548,7 +2549,7 @@ const postRollToGroup = async () => {
     <SheetSection title="Inventar & Beute" class="lg:col-span-2">
       <UFormField label="Inventar">
         <UTextarea
-          rows="6"
+          :rows="6"
           :model-value="sheet.inventory"
           class="w-full"
           @update:model-value="setText('inventory', String($event))"
@@ -2622,7 +2623,7 @@ const postRollToGroup = async () => {
       </div>
       <UFormField label="Sonstige Beute" class="mt-3" help="Edelsteine, Wertgegenstände, Schuldscheine — nicht-monetäre Beute.">
         <UTextarea
-          rows="3"
+          :rows="3"
           placeholder="z.B. Rubin (geschätzt 50 Gold), Goldkette, Schuldschein über 200 Silber …"
           :model-value="sheet.beute"
           class="w-full"
@@ -3084,7 +3085,7 @@ const postRollToGroup = async () => {
         help="Zusätzlich zu den strukturierten Zaubern oben — für freie Notizen, Spruchrollen, magische Gegenstände."
       >
         <UTextarea
-          rows="6"
+          :rows="6"
           placeholder="z.B. Spruchrolle Heilende Hände (1×), Amulett der Manaregeneration (+1/h) …"
           :model-value="sheet.magic"
           class="w-full"
@@ -3254,7 +3255,7 @@ const postRollToGroup = async () => {
 
     <SheetSection title="Anmerkungen">
       <UTextarea
-        rows="11"
+        :rows="11"
         placeholder="Kontakte, Hintergrund, sonstiges…"
         :model-value="sheet.notes"
         class="w-full"

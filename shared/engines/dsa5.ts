@@ -207,8 +207,8 @@ export function dsa5RollProbe(input: Dsa5ProbeInput): Dsa5ProbeResult {
   let ones = 0
   let twenties = 0
   for (let i = 0; i < 3; i++) {
-    const r = input.rolls[i]
-    const eff = input.abilities[i] + mod
+    const r = input.rolls[i]!
+    const eff = input.abilities[i]! + mod
     if (r === 1) ones++
     if (r === 20) twenties++
     if (r > eff) overflow += r - eff

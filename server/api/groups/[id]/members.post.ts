@@ -33,7 +33,7 @@ export default defineEventHandler(async (event) => {
   try {
     const [created] = await db
       .insert(groupMembers)
-      .values({ groupId, userId: found[0].id })
+      .values({ groupId, userId: found[0]!.id })
       .returning()
     return { member: created }
   } catch (err: unknown) {

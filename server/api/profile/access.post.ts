@@ -36,7 +36,7 @@ export default defineEventHandler(async (event) => {
   if (found.length === 0) {
     throw createError({ statusCode: 404, statusMessage: 'Kein User mit dieser Kennung gefunden.' })
   }
-  const dm = found[0]
+  const dm = found[0]!
   if (dm.role !== 'dm' && dm.role !== 'admin') {
     throw createError({
       statusCode: 400,

@@ -25,7 +25,7 @@ export default defineEventHandler(async (event) => {
   if (toDelete.length === 0) {
     throw createError({ statusCode: 404, statusMessage: 'Zugriff nicht gefunden.' })
   }
-  if (toDelete[0].ownerId !== user.id) {
+  if (toDelete[0]!.ownerId !== user.id) {
     throw createError({ statusCode: 403, statusMessage: 'Keine Berechtigung.' })
   }
 

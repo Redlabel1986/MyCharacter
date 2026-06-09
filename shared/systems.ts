@@ -62,12 +62,12 @@ export function createBlankCharacter(system: GameSystem, name: string): Record<s
   switch (system) {
     case 'dnd5e':
     case 'dnd2024':
-      return createBlankDnD(system, name)
+      return createBlankDnD(system, name) as unknown as Record<string, unknown>
     case 'dsa5':
-      return createBlankDsa5(name)
+      return createBlankDsa5(name) as unknown as Record<string, unknown>
     case 'dsa41':
-      return createBlankDsa41(name)
+      return createBlankDsa41(name) as unknown as Record<string, unknown>
     case 'htbah':
-      return createBlankHtbah(name)
+      return createBlankHtbah(name) as unknown as Record<string, unknown>
   }
 }

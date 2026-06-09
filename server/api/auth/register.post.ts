@@ -23,7 +23,7 @@ export default defineEventHandler(async (event) => {
     .limit(1)
 
   if (existing.length > 0) {
-    const dup = existing[0]
+    const dup = existing[0]!
     throw createError({
       statusCode: 409,
       statusMessage:
@@ -53,7 +53,7 @@ export default defineEventHandler(async (event) => {
       role: users.role,
     })
 
-  const user = inserted[0]
+  const user = inserted[0]!
   await setUserSession(event, {
     user: {
       id: user.id,

@@ -75,6 +75,7 @@ export default defineNuxtConfig({
   routeRules: {
     '/api/import/**': {
       // Override für KI-Endpoints: bis zu 60s (Vercel Hobby max).
+      // @ts-expect-error 'vercel' ist eine Preset-spezifische Route-Rule (Nitro-Vercel), nicht im Basistyp.
       vercel: { maxDuration: 60 },
     },
   },

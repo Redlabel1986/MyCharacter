@@ -155,7 +155,7 @@ export default defineEventHandler(async (event) => {
     if (!membership.length) {
       throw createError({ statusCode: 403, statusMessage: 'Händler gehört nicht zu dieser Gruppe.' })
     }
-    const merchantData = merchant.data as HtbahCharacterData
+    const merchantData = merchant.data as unknown as HtbahCharacterData
     const merchantCfg = merchantData.merchant as HtbahMerchant | undefined
     if (!merchantCfg || !merchantCfg.active) {
       throw createError({ statusCode: 400, statusMessage: 'Dieser Charakter ist kein aktiver Händler.' })
@@ -208,7 +208,7 @@ export default defineEventHandler(async (event) => {
   // Preis pruefen.
   const unitCopper = htbahShopItemCopper(item)
   const totalCopper = unitCopper * qty
-  const buyerData = buyer.data as HtbahCharacterData
+  const buyerData = buyer.data as unknown as HtbahCharacterData
   const purse = normalizeHtbahPurse(buyerData.purse ?? { copper: 0, silver: 0, gold: 0 })
   const have = htbahPurseToCopper(purse)
   if (have < totalCopper) {

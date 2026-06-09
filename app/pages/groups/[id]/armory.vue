@@ -301,6 +301,10 @@ const startRenameTab = (t: Tab) => {
 const cancelRenameTab = () => {
   renamingTabId.value = null
 }
+const onRenameTabKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Enter') saveRenameTab()
+  else if (e.key === 'Escape') cancelRenameTab()
+}
 const saveRenameTab = async () => {
   if (renamingTabId.value === null || !renameDraft.value.trim()) return
   renameSaving.value = true
@@ -515,8 +519,7 @@ const showReference = ref(false)
               :maxlength="60"
               class="w-40"
               autofocus
-              @keydown.enter="saveRenameTab"
-              @keydown.escape="cancelRenameTab"
+              @keydown="onRenameTabKeydown"
             />
             <UButton size="xs" variant="ghost" icon="i-lucide-check" :loading="renameSaving" :disabled="!renameDraft.trim()" @click="saveRenameTab" />
             <UButton size="xs" variant="ghost" icon="i-lucide-x" @click="cancelRenameTab" />

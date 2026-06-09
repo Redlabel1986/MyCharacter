@@ -190,7 +190,7 @@ export function initiativeTotal(data: DnDCharacterData): number {
 export function levelFromXp(xp: number): number {
   let lvl = 1
   for (let i = 0; i < DND_XP_TABLE.length; i++) {
-    if (xp >= DND_XP_TABLE[i]) lvl = i + 1
+    if (xp >= DND_XP_TABLE[i]!) lvl = i + 1
   }
   return lvl
 }

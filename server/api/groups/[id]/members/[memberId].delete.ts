@@ -22,7 +22,7 @@ export default defineEventHandler(async (event) => {
   if (target.length === 0) {
     throw createError({ statusCode: 404, statusMessage: 'Mitglied nicht gefunden.' })
   }
-  if (target[0].userId === group.ownerUserId) {
+  if (target[0]!.userId === group.ownerUserId) {
     throw createError({
       statusCode: 400,
       statusMessage: 'Der Owner kann sich nicht selbst entfernen. Lösche stattdessen die Gruppe.',

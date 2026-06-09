@@ -93,6 +93,10 @@ const removeOverride = async (id: number) => {
     alert((e as { statusMessage?: string }).statusMessage ?? 'Loeschen fehlgeschlagen.')
   }
 }
+const removeOverrideForKey = (key: string) => {
+  const o = overrides.value[key]
+  if (o) removeOverride(o.id)
+}
 
 // — Neue globale Objekte —
 const showNewForm = ref(false)
@@ -225,7 +229,7 @@ const categoryLabel = (cat: string): string =>
               color="error"
               icon="i-lucide-rotate-ccw"
               title="Override entfernen / Standard wiederherstellen"
-              @click="removeOverride(overrides[b.key].id)"
+              @click="removeOverrideForKey(b.key)"
             >
               Standard
             </UButton>
@@ -340,7 +344,7 @@ const categoryLabel = (cat: string): string =>
     </section>
 
     <!-- Replace-Modal -->
-    <UModal v-model:open="replacingKey" :title="`Bild ersetzen: ${replacingKey ?? ''}`">
+    <UModal :open="replacingKey !== null" :title="`Bild ersetzen: ${replacingKey ?? ''}`" @update:open="(v) => { if (!v) replacingKey = null }">
       <template #body>
         <div class="space-y-3">
           <p class="text-xs text-ink-300">

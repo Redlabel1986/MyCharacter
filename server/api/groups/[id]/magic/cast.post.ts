@@ -62,7 +62,7 @@ export default defineEventHandler(async (event) => {
   if (char.system !== 'htbah') {
     throw createError({ statusCode: 400, statusMessage: 'Zauberei-Modul nur fuer HtbaH.' })
   }
-  const data = char.data as HtbahCharacterData
+  const data = char.data as unknown as HtbahCharacterData
   if (!data.magicState?.active) {
     throw createError({
       statusCode: 400,

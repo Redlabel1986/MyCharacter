@@ -8,9 +8,9 @@ import StatBlock from '~/components/ui/StatBlock.vue'
 const props = defineProps<{ data: Record<string, unknown>; system: GameSystem }>()
 const emit = defineEmits<{ (e: 'update:data', v: Record<string, unknown>): void }>()
 
-const sheet = computed<Dsa41CharacterData>(() => props.data as Dsa41CharacterData)
+const sheet = computed<Dsa41CharacterData>(() => props.data as unknown as Dsa41CharacterData)
 const update = (next: Dsa41CharacterData) => emit('update:data', next as unknown as Record<string, unknown>)
-const clone = () => JSON.parse(JSON.stringify(sheet.value)) as Dsa41CharacterData
+const clone = () => JSON.parse(JSON.stringify(sheet.value)) as unknown as Dsa41CharacterData
 
 const derived = computed(() => dsa41Derived(sheet.value))
 
@@ -42,7 +42,7 @@ const addTalent = () => {
   update(n)
 }
 const updateTalent = (idx: number, patch: Partial<Dsa41CharacterData['talents'][number]>) => {
-  const n = clone(); n.talents[idx] = { ...n.talents[idx], ...patch }; update(n)
+  const n = clone(); n.talents[idx] = { ...n.talents[idx]!, ...patch }; update(n)
 }
 const removeTalent = (idx: number) => { const n = clone(); n.talents.splice(idx, 1); update(n) }
 
@@ -73,7 +73,7 @@ const setBlessed = (v: boolean) => { const n = clone(); n.isBlessed = v; update(
         <UFormField label="Titel"><UInput :model-value="sheet.identity.title" class="w-full" @update:model-value="setIdentity('title', String($event))" /></UFormField>
         <UFormField label="Erfahrungsgrad">
           <USelect :model-value="sheet.identity.experienceLevel" :items="experienceLevels"
-            @update:model-value="setIdentity('experienceLevel', $event as Dsa41CharacterData['identity']['experienceLevel'])" />
+            @update:model-value="setIdentity('experienceLevel', $event as unknown as Dsa41CharacterData['identity']['experienceLevel'])" />
         </UFormField>
         <UFormField label="AP gesamt / eingesetzt">
           <div class="flex gap-2">
@@ -140,18 +140,18 @@ const setBlessed = (v: boolean) => { const n = clone(); n.isBlessed = v; update(
         </UFormField>
         <UFormField label="Gruppe" class="col-span-2">
           <USelect :model-value="t.group" :items="talentGroups"
-            @update:model-value="updateTalent(idx, { group: $event as Dsa41CharacterData['talents'][number]['group'] })" />
+            @update:model-value="updateTalent(idx, { group: $event as unknown as Dsa41CharacterData['talents'][number]['group'] })" />
         </UFormField>
         <div class="col-span-3 grid grid-cols-3 gap-1">
           <USelect v-for="i in 3" :key="i" :model-value="t.probe[i-1]" :items="['-', ...DSA_ABILITIES]"
-            @update:model-value="updateTalent(idx, { probe: t.probe.map((p, j) => j === i-1 ? ($event as DsaAbility | '-') : p) as Dsa41CharacterData['talents'][number]['probe'] })" />
+            @update:model-value="updateTalent(idx, { probe: t.probe.map((p, j) => j === i-1 ? ($event as DsaAbility | '-') : p) as unknown as Dsa41CharacterData['talents'][number]['probe'] })" />
         </div>
         <UFormField label="TaW" class="col-span-1">
           <UInput type="number" :model-value="t.taw" @update:model-value="updateTalent(idx, { taw: Number($event) })" />
         </UFormField>
         <UFormField label="Spalte" class="col-span-2">
           <USelect :model-value="t.spalte" :items="['A','B','C','D','E','F','G','H']"
-            @update:model-value="updateTalent(idx, { spalte: $event as Dsa41CharacterData['talents'][number]['spalte'] })" />
+            @update:model-value="updateTalent(idx, { spalte: $event as unknown as Dsa41CharacterData['talents'][number]['spalte'] })" />
         </UFormField>
         <UButton size="xs" color="error" variant="ghost" icon="i-lucide-x" class="col-span-1" @click="removeTalent(idx)" />
       </div>
@@ -159,14 +159,14 @@ const setBlessed = (v: boolean) => { const n = clone(); n.isBlessed = v; update(
     </SheetSection>
 
     <SheetSection title="Vor-/Nachteile, SF" class="lg:col-span-2">
-      <UFormField label="Vorteile"><UTextarea rows="3" :model-value="sheet.advantages" @update:model-value="setText('advantages', String($event))" /></UFormField>
-      <UFormField label="Nachteile" class="mt-2"><UTextarea rows="3" :model-value="sheet.disadvantages" @update:model-value="setText('disadvantages', String($event))" /></UFormField>
-      <UFormField label="Sonderfertigkeiten" class="mt-2"><UTextarea rows="4" :model-value="sheet.specialAbilities" @update:model-value="setText('specialAbilities', String($event))" /></UFormField>
+      <UFormField label="Vorteile"><UTextarea :rows="3" :model-value="sheet.advantages" @update:model-value="setText('advantages', String($event))" /></UFormField>
+      <UFormField label="Nachteile" class="mt-2"><UTextarea :rows="3" :model-value="sheet.disadvantages" @update:model-value="setText('disadvantages', String($event))" /></UFormField>
+      <UFormField label="Sonderfertigkeiten" class="mt-2"><UTextarea :rows="4" :model-value="sheet.specialAbilities" @update:model-value="setText('specialAbilities', String($event))" /></UFormField>
     </SheetSection>
 
     <SheetSection title="Inventar & Notizen" class="lg:col-span-3">
-      <UFormField label="Inventar"><UTextarea rows="6" :model-value="sheet.inventory" class="w-full" @update:model-value="setText('inventory', String($event))" /></UFormField>
-      <UFormField label="Notizen" class="mt-2"><UTextarea rows="6" :model-value="sheet.notes" class="w-full" @update:model-value="setText('notes', String($event))" /></UFormField>
+      <UFormField label="Inventar"><UTextarea :rows="6" :model-value="sheet.inventory" class="w-full" @update:model-value="setText('inventory', String($event))" /></UFormField>
+      <UFormField label="Notizen" class="mt-2"><UTextarea :rows="6" :model-value="sheet.notes" class="w-full" @update:model-value="setText('notes', String($event))" /></UFormField>
     </SheetSection>
   </div>
 </template>

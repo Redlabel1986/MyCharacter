@@ -28,7 +28,7 @@ const emit = defineEmits<{
   (e: 'update:data', v: Record<string, unknown>): void
 }>()
 
-const sheet = computed<DnDCharacterData>(() => props.data as DnDCharacterData)
+const sheet = computed<DnDCharacterData>(() => props.data as unknown as DnDCharacterData)
 const update = (next: DnDCharacterData) => emit('update:data', next as unknown as Record<string, unknown>)
 
 const formatMod = (n: number) => (n >= 0 ? `+${n}` : `${n}`)
@@ -49,14 +49,14 @@ const toggleSaveProf = (key: DnDAbility) => {
 }
 const toggleSkillProf = (key: string) => {
   const next: DnDCharacterData = JSON.parse(JSON.stringify(sheet.value))
-  const s = next.skills[key]
+  const s = next.skills[key]!
   s.proficient = !s.proficient
   if (!s.proficient) s.expertise = false
   update(next)
 }
 const toggleSkillExp = (key: string) => {
   const next: DnDCharacterData = JSON.parse(JSON.stringify(sheet.value))
-  const s = next.skills[key]
+  const s = next.skills[key]!
   s.expertise = !s.expertise
   if (s.expertise) s.proficient = true
   update(next)
@@ -68,7 +68,7 @@ const setIdentity = <K extends keyof DnDCharacterData['identity']>(key: K, value
 }
 const setClass = (idx: number, patch: Partial<DnDCharacterData['identity']['classes'][number]>) => {
   const next: DnDCharacterData = JSON.parse(JSON.stringify(sheet.value))
-  next.identity.classes[idx] = { ...next.identity.classes[idx], ...patch }
+  next.identity.classes[idx] = { ...next.identity.classes[idx]!, ...patch }
   update(next)
 }
 const addClass = () => {
@@ -101,19 +101,19 @@ const removeAttack = (idx: number) => {
 }
 const setAttack = (idx: number, patch: Partial<DnDCharacterData['attacks'][number]>) => {
   const next: DnDCharacterData = JSON.parse(JSON.stringify(sheet.value))
-  next.attacks[idx] = { ...next.attacks[idx], ...patch }
+  next.attacks[idx] = { ...next.attacks[idx]!, ...patch }
   update(next)
 }
 
 const setRoleplay = <K extends keyof DnDCharacterData['roleplay']>(key: K, value: string) => {
   const next: DnDCharacterData = JSON.parse(JSON.stringify(sheet.value))
-  next.roleplay[key] = value as DnDCharacterData['roleplay'][K]
+  next.roleplay[key] = value as unknown as DnDCharacterData['roleplay'][K]
   update(next)
 }
 
 const setSpellSlots = (idx: number, patch: { total?: number; used?: number }) => {
   const next: DnDCharacterData = JSON.parse(JSON.stringify(sheet.value))
-  next.spellcasting.slots[idx] = { ...next.spellcasting.slots[idx], ...patch }
+  next.spellcasting.slots[idx] = { ...next.spellcasting.slots[idx]!, ...patch }
   update(next)
 }
 
@@ -274,8 +274,8 @@ const setHp = <K extends keyof DnDCharacterData['combat']['hp']>(key: K, value: 
     <SheetSection title="Skills" class="lg:col-span-2">
       <div class="grid sm:grid-cols-2 gap-x-4 gap-y-1">
         <div v-for="s in DND_SKILLS" :key="s.key" class="flex items-center gap-2 py-1 border-b border-parchment-700/15">
-          <UCheckbox :model-value="sheet.skills[s.key].proficient" @update:model-value="toggleSkillProf(s.key)" />
-          <UCheckbox :model-value="sheet.skills[s.key].expertise" @update:model-value="toggleSkillExp(s.key)" />
+          <UCheckbox :model-value="sheet.skills[s.key]?.proficient ?? false" @update:model-value="toggleSkillProf(s.key)" />
+          <UCheckbox :model-value="sheet.skills[s.key]?.expertise ?? false" @update:model-value="toggleSkillExp(s.key)" />
           <span class="flex-1 text-sm">{{ s.label }} <span class="text-ink-300">({{ s.ability }})</span></span>
           <span class="font-serif text-lg w-10 text-right">{{ formatMod(skillBonus(sheet, s.key).value) }}</span>
         </div>
@@ -317,8 +317,8 @@ const setHp = <K extends keyof DnDCharacterData['combat']['hp']>(key: K, value: 
         <UFormField label="Spellcasting Ability">
           <div class="flex gap-2 items-center">
             <USelect
-              :model-value="sheet.spellcasting.ability"
-              :items="DND_ABILITIES"
+              :model-value="sheet.spellcasting.ability || undefined"
+              :items="[...DND_ABILITIES]"
               placeholder="—"
               class="w-full"
               @update:model-value="setSpellcastingAbility"
@@ -338,7 +338,7 @@ const setHp = <K extends keyof DnDCharacterData['combat']['hp']>(key: K, value: 
       <UFormField label="Bekannte / Vorbereitete Zauber" class="mt-3">
         <UTextarea
           :model-value="sheet.spellcasting.spells"
-          rows="6"
+          :rows="6"
           class="w-full"
           @update:model-value="setSpellcasting('spells', String($event))"
         />
@@ -369,7 +369,7 @@ const setHp = <K extends keyof DnDCharacterData['combat']['hp']>(key: K, value: 
       <UFormField label="Ausrüstung (Freitext)">
         <UTextarea
           :model-value="sheet.equipment"
-          rows="6"
+          :rows="6"
           class="w-full"
           @update:model-value="emit('update:data', { ...sheet, equipment: String($event) } as unknown as Record<string, unknown>)"
         />
@@ -384,16 +384,16 @@ const setHp = <K extends keyof DnDCharacterData['combat']['hp']>(key: K, value: 
     <SheetSection title="Sprachen, Werkzeuge, Rüstung" class="lg:col-span-2">
       <div class="grid sm:grid-cols-2 gap-3">
         <UFormField label="Sprachen">
-          <UTextarea :model-value="sheet.proficiencies.languages" rows="3" class="w-full" @update:model-value="setProficiencies('languages', String($event))" />
+          <UTextarea :model-value="sheet.proficiencies.languages" :rows="3" class="w-full" @update:model-value="setProficiencies('languages', String($event))" />
         </UFormField>
         <UFormField label="Werkzeuge">
-          <UTextarea :model-value="sheet.proficiencies.tools" rows="3" class="w-full" @update:model-value="setProficiencies('tools', String($event))" />
+          <UTextarea :model-value="sheet.proficiencies.tools" :rows="3" class="w-full" @update:model-value="setProficiencies('tools', String($event))" />
         </UFormField>
         <UFormField label="Waffen-Proficiency">
-          <UTextarea :model-value="sheet.proficiencies.weapons" rows="3" class="w-full" @update:model-value="setProficiencies('weapons', String($event))" />
+          <UTextarea :model-value="sheet.proficiencies.weapons" :rows="3" class="w-full" @update:model-value="setProficiencies('weapons', String($event))" />
         </UFormField>
         <UFormField label="Rüstungs-Proficiency">
-          <UTextarea :model-value="sheet.proficiencies.armor" rows="3" class="w-full" @update:model-value="setProficiencies('armor', String($event))" />
+          <UTextarea :model-value="sheet.proficiencies.armor" :rows="3" class="w-full" @update:model-value="setProficiencies('armor', String($event))" />
         </UFormField>
       </div>
     </SheetSection>
@@ -402,7 +402,7 @@ const setHp = <K extends keyof DnDCharacterData['combat']['hp']>(key: K, value: 
       <UFormField label="Features (Klasse, Spezies, Background)">
         <UTextarea
           :model-value="sheet.features"
-          rows="6"
+          :rows="6"
           class="w-full"
           @update:model-value="emit('update:data', { ...sheet, features: String($event) } as unknown as Record<string, unknown>)"
         />
@@ -410,7 +410,7 @@ const setHp = <K extends keyof DnDCharacterData['combat']['hp']>(key: K, value: 
       <UFormField label="Feats" class="mt-2">
         <UTextarea
           :model-value="sheet.feats"
-          rows="4"
+          :rows="4"
           class="w-full"
           @update:model-value="emit('update:data', { ...sheet, feats: String($event) } as unknown as Record<string, unknown>)"
         />
@@ -420,22 +420,22 @@ const setHp = <K extends keyof DnDCharacterData['combat']['hp']>(key: K, value: 
     <SheetSection title="Persönlichkeit & Hintergrund" class="lg:col-span-3">
       <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <UFormField label="Persönlichkeit">
-          <UTextarea :model-value="sheet.roleplay.personalityTraits" rows="3" class="w-full" @update:model-value="setRoleplay('personalityTraits', String($event))" />
+          <UTextarea :model-value="sheet.roleplay.personalityTraits" :rows="3" class="w-full" @update:model-value="setRoleplay('personalityTraits', String($event))" />
         </UFormField>
         <UFormField label="Ideale">
-          <UTextarea :model-value="sheet.roleplay.ideals" rows="3" class="w-full" @update:model-value="setRoleplay('ideals', String($event))" />
+          <UTextarea :model-value="sheet.roleplay.ideals" :rows="3" class="w-full" @update:model-value="setRoleplay('ideals', String($event))" />
         </UFormField>
         <UFormField label="Bindungen">
-          <UTextarea :model-value="sheet.roleplay.bonds" rows="3" class="w-full" @update:model-value="setRoleplay('bonds', String($event))" />
+          <UTextarea :model-value="sheet.roleplay.bonds" :rows="3" class="w-full" @update:model-value="setRoleplay('bonds', String($event))" />
         </UFormField>
         <UFormField label="Makel">
-          <UTextarea :model-value="sheet.roleplay.flaws" rows="3" class="w-full" @update:model-value="setRoleplay('flaws', String($event))" />
+          <UTextarea :model-value="sheet.roleplay.flaws" :rows="3" class="w-full" @update:model-value="setRoleplay('flaws', String($event))" />
         </UFormField>
         <UFormField label="Aussehen" class="lg:col-span-2">
-          <UTextarea :model-value="sheet.roleplay.appearance" rows="3" class="w-full" @update:model-value="setRoleplay('appearance', String($event))" />
+          <UTextarea :model-value="sheet.roleplay.appearance" :rows="3" class="w-full" @update:model-value="setRoleplay('appearance', String($event))" />
         </UFormField>
         <UFormField label="Hintergrundgeschichte" class="lg:col-span-2">
-          <UTextarea :model-value="sheet.roleplay.backstory" rows="3" class="w-full" @update:model-value="setRoleplay('backstory', String($event))" />
+          <UTextarea :model-value="sheet.roleplay.backstory" :rows="3" class="w-full" @update:model-value="setRoleplay('backstory', String($event))" />
         </UFormField>
       </div>
     </SheetSection>

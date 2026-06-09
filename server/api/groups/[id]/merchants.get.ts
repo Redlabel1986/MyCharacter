@@ -40,7 +40,7 @@ export default defineEventHandler(async (event) => {
 
   const merchants = chars
     .map((c) => {
-      const m = (c.data as HtbahCharacterData)?.merchant as HtbahMerchant | undefined
+      const m = (c.data as unknown as HtbahCharacterData)?.merchant as HtbahMerchant | undefined
       if (!m || !m.active) return null
       return {
         characterId: c.id,

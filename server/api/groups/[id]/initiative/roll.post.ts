@@ -98,7 +98,7 @@ export default defineEventHandler(async (event) => {
   //    bereits in htbahInitiativeBonus eingerechnet, Regelwerk §2.2 + §6.2.3).
   //  - Battlebuben-Modus: flach 1W20, kein Begabungs-/Ruestungs-Bonus.
   // Stangenwaffen-Bonus (+10) kommt obendrauf, wenn der Client das Flag setzt.
-  const data = char.data as HtbahCharacterData
+  const data = char.data as unknown as HtbahCharacterData
   const battlebuben = data.battlebuben === true
   const handelnBonus = battlebuben ? 0 : htbahInitiativeBonus(data)
   const stangenwaffeBonus = body.stangenwaffe ? 10 : 0

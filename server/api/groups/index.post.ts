@@ -17,7 +17,7 @@ export default defineEventHandler(async (event) => {
     .returning()
 
   // Owner ist automatisch Mitglied
-  await db.insert(groupMembers).values({ groupId: created.id, userId: user.id })
+  await db.insert(groupMembers).values({ groupId: created!.id, userId: user.id })
 
   return { group: created }
 })

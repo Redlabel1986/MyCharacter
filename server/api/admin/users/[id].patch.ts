@@ -27,7 +27,7 @@ export default defineEventHandler(async (event) => {
   }
 
   // Schutz: Der eingebaute Admin-Account darf nicht degradiert werden.
-  if (target[0].email === ADMIN_EMAIL && body.role !== 'admin') {
+  if (target[0]!.email === ADMIN_EMAIL && body.role !== 'admin') {
     throw createError({
       statusCode: 400,
       statusMessage: 'Der Standard-Admin-Account kann nicht herabgestuft werden.',

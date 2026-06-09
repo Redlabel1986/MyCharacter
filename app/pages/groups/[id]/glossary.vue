@@ -215,7 +215,7 @@ const abilityDescription = (a: NpcAbility): string => {
     </div>
 
     <!-- Detail-Modal -->
-    <UModal v-model:open="detailId" :title="detail?.name ?? ''">
+    <UModal :open="detailId !== null" :title="detail?.name ?? ''" @update:open="(v) => { if (!v) detailId = null }">
       <template #body>
         <div v-if="detail" class="space-y-3">
           <div class="flex gap-3">

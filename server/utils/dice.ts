@@ -78,7 +78,7 @@ export function rollHtbahSkill(input: HtbahSkillRollInput): RollPayload {
   if (input.character.system !== 'htbah') {
     throw createError({ statusCode: 400, statusMessage: 'Wurf-System passt nicht zum Charakter.' })
   }
-  const data = input.character.data as HtbahCharacterData
+  const data = input.character.data as unknown as HtbahCharacterData
   const skill = data.skills.find((s) => s.id === input.skillId)
   if (!skill) {
     throw createError({ statusCode: 404, statusMessage: 'Skill am Charakter nicht gefunden.' })
@@ -118,7 +118,7 @@ export function rollHtbahTalent(input: HtbahTalentRollInput): RollPayload {
   if (input.character.system !== 'htbah') {
     throw createError({ statusCode: 400, statusMessage: 'Wurf-System passt nicht zum Charakter.' })
   }
-  const data = input.character.data as HtbahCharacterData
+  const data = input.character.data as unknown as HtbahCharacterData
   const baseTarget = htbahTalentValue(data, input.talent)
   const mod = input.modifier ?? 0
   const target = baseTarget + mod
@@ -251,7 +251,7 @@ export function rollDndSkill(input: DndSkillRollInput): RollPayload {
   if (input.character.system !== 'dnd5e' && input.character.system !== 'dnd2024') {
     throw createError({ statusCode: 400, statusMessage: 'Charakter ist kein D&D-Bogen.' })
   }
-  const data = input.character.data as DnDCharacterData
+  const data = input.character.data as unknown as DnDCharacterData
   const skill = DND_SKILLS.find((s) => s.key === input.skillKey)
   if (!skill) {
     throw createError({ statusCode: 404, statusMessage: 'Skill unbekannt.' })
@@ -287,7 +287,7 @@ export function rollDndSave(input: DndSaveRollInput): RollPayload {
   if (!DND_ABILITIES.includes(input.ability)) {
     throw createError({ statusCode: 400, statusMessage: 'Ungültiges Attribut.' })
   }
-  const data = input.character.data as DnDCharacterData
+  const data = input.character.data as unknown as DnDCharacterData
   const bonus = saveBonus(data, input.ability)
   const mod = input.modifier ?? 0
   const mode = input.rollMode ?? 'normal'
@@ -325,7 +325,7 @@ export function rollDndAbility(input: DndAbilityCheckInput): RollPayload {
   if (input.character.system !== 'dnd5e' && input.character.system !== 'dnd2024') {
     throw createError({ statusCode: 400, statusMessage: 'Charakter ist kein D&D-Bogen.' })
   }
-  const data = input.character.data as DnDCharacterData
+  const data = input.character.data as unknown as DnDCharacterData
   const bonus = abilityModifier(data.abilities[input.ability].score)
   const mod = input.modifier ?? 0
   const mode = input.rollMode ?? 'normal'
@@ -368,7 +368,7 @@ export function rollDsa5Skill(input: Dsa5SkillRollInput): RollPayload {
   if (input.character.system !== 'dsa5') {
     throw createError({ statusCode: 400, statusMessage: 'Charakter ist kein DSA-5-Bogen.' })
   }
-  const data = input.character.data as Dsa5CharacterData
+  const data = input.character.data as unknown as Dsa5CharacterData
   const src = input.source ?? 'skill'
   const collection: Array<{
     id: string
@@ -429,7 +429,7 @@ export function rollDsa5Ability(input: Dsa5AbilityCheckInput): RollPayload {
   if (input.character.system !== 'dsa5') {
     throw createError({ statusCode: 400, statusMessage: 'Charakter ist kein DSA-5-Bogen.' })
   }
-  const data = input.character.data as Dsa5CharacterData
+  const data = input.character.data as unknown as Dsa5CharacterData
   const target = data.abilities[input.ability] + (input.modifier ?? 0)
   const roll = rand1to(20)
   const success = roll <= target && roll < 20
