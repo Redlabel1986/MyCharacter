@@ -42,6 +42,13 @@ import {
 } from '~~/shared/engines/htbah'
 import { HTBAH_SPELL_BY_KEY } from '~~/shared/engines/htbah-spell-catalog'
 import {
+  BATTLEBUBEN_SPELL_BY_KEY,
+  BATTLEBUBEN_STIL_LABELS,
+  battlebubenSpellMeta,
+  type BattlebubenSpell,
+  type BattlebubenEffectPart,
+} from '~~/shared/battlebuben-magic'
+import {
   DND_ABILITIES,
   DND_SKILLS,
   abilityModifier,
@@ -1271,6 +1278,99 @@ const rddState = computed(() => htbahData.value?.rdd ?? null)
 const isUniversalCombat = computed(
   () => isHtbah.value && htbahData.value?.combatModule === 'universal',
 )
+
+// --- Battlebuben-Magie — Quick-Cast ---
+const isBattlebubenMagic = computed(
+  () => hasMagic.value && magicModule.value === 'battlebuben',
+)
+const bbArkanumCurrent = computed(() => htbahData.value?.magicState?.bbArkanumCurrent ?? 0)
+const bbArkanumMax = computed(() => htbahData.value?.magicState?.bbArkanumMax ?? 0)
+// Gelernte Battlebuben-Zauber (Katalog-Eintraege), nach Stil + Level sortiert.
+const bbKnownSpells = computed<BattlebubenSpell[]>(() => {
+  const keys = htbahData.value?.magicState?.bbKnownSpellKeys ?? []
+  return keys
+    .map((k: string) => BATTLEBUBEN_SPELL_BY_KEY[k])
+    .filter((sp: BattlebubenSpell | undefined): sp is BattlebubenSpell => !!sp)
+    .sort(
+      (a: BattlebubenSpell, b: BattlebubenSpell) =>
+        a.stil.localeCompare(b.stil) || a.level - b.level || a.name.localeCompare(b.name),
+    )
+})
+const bbSelectedKey = ref<string>('')
+const bbSpellOptions = computed(() =>
+  bbKnownSpells.value.map((sp: BattlebubenSpell) => {
+    const meta = battlebubenSpellMeta(sp)
+    return {
+      label: `${BATTLEBUBEN_STIL_LABELS[sp.stil]} · L${sp.level} · ${sp.name} (${meta.arkanum} Ark.)`,
+      value: sp.key,
+    }
+  }),
+)
+const bbSelectedSpell = computed<BattlebubenSpell | null>(
+  () => BATTLEBUBEN_SPELL_BY_KEY[bbSelectedKey.value] ?? null,
+)
+const bbSelectedMeta = computed(() =>
+  bbSelectedSpell.value ? battlebubenSpellMeta(bbSelectedSpell.value) : null,
+)
+const bbCastSending = ref(false)
+const bbCastError = ref<string | null>(null)
+const bbLastResult = ref<{
+  success: boolean
+  critical: boolean
+  fumble: boolean
+  qsLabel: string
+  roll: number
+  target: number
+  effectParts: BattlebubenEffectPart[]
+  selfDamage: number
+  arkanum: number
+  arkanumMax: number
+} | null>(null)
+// Reset bei Charakter-Wechsel.
+watch(selectedTokenId, () => {
+  bbSelectedKey.value = ''
+  bbLastResult.value = null
+  bbCastError.value = null
+})
+const castBattlebubenSpell = async () => {
+  if (!character.value || !isBattlebubenMagic.value) return
+  const spell = bbSelectedSpell.value
+  if (!spell) {
+    bbCastError.value = 'Kein Zauber gewählt.'
+    return
+  }
+  bbCastSending.value = true
+  bbCastError.value = null
+  try {
+    const res = (await $fetch(`/api/groups/${props.groupId}/magic/cast-bb`, {
+      method: 'POST',
+      body: { characterId: character.value.id, spellKey: spell.key },
+    })) as {
+      success: boolean
+      critical: boolean
+      fumble: boolean
+      qsLabel: string
+      roll: number
+      target: number
+      effectParts: BattlebubenEffectPart[]
+      selfDamage: number
+      arkanum: number
+      arkanumMax: number
+    }
+    bbLastResult.value = res
+    // Charakter neu laden — Arkanum-Pool (+ ggf. LP) wurden serverseitig geaendert.
+    const updated = await $fetch<{ character: CharacterFull }>(
+      `/api/characters/${character.value.id}`,
+    )
+    character.value = updated.character
+  } catch (e: unknown) {
+    bbCastError.value =
+      (e as { statusMessage?: string }).statusMessage ?? 'Wirken fehlgeschlagen.'
+  } finally {
+    bbCastSending.value = false
+  }
+}
+
 const castOpen = ref(false)
 const castSpellName = ref('')
 const castSpellLevel = ref<1 | 2 | 3 | 4 | 5>(1)
@@ -2388,12 +2488,15 @@ const onImageError = (tokenId: number) => {
           variant="soft"
           icon="i-lucide-sparkles"
           size="sm"
-          :title="`Zauberei (§8) — Komplexitätswurf · Mana ${mana}/${manaMax}`"
+          :title="isBattlebubenMagic
+            ? `Battlebuben-Magie — W100-Probe · Arkanum ${bbArkanumCurrent}/${bbArkanumMax}`
+            : `Zauberei (§8) — Komplexitätswurf · Mana ${mana}/${manaMax}`"
           @click="castOpen = !castOpen"
         >
           Zaubern
           <span class="ml-1 font-mono text-[10px] opacity-80">
-            {{ mana }}/{{ manaMax }}
+            <template v-if="isBattlebubenMagic">{{ bbArkanumCurrent }}/{{ bbArkanumMax }}</template>
+            <template v-else>{{ mana }}/{{ manaMax }}</template>
           </span>
         </UButton>
         <div
@@ -2794,7 +2897,92 @@ const onImageError = (tokenId: number) => {
            (server wuerfelt 3W10 + Arkanum, prueft gegen Stufen-Schwelle,
            zieht Mana ab). -->
       <div
-        v-if="castOpen && hasMagic"
+        v-if="castOpen && hasMagic && magicModule === 'battlebuben'"
+        class="p-2 rounded border border-emerald-300 bg-emerald-50 space-y-2"
+      >
+        <div class="text-[10px] uppercase tracking-widest text-emerald-700 mb-1 flex items-center justify-between">
+          <span>Battlebuben-Magie wirken</span>
+          <span class="font-mono normal-case tracking-normal">
+            Arkanum {{ bbArkanumCurrent }}/{{ bbArkanumMax }}
+          </span>
+        </div>
+        <div v-if="!bbKnownSpells.length" class="text-[11px] text-ink-400 italic">
+          Noch keine Zauber gelernt. Im Charakterbogen unter „Magie" → Battlebuben-Magie Zauber lernen
+          und je Stil einen Probe-Skill binden.
+        </div>
+        <template v-else>
+          <UFormField label="Zauber">
+            <USelect
+              v-model="bbSelectedKey"
+              :items="bbSpellOptions"
+              value-key="value"
+              size="sm"
+              placeholder="— Zauber wählen —"
+            />
+          </UFormField>
+          <div
+            v-if="bbSelectedSpell && bbSelectedMeta"
+            class="text-[11px] p-1.5 rounded bg-white/70 border border-emerald-200 space-y-1"
+          >
+            <div class="font-mono text-[10px] text-emerald-800">
+              +{{ bbSelectedMeta.schwierigkeit }} Schwierigkeit ·
+              {{ bbSelectedMeta.arkanum }} Arkanum<template v-if="bbSelectedMeta.fehlschlag"> · Fehlschlag {{ bbSelectedMeta.fehlschlag }}</template>
+            </div>
+            <div class="text-ink-500">{{ bbSelectedSpell.effect }}</div>
+            <div v-if="bbSelectedSpell.extra" class="text-ink-400 italic">{{ bbSelectedSpell.extra }}</div>
+          </div>
+          <UButton
+            block
+            color="primary"
+            icon="i-lucide-dices"
+            :loading="bbCastSending"
+            :disabled="!bbSelectedSpell || bbArkanumCurrent < (bbSelectedMeta?.arkanum ?? 0)"
+            @click="castBattlebubenSpell"
+          >
+            Wirken (W100-Probe)
+          </UButton>
+          <div
+            v-if="bbSelectedMeta && bbArkanumCurrent < bbSelectedMeta.arkanum"
+            class="text-xs text-amber-700"
+          >
+            ⚠ Nicht genug Arkanum ({{ bbArkanumCurrent }}/{{ bbSelectedMeta.arkanum }} benötigt).
+          </div>
+          <p v-if="bbCastError" class="text-xs text-red-700">{{ bbCastError }}</p>
+          <!-- Ergebnis des letzten Battlebuben-Casts -->
+          <div
+            v-if="bbLastResult"
+            class="text-xs p-2 rounded border"
+            :class="bbLastResult.fumble
+              ? 'bg-red-100 text-red-900 border-red-400'
+              : bbLastResult.success
+                ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                : 'bg-amber-50 text-amber-900 border-amber-200'"
+          >
+            <div class="font-semibold">
+              <template v-if="bbLastResult.fumble">💥 Kritischer Patzer</template>
+              <template v-else-if="bbLastResult.critical">⚡ Kritischer Erfolg ({{ bbLastResult.qsLabel }})</template>
+              <template v-else-if="bbLastResult.success">✓ Erfolg ({{ bbLastResult.qsLabel }})</template>
+              <template v-else>✗ Misserfolg</template>
+              — W100 {{ bbLastResult.roll }} vs {{ bbLastResult.target }}
+            </div>
+            <ul v-if="bbLastResult.effectParts.length" class="mt-0.5 space-y-0.5">
+              <li v-for="(p, i) in bbLastResult.effectParts" :key="i">
+                <strong>{{ p.label }}: {{ p.value }}</strong>
+                <span class="opacity-70">({{ p.detail }})</span>
+              </li>
+            </ul>
+            <div v-if="bbLastResult.selfDamage > 0" class="mt-0.5 text-red-800">
+              Fehlschlag-Schaden 1W8 = {{ bbLastResult.selfDamage }} (auf eigene LP angerechnet)
+            </div>
+            <div class="mt-0.5 font-mono text-[10px] opacity-80">
+              Arkanum {{ bbLastResult.arkanum }}/{{ bbLastResult.arkanumMax }}
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <div
+        v-if="castOpen && hasMagic && magicModule !== 'battlebuben'"
         class="p-2 rounded border border-purple-300 bg-purple-50 space-y-2"
       >
         <div class="text-[10px] uppercase tracking-widest text-purple-700 mb-1 flex items-center justify-between">

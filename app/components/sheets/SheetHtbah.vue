@@ -72,6 +72,14 @@ import {
   type HtbahShopItem,
 } from '~~/shared/engines/htbah'
 import { htbahSpellsByLehre } from '~~/shared/engines/htbah-spell-catalog'
+import {
+  BATTLEBUBEN_MAGIC_STILE,
+  BATTLEBUBEN_STIL_LABELS,
+  BATTLEBUBEN_SPELL_BY_KEY,
+  battlebubenSpellsByStil,
+  battlebubenSpellMeta,
+  type BattlebubenStilId,
+} from '~~/shared/battlebuben-magic'
 import type { GameSystem } from '~~/shared/systems'
 import SheetSection from '~/components/ui/SheetSection.vue'
 import StatBlock from '~/components/ui/StatBlock.vue'
@@ -195,6 +203,19 @@ const sheet = computed<HtbahCharacterData>(() => {
             : [],
           sonnenKonzentration: Math.max(0, Math.min(100, Math.floor(Number(incoming.magicState.sonnenKonzentration ?? 70)))),
           seeleVerbraucht: Math.max(0, Math.min(100, Math.floor(Number(incoming.magicState.seeleVerbraucht ?? 0)))),
+          bbArkanumCurrent: Math.max(0, Math.floor(Number(incoming.magicState.bbArkanumCurrent ?? 0))),
+          bbArkanumMax: Math.max(0, Math.floor(Number(incoming.magicState.bbArkanumMax ?? 0))),
+          bbKnownSpellKeys: Array.isArray(incoming.magicState.bbKnownSpellKeys)
+            ? incoming.magicState.bbKnownSpellKeys.filter((k): k is string => typeof k === 'string')
+            : [],
+          bbStilSkills:
+            incoming.magicState.bbStilSkills && typeof incoming.magicState.bbStilSkills === 'object'
+              ? Object.fromEntries(
+                  Object.entries(incoming.magicState.bbStilSkills as Record<string, unknown>)
+                    .filter(([, v]) => typeof v === 'string')
+                    .map(([k, v]) => [k, String(v)]),
+                )
+              : {},
         }
       : undefined,
     rdd: incoming.rdd
@@ -905,6 +926,49 @@ const restoreMagicMana = () => {
   update(n)
 }
 
+// --- Battlebuben-Magie-Modul ---
+const setBbArkanumCurrent = (v: number) => {
+  const n = clone()
+  const ms = ensureMagicState(n)
+  const max = Math.max(0, Math.floor(ms.bbArkanumMax ?? 0))
+  ms.bbArkanumCurrent = Math.max(0, Math.min(max, Math.floor(v || 0)))
+  update(n)
+}
+const setBbArkanumMax = (v: number) => {
+  const n = clone()
+  const ms = ensureMagicState(n)
+  ms.bbArkanumMax = Math.max(0, Math.floor(v || 0))
+  // Aktuellen Pool auf neues Maximum clampen.
+  ms.bbArkanumCurrent = Math.min(ms.bbArkanumCurrent ?? 0, ms.bbArkanumMax)
+  update(n)
+}
+const restoreBbArkanum = () => {
+  const n = clone()
+  const ms = ensureMagicState(n)
+  ms.bbArkanumCurrent = Math.max(0, Math.floor(ms.bbArkanumMax ?? 0))
+  update(n)
+}
+const toggleBbKnownSpell = (spellKey: string) => {
+  const n = clone()
+  const ms = ensureMagicState(n)
+  const list = ms.bbKnownSpellKeys ?? []
+  const idx = list.indexOf(spellKey)
+  if (idx >= 0) list.splice(idx, 1)
+  else list.push(spellKey)
+  ms.bbKnownSpellKeys = list
+  update(n)
+}
+const setBbStilSkill = (stil: BattlebubenStilId, rawSkillId: unknown) => {
+  const n = clone()
+  const ms = ensureMagicState(n)
+  const map = { ...(ms.bbStilSkills ?? {}) }
+  const skillId = String(rawSkillId)
+  if (!skillId || skillId === NONE_VALUE) delete map[stil]
+  else map[stil] = skillId
+  ms.bbStilSkills = map
+  update(n)
+}
+
 // Skill-Auswahl-Optionen fuer das Zauber-"Probe-gegen"-Dropdown.
 const spellSkillOptions = computed(() => [
   { label: '— Skill waehlen —', value: NONE_VALUE },
@@ -915,6 +979,29 @@ const spellSkillOptions = computed(() => [
       value: s.id,
     })),
 ])
+
+// Battlebuben: Stile, in denen der Charakter mindestens einen Zauber gelernt hat.
+const bbKnownStile = computed<BattlebubenStilId[]>(() => {
+  const keys = sheet.value.magicState?.bbKnownSpellKeys ?? []
+  const used = new Set<string>()
+  for (const k of keys) {
+    const sp = BATTLEBUBEN_SPELL_BY_KEY[k]
+    if (sp) used.add(sp.stil)
+  }
+  return BATTLEBUBEN_MAGIC_STILE.filter((st) => used.has(st.id)).map((st) => st.id)
+})
+// Fertigkeitswert des an einen Stil gebundenen Skills (oder null).
+const bbStilSkillValue = (stil: BattlebubenStilId): number | null => {
+  const skillId = sheet.value.magicState?.bbStilSkills?.[stil]
+  if (!skillId) return null
+  const sk = sheet.value.skills.find((s: HtbahSkill) => s.id === skillId)
+  return sk ? htbahSkillTotal(sheet.value, sk) : null
+}
+// Anzahl gelernter Zauber in einem Stil (fuer Slot-Anzeige).
+const bbLearnedCountInStil = (stil: BattlebubenStilId): number =>
+  (sheet.value.magicState?.bbKnownSpellKeys ?? []).filter(
+    (k: string) => BATTLEBUBEN_SPELL_BY_KEY[k]?.stil === stil,
+  ).length
 
 const refreshAllInsights = () => {
   const n = clone()
@@ -1168,9 +1255,16 @@ const postRollToGroup = async () => {
         />
         <!-- Mana: Aktueller / Max-Wert (max = htbahManaMax(arkanum)). Wird
              nur angezeigt, wenn das Magie-Modul aktiviert ist — sonst ist
-             der Wert irrelevant. -->
+             der Wert irrelevant. Battlebuben-Magie nutzt stattdessen den
+             verbrauchbaren Arkanum-Pool. -->
         <StatBlock
-          v-if="sheet.magicState?.active"
+          v-if="sheet.magicState?.active && sheet.magicState.module === 'battlebuben'"
+          label="Arkanum"
+          :value="`${sheet.magicState.bbArkanumCurrent ?? 0}/${sheet.magicState.bbArkanumMax ?? 0}`"
+          sublabel="Battlebuben-Magie"
+        />
+        <StatBlock
+          v-else-if="sheet.magicState?.active"
           label="Mana"
           :value="`${sheet.magicState.mana}/${htbahManaMax(sheet.magicState.arkanum)}`"
           :sublabel="`Arkanum ${sheet.magicState.arkanum}`"
@@ -1199,7 +1293,7 @@ const postRollToGroup = async () => {
            damit Mit-Spieler den Wert pflegen können ohne in den Magie-Tab
            abzutauchen. -->
       <div
-        v-if="sheet.magicState?.active"
+        v-if="sheet.magicState?.active && sheet.magicState.module !== 'battlebuben'"
         class="grid grid-cols-12 gap-2 mt-3 items-end"
       >
         <UFormField label="Mana aktuell" class="col-span-5">
@@ -2852,6 +2946,126 @@ const postRollToGroup = async () => {
               Mind. 1 % pro Zauber · Vor jeder Probe W100; Wurf ≤ verbrauchter % = Schreckens-/Todesvision ·
               &gt; 99 % = vermutet tot
             </p>
+          </div>
+
+          <!-- ====== Battlebuben-Magie-Block (Magiestile) ====== -->
+          <div
+            v-if="sheet.magicState.module === 'battlebuben'"
+            class="mt-2 p-2 rounded border border-emerald-300 bg-emerald-50/60 space-y-3"
+          >
+            <div class="text-xs uppercase tracking-widest text-emerald-900 flex items-baseline justify-between">
+              <span>Battlebuben-Magie</span>
+              <span class="font-mono normal-case tracking-normal text-[10px]">
+                Arkanum {{ sheet.magicState.bbArkanumCurrent ?? 0 }}/{{ sheet.magicState.bbArkanumMax ?? 0 }}
+              </span>
+            </div>
+
+            <!-- Arkanum-Pool (verbrauchbar) -->
+            <div class="grid grid-cols-12 gap-2 items-end">
+              <UFormField label="Arkanum aktuell" class="col-span-4">
+                <UInput
+                  type="number"
+                  min="0"
+                  :max="sheet.magicState.bbArkanumMax ?? 0"
+                  :model-value="sheet.magicState.bbArkanumCurrent ?? 0"
+                  @update:model-value="setBbArkanumCurrent(Number($event))"
+                />
+              </UFormField>
+              <UFormField label="Arkanum max" class="col-span-4">
+                <UInput
+                  type="number"
+                  min="0"
+                  :model-value="sheet.magicState.bbArkanumMax ?? 0"
+                  @update:model-value="setBbArkanumMax(Number($event))"
+                />
+              </UFormField>
+              <UButton
+                size="sm"
+                color="primary"
+                variant="soft"
+                icon="i-lucide-sparkles"
+                class="col-span-4"
+                block
+                :disabled="(sheet.magicState.bbArkanumCurrent ?? 0) >= (sheet.magicState.bbArkanumMax ?? 0)"
+                title="Arkanum-Pool auf Maximum auffuellen (z.B. nach Rast)"
+                @click="restoreBbArkanum"
+              >
+                Auffüllen
+              </UButton>
+            </div>
+            <p class="text-[10px] text-emerald-900/80">
+              Probe: W100 ≤ (Magie-FW − Schwierigkeit) · Schwierigkeit +10/+20/+30 je Level ·
+              Arkanumkosten 1/2/3 · ab Level 3: 1W8 Schaden bei Fehlschlag · Effekte skalieren mit der QS.
+              Richtwert Zauber-Slots je Stil: FW ÷ 20.
+            </p>
+
+            <!-- Stil → Skill-Bindung (nur fuer gelernte Stile) -->
+            <div v-if="bbKnownStile.length" class="space-y-1">
+              <div class="text-[10px] uppercase tracking-widest text-emerald-900">
+                Probe-Skill je Stil
+              </div>
+              <div
+                v-for="stilId in bbKnownStile"
+                :key="stilId"
+                class="grid grid-cols-12 gap-2 items-center"
+              >
+                <div class="col-span-4 text-xs font-semibold">{{ BATTLEBUBEN_STIL_LABELS[stilId] }}</div>
+                <USelect
+                  class="col-span-6"
+                  size="xs"
+                  :model-value="sheet.magicState.bbStilSkills?.[stilId] ?? NONE_VALUE"
+                  :items="spellSkillOptions"
+                  value-key="value"
+                  @update:model-value="setBbStilSkill(stilId, $event)"
+                />
+                <div class="col-span-2 text-[10px] text-emerald-900/80 text-right tabular-nums">
+                  <template v-if="bbStilSkillValue(stilId) !== null">
+                    {{ bbLearnedCountInStil(stilId) }}/{{ htbahBbTalentLevel(bbStilSkillValue(stilId) ?? 0) }} Slots
+                  </template>
+                  <template v-else>— Slots</template>
+                </div>
+              </div>
+            </div>
+
+            <!-- Katalog: pro Stil alle Zauber als Toggle (lernen / verlernen) -->
+            <details class="border border-emerald-300/60 rounded p-2 bg-white/40" :open="!(sheet.magicState.bbKnownSpellKeys?.length)">
+              <summary class="cursor-pointer text-xs uppercase tracking-widest text-emerald-900 flex items-center justify-between">
+                <span>Zauber-Katalog ({{ sheet.magicState.bbKnownSpellKeys?.length ?? 0 }} gelernt)</span>
+                <span class="text-[10px] normal-case tracking-normal opacity-70">Klick = lernen / verlernen</span>
+              </summary>
+              <div class="mt-2 space-y-2">
+                <div
+                  v-for="stil in BATTLEBUBEN_MAGIC_STILE"
+                  :key="stil.id"
+                  class="border border-emerald-300/30 rounded p-2 bg-white/40"
+                >
+                  <div class="font-serif text-sm mb-1">{{ stil.label }}</div>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                    <button
+                      v-for="spell in battlebubenSpellsByStil(stil.id)"
+                      :key="spell.key"
+                      type="button"
+                      class="text-left text-[11px] px-2 py-1.5 rounded border transition flex items-start gap-2"
+                      :class="(sheet.magicState.bbKnownSpellKeys ?? []).includes(spell.key)
+                        ? 'bg-[var(--color-accent)]/15 border-[var(--color-accent)] text-ink-700'
+                        : 'bg-white/40 border-parchment-700/30 hover:bg-white/70 text-ink-500'"
+                      :title="spell.effect"
+                      @click="toggleBbKnownSpell(spell.key)"
+                    >
+                      <span class="font-mono text-[10px] opacity-70 mt-0.5 shrink-0">L{{ spell.level }}</span>
+                      <span class="flex-1 min-w-0">
+                        <span class="font-semibold block">{{ spell.name }}</span>
+                        <span class="text-[10px] opacity-75 block">
+                          +{{ battlebubenSpellMeta(spell).schwierigkeit }} Schw. ·
+                          {{ battlebubenSpellMeta(spell).arkanum }} Arkanum<template v-if="battlebubenSpellMeta(spell).fehlschlag"> · Fehlschlag {{ battlebubenSpellMeta(spell).fehlschlag }}</template>
+                        </span>
+                        <span class="text-[10px] opacity-75 block truncate">{{ spell.effect }}</span>
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </details>
           </div>
 
           <!-- ====== "Frei"-Modul (kein strukturiertes System) ====== -->

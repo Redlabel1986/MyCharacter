@@ -950,6 +950,7 @@ export const HTBAH_MAGIC_MODULES = [
   'fuenfstufen',
   'sonnen',
   'seelensplitter',
+  'battlebuben',
   'frei',
 ] as const
 export type HtbahMagicModuleId = (typeof HTBAH_MAGIC_MODULES)[number]
@@ -958,6 +959,7 @@ export const HTBAH_MAGIC_MODULE_LABELS: Record<HtbahMagicModuleId, string> = {
   fuenfstufen: 'Fünfstufenmagie (§8.13.1)',
   sonnen: 'Sonnen-Magie (§8.13.2)',
   seelensplitter: 'Seelensplittermagie (§8.13.3)',
+  battlebuben: 'Battlebuben-Magie (Magiestile)',
   frei: 'Frei (kein Modul aktiv)',
 }
 
@@ -1009,6 +1011,27 @@ export interface HtbahMagicState {
    * Bei > 99% gilt der Charakter als (vermutet) tot.
    */
   seeleVerbraucht?: number
+
+  /* ----- Battlebuben-Magie (Hausregel "Magiestile") ----- */
+  /**
+   * Arkanum als VERBRAUCHBARER Pool (nicht "Anzahl bekannter Zauber" wie das
+   * obige `arkanum`-Feld). Jeder Battlebuben-Zauber zieht `arkanum`-Kosten
+   * (0–3 je nach Level) aus dem aktuellen Pool. Voll auffuellbar (z.B. nach
+   * Rast) auf `bbArkanumMax`.
+   */
+  bbArkanumCurrent?: number
+  bbArkanumMax?: number
+  /**
+   * Gelernte Battlebuben-Zauber als Katalog-Keys (`stil:level:slug`, siehe
+   * shared/battlebuben-magic.ts).
+   */
+  bbKnownSpellKeys?: string[]
+  /**
+   * Bindung Magiestil → Skill-ID. Die Magie-Probe eines Zaubers laeuft gegen
+   * den Fertigkeitswert des Skills, der seinem Stil zugeordnet ist (minus
+   * Schwierigkeit). Stile ohne Bindung koennen nicht gewirkt werden.
+   */
+  bbStilSkills?: Record<string, string>
 }
 
 export function createBlankMagicState(): HtbahMagicState {
@@ -1019,6 +1042,10 @@ export function createBlankMagicState(): HtbahMagicState {
     arkanum: 0,
     lehren: [],
     knownSpellKeys: [],
+    bbArkanumCurrent: 0,
+    bbArkanumMax: 0,
+    bbKnownSpellKeys: [],
+    bbStilSkills: {},
   }
 }
 
