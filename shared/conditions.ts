@@ -42,6 +42,20 @@ export const TOKEN_CONDITIONS: TokenCondition[] = [
     hint: 'Erleidet Feuerschaden pro Runde',
   },
   {
+    id: 'acid',
+    label: 'Verätzt',
+    icon: 'i-lucide-flask-round',
+    color: 'green',
+    hint: 'Säureschaden pro Runde',
+  },
+  {
+    id: 'dot',
+    label: 'Schaden/Runde',
+    icon: 'i-lucide-heart-crack',
+    color: 'red',
+    hint: 'Generischer Schaden pro Runde (z.B. Lava, Ertrinken)',
+  },
+  {
     id: 'frozen',
     label: 'Eingefroren',
     icon: 'i-lucide-snowflake',
