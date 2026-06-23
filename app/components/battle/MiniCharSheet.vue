@@ -898,13 +898,20 @@ const customWeaponAttack = async (w: { name: string }) => {
   customResult.value = `${w.name} — Angriff: ${check.text} → ${check.success ? 'Treffer ✓' : 'daneben ✗'}`
 }
 
-const customWeaponDamage = async (w: { name: string; damageFormula: string }) => {
+const customWeaponDamage = async (w: { name: string; damageFormula: string; range?: number }) => {
   const cd = customData.value
   if (!cd) return
   const target = selectedCustomTarget.value
   const eff = rollFormula(w.damageFormula, statContext(cd))
   if (!target) {
     customResult.value = `${w.name} — Schaden: ${eff.total} (${eff.detail}). Kein Ziel gewählt.`
+    return
+  }
+  // Reichweiten-Pruefung (Chebyshev-Felder). DM darf ausserhalb der Reichweite.
+  const range = w.range && w.range > 0 ? w.range : 1
+  const dist = distanceToToken(target)
+  if (dist !== null && dist > range && !props.isDm) {
+    customResult.value = `${w.name}: Ziel ${dist} Felder entfernt — Reichweite ${range}.`
     return
   }
   await applyCustomEffect(target, eff.total, 'damage', `${w.name} → ${target.name}`)
@@ -2563,7 +2570,7 @@ const onImageError = (tokenId: number) => {
             </div>
             <div v-else class="space-y-1">
               <div v-for="w in customData.weapons" :key="w.id" class="flex items-center gap-1.5 text-xs">
-                <span class="flex-1 truncate">{{ w.name }} <span class="text-ink-300">· {{ w.damageFormula }}</span></span>
+                <span class="flex-1 truncate">{{ w.name }} <span class="text-ink-300">· {{ w.damageFormula }} · {{ (w.range && w.range > 0) ? w.range : 1 }} Feld</span></span>
                 <UButton size="xs" variant="outline" icon="i-lucide-dices" @click="customWeaponAttack(w)">Angriff</UButton>
                 <UButton size="xs" color="error" variant="soft" icon="i-lucide-swords" @click="customWeaponDamage(w)">Schaden</UButton>
               </div>

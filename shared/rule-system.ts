@@ -117,8 +117,11 @@ export interface CustomCharacterData {
     /** Nur wenn das Magie-Modul aktiv ist. */
     mana?: { current: number; max: number }
   }
-  /** Waffen des Charakters (nur wenn Kampf-Modul aktiv). */
-  weapons?: Array<{ id: string; name: string; damageFormula: string }>
+  /**
+   * Waffen des Charakters (nur wenn Kampf-Modul aktiv). `range` ist die
+   * Reichweite in Rasterfeldern (Chebyshev). Fehlt/0 = Nahkampf (1 Feld).
+   */
+  weapons?: Array<{ id: string; name: string; damageFormula: string; range?: number }>
   inventory: string
   notes: string
 }

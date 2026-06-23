@@ -237,7 +237,7 @@ const addWeapon = () => {
   const l = local.value
   if (!l) return
   if (!l.weapons) l.weapons = []
-  l.weapons.push({ id: genId(), name: 'Neue Waffe', damageFormula: '1d6' })
+  l.weapons.push({ id: genId(), name: 'Neue Waffe', damageFormula: '1d6', range: 1 })
 }
 const removeWeapon = (idx: number) => {
   local.value?.weapons?.splice(idx, 1)
@@ -380,6 +380,8 @@ const weaponDamage = (w: { name: string; damageFormula: string }) => {
             <UInput v-model="w.name" size="xs" class="w-40" placeholder="Name" />
             <span class="text-[10px] text-ink-300">Schaden</span>
             <UInput v-model="w.damageFormula" size="xs" class="w-32" placeholder="1d6 + KOR" />
+            <span class="text-[10px] text-ink-300">Reichw.</span>
+            <UInput v-model.number="w.range" type="number" min="1" max="100" size="xs" class="w-16" title="Reichweite in Feldern (1 = Nahkampf)" />
             <UButton size="xs" variant="outline" icon="i-lucide-dices" @click="weaponAttack(w)">Angriff</UButton>
             <UButton size="xs" color="error" variant="soft" icon="i-lucide-swords" @click="weaponDamage(w)">Schaden</UButton>
             <UButton size="xs" variant="ghost" color="error" icon="i-lucide-trash-2" @click="removeWeapon(i)" />
