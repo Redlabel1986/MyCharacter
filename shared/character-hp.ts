@@ -13,7 +13,7 @@
  */
 import { dsa5Derived, type Dsa5CharacterData } from './engines/dsa5'
 
-export type CharSystem = 'dnd5e' | 'dnd2024' | 'dsa5' | 'dsa41' | 'htbah'
+export type CharSystem = 'dnd5e' | 'dnd2024' | 'dsa5' | 'dsa41' | 'htbah' | 'custom'
 
 export interface CharacterHp {
   current: number | null
@@ -50,6 +50,11 @@ export function readCharacterHp(system: CharSystem, data: unknown): CharacterHp 
     }
     return { current: asNumOrNull(state.leCurrent), max }
   }
+  if (system === 'custom') {
+    const resources = asObj(d.resources)
+    const hp = asObj(resources.hp)
+    return { current: asNumOrNull(hp.current), max: asNumOrNull(hp.max) }
+  }
   // dsa41 ist heute UI-seitig nicht voll integriert — keine kanonische HP-Stelle.
   return { current: null, max: null }
 }
@@ -85,6 +90,15 @@ export function writeCharacterHp(
     if (patch.current !== undefined) state.leCurrent = patch.current ?? 0
     next.state = state
     // hpMax ignorieren — wird aus leBase + 2*KO + leMod berechnet.
+    return next
+  }
+  if (system === 'custom') {
+    const resources = asObj(next.resources)
+    const hp = asObj(resources.hp)
+    if (patch.current !== undefined) hp.current = patch.current ?? 0
+    if (patch.max !== undefined) hp.max = patch.max ?? 0
+    resources.hp = hp
+    next.resources = resources
     return next
   }
   return next

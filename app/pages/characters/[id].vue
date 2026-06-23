@@ -4,6 +4,7 @@ import SheetDnd from '~/components/sheets/SheetDnd.vue'
 import SheetDsa5 from '~/components/sheets/SheetDsa5.vue'
 import SheetDsa41 from '~/components/sheets/SheetDsa41.vue'
 import SheetHtbah from '~/components/sheets/SheetHtbah.vue'
+import SheetCustom from '~/components/sheets/SheetCustom.vue'
 import DmAccessManager from '~/components/DmAccessManager.vue'
 import PortraitUploader from '~/components/PortraitUploader.vue'
 
@@ -11,7 +12,8 @@ definePageMeta({ middleware: ['auth'] })
 
 interface Character {
   id: number
-  system: GameSystem
+  system: GameSystem | 'custom'
+  ruleSystemId: number | null
   name: string
   portraitUrl: string | null
   data: Record<string, unknown>
@@ -91,8 +93,17 @@ const sheetComponent = computed(() => {
       return SheetDsa41
     case 'htbah':
       return SheetHtbah
+    case 'custom':
+      return SheetCustom
   }
   return null
+})
+// Label fuer den System-Badge: Built-ins ueber SYSTEM_META, Custom generisch.
+const systemLabel = computed(() => {
+  const s = character.value?.system
+  if (!s) return ''
+  if (s === 'custom') return 'Eigenes Regelwerk'
+  return SYSTEM_META[s as GameSystem]?.shortLabel ?? s
 })
 </script>
 
@@ -114,7 +125,7 @@ const sheetComponent = computed(() => {
             ← Zur Übersicht
           </NuxtLink>
           <div class="text-xs uppercase tracking-widest text-[var(--color-accent)] font-semibold mt-1 flex gap-2 items-baseline">
-            <span>{{ SYSTEM_META[character.system].shortLabel }}</span>
+            <span>{{ systemLabel }}</span>
             <span v-if="!isOwner" class="text-[10px] bg-[var(--color-accent-soft)] px-2 py-0.5 rounded-full text-[var(--color-accent)]">
               DM-Zugriff
             </span>
@@ -152,6 +163,7 @@ const sheetComponent = computed(() => {
       v-model:data="draftData"
       :system="character.system"
       :character-id="character.id"
+      :rule-system-id="character.ruleSystemId ?? undefined"
     />
 
     <DmAccessManager

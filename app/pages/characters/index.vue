@@ -5,7 +5,7 @@ definePageMeta({ middleware: ['auth'] })
 
 interface CharacterListItem {
   id: number
-  system: GameSystem
+  system: GameSystem | 'custom'
   name: string
   updatedAt: string
   createdAt: string
@@ -34,6 +34,9 @@ const remove = async (id: number, name: string) => {
         <p class="text-ink-400 text-sm">Pflege deine Helden und beginne neue Abenteuer.</p>
       </div>
       <div class="flex gap-2 flex-wrap">
+        <UButton to="/rule-systems" variant="outline" icon="i-lucide-blocks">
+          Regelwerke
+        </UButton>
         <UButton to="/characters/import" variant="outline" icon="i-lucide-upload">
           PDF importieren
         </UButton>
@@ -59,7 +62,7 @@ const remove = async (id: number, name: string) => {
         class="parchment-card p-5 flex flex-col gap-2"
       >
         <div class="text-xs uppercase tracking-widest text-[var(--color-accent)] font-semibold">
-          {{ SYSTEM_META[c.system].shortLabel }}
+          {{ SYSTEM_META[c.system as GameSystem]?.shortLabel ?? 'Eigenes Regelwerk' }}
         </div>
         <NuxtLink :to="`/characters/${c.id}`" class="font-serif text-2xl hover:underline">
           {{ c.name }}

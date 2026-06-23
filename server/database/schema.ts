@@ -37,7 +37,14 @@ export const characters = pgTable(
     userId: integer('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    system: text('system').notNull().$type<'dnd5e' | 'dnd2024' | 'dsa5' | 'dsa41' | 'htbah'>(),
+    system: text('system')
+      .notNull()
+      .$type<'dnd5e' | 'dnd2024' | 'dsa5' | 'dsa41' | 'htbah' | 'custom'>(),
+    /**
+     * Bei system='custom': Referenz auf das benutzerdefinierte Regelwerk
+     * (rule_systems). Die generische Engine interpretiert dessen Definition.
+     */
+    ruleSystemId: integer('rule_system_id'),
     name: text('name').notNull(),
     portraitUrl: text('portrait_url'),
     data: jsonb('data').notNull().$type<Record<string, unknown>>().default({}),
@@ -81,6 +88,38 @@ export const groups = pgTable('groups', {
   audioState: jsonb('audio_state').$type<unknown>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+/**
+ * Benutzerdefinierte Regelwerke ("Eigenes Regelwerk"). Die `definition` (JSONB)
+ * folgt RuleSystemDefinition (shared/rule-system.ts). Sichtbarkeit:
+ *   - owner sieht/bearbeitet immer seine eigenen
+ *   - published=true -> fuer alle Nutzer sichtbar (global veroeffentlicht)
+ *   - groupId (optional) -> zusaetzlich an eine Gruppe gebunden
+ */
+export const ruleSystems = pgTable(
+  'rule_systems',
+  {
+    id: serial('id').primaryKey(),
+    ownerUserId: integer('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    groupId: integer('group_id').references(() => groups.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    description: text('description').notNull().default(''),
+    published: boolean('published').notNull().default(false),
+    definition: jsonb('definition')
+      .notNull()
+      .$type<import('~~/shared/rule-system').RuleSystemDefinition>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    ownerIdx: index('idx_rule_systems_owner').on(table.ownerUserId),
+    publishedIdx: index('idx_rule_systems_published').on(table.published),
+  }),
+)
+export type RuleSystemRow = typeof ruleSystems.$inferSelect
+export type NewRuleSystemRow = typeof ruleSystems.$inferInsert
 
 export const groupMembers = pgTable(
   'group_members',

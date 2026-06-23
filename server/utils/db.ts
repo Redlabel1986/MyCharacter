@@ -86,6 +86,10 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     ALTER TABLE characters ADD COLUMN IF NOT EXISTS portrait_url TEXT
   `)
+  // Custom-Regelwerk-Referenz am Charakter (system='custom').
+  await db.execute(sql`
+    ALTER TABLE characters ADD COLUMN IF NOT EXISTS rule_system_id INTEGER
+  `)
   // Gruppen + Mitglieder + Chat
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS groups (
@@ -94,6 +98,26 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
       owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
+  `)
+  // Custom-Regelwerke ("Eigenes Regelwerk").
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS rule_systems (
+      id SERIAL PRIMARY KEY,
+      owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      group_id INTEGER REFERENCES groups(id) ON DELETE SET NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      published BOOLEAN NOT NULL DEFAULT FALSE,
+      definition JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_rule_systems_owner ON rule_systems(owner_user_id)
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_rule_systems_published ON rule_systems(published)
   `)
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS group_members (

@@ -5,7 +5,7 @@ definePageMeta({ middleware: ['dm'] })
 
 interface DmCharacter {
   id: number
-  system: GameSystem
+  system: GameSystem | 'custom'
   name: string
   updatedAt: string
   createdAt: string
@@ -47,7 +47,7 @@ const formatDate = (iso: string) =>
         class="parchment-card p-5 flex flex-col gap-2"
       >
         <div class="text-xs uppercase tracking-widest text-[var(--color-accent)] font-semibold">
-          {{ SYSTEM_META[c.system].shortLabel }}
+          {{ SYSTEM_META[c.system as GameSystem]?.shortLabel ?? 'Eigenes Regelwerk' }}
         </div>
         <NuxtLink :to="`/characters/${c.id}`" class="font-serif text-2xl hover:underline">
           {{ c.name }}

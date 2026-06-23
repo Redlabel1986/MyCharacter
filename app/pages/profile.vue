@@ -8,7 +8,7 @@ const { user, fetch: refreshSession } = useUserSession()
 interface AccessRow {
   id: number
   grantedAt: string
-  character: { id: number; name: string; system: GameSystem }
+  character: { id: number; name: string; system: GameSystem | 'custom' }
   dm: { id: number; username: string; email: string; role: string }
 }
 
@@ -332,7 +332,7 @@ const submitPasswordChange = async () => {
           class="py-3 flex items-center gap-3 flex-wrap"
         >
           <div class="text-xs uppercase tracking-widest text-[var(--color-accent)] font-semibold w-20">
-            {{ SYSTEM_META[row.character.system].shortLabel }}
+            {{ SYSTEM_META[row.character.system as GameSystem]?.shortLabel ?? 'Eigenes Regelwerk' }}
           </div>
           <NuxtLink :to="`/characters/${row.character.id}`" class="font-serif text-lg hover:underline">
             {{ row.character.name }}

@@ -3,14 +3,14 @@ import type { GameSystem } from '~~/shared/systems'
 
 interface Props {
   characterId: number
-  system: GameSystem
+  system: GameSystem | 'custom'
 }
 const props = defineProps<Props>()
 
 interface AccessRow {
   id: number
   grantedAt: string
-  character: { id: number; name: string; system: GameSystem }
+  character: { id: number; name: string; system: GameSystem | 'custom' }
   dm: { id: number; username: string; email: string; role: string }
 }
 

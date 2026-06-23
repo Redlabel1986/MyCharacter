@@ -8,7 +8,8 @@ export type AccessKind = 'owner' | 'dm'
 export interface AccessibleCharacter {
   id: number
   userId: number
-  system: 'dnd5e' | 'dnd2024' | 'dsa5' | 'dsa41' | 'htbah'
+  system: 'dnd5e' | 'dnd2024' | 'dsa5' | 'dsa41' | 'htbah' | 'custom'
+  ruleSystemId: number | null
   name: string
   portraitUrl: string | null
   data: Record<string, unknown>
@@ -38,6 +39,7 @@ export async function loadAccessibleCharacter(
       id: c.id,
       userId: c.userId,
       system: c.system!,
+      ruleSystemId: c.ruleSystemId ?? null,
       name: c.name,
       portraitUrl: c.portraitUrl,
       data: c.data as Record<string, unknown>,
