@@ -14,9 +14,10 @@ import {
   type RuleSystemDefinition,
   type RsAttributeDef,
   type RsSkillDef,
+  type RsSpellDef,
   type RsDiceMechanic,
 } from '~~/shared/rule-system'
-import { isValidFormula } from '~~/shared/formula'
+import { isValidFormula, isValidRollFormula } from '~~/shared/formula'
 
 definePageMeta({ middleware: ['auth'] })
 
@@ -72,9 +73,42 @@ const openEdit = (rs: RuleSystemListItem) => {
   if (!draftDef.value.skills) draftDef.value.skills = []
   if (!draftDef.value.hp) draftDef.value.hp = { maxFormula: '10' }
   if (!draftDef.value.dice) draftDef.value.dice = { mechanic: 'roll-over', dieSize: 20 }
+  if (!draftDef.value.modules) draftDef.value.modules = {}
+  if (!draftDef.value.modules.magic) {
+    draftDef.value.modules.magic = { enabled: false, resourceName: 'Mana', resourceMaxFormula: 'GEI * 5', castStat: '', spells: [] }
+  }
+  if (!draftDef.value.modules.magic.spells) draftDef.value.modules.magic.spells = []
+  if (!draftDef.value.modules.combat) {
+    draftDef.value.modules.combat = { enabled: false, attackStat: '' }
+  }
   saveError.value = null
   editorOpen.value = true
 }
+
+// Module-Shortcuts (immer vorhanden nach openCreate/openEdit).
+const magic = computed(() => draftDef.value.modules!.magic!)
+const combat = computed(() => draftDef.value.modules!.combat!)
+
+// Auswahl von Attributen + Fertigkeiten (fuer castStat/attackStat).
+const statSelectItems = computed(() => [
+  { label: '— wählen —', value: '' },
+  ...draftDef.value.attributes.map((a) => ({ label: `${a.label} (${a.key})`, value: a.key })),
+  ...draftDef.value.skills.map((s) => ({ label: `${s.label} (${s.key})`, value: s.key })),
+])
+
+const genId = () => {
+  try {
+    return crypto.randomUUID()
+  } catch {
+    return `sp-${Date.now()}-${Math.floor(Math.random() * 1e6)}`
+  }
+}
+const addSpell = () => {
+  magic.value.spells.push({ id: genId(), name: 'Neuer Zauber', cost: 1, kind: 'damage', effectFormula: '1d6', difficulty: 0, note: '' } as RsSpellDef)
+}
+const removeSpell = (idx: number) => magic.value.spells.splice(idx, 1)
+const spellEffectValid = (sp: RsSpellDef) => sp.kind === 'utility' || isValidRollFormula(sp.effectFormula, attrSampleCtx.value)
+const resourceMaxValid = computed(() => isValidFormula(magic.value.resourceMaxFormula, attrSampleCtx.value))
 
 // Attribute
 const addAttr = () => {
@@ -254,6 +288,78 @@ const diceLabel = (m: RsDiceMechanic) => RS_DICE_LABELS[m]
                 <UButton size="xs" variant="ghost" color="error" icon="i-lucide-trash-2" @click="removeSkill(i)" />
               </div>
               <p v-if="!draftDef.skills.length" class="text-xs text-ink-300 italic">Keine Fertigkeiten (optional).</p>
+            </div>
+          </div>
+
+          <!-- Magie-Modul -->
+          <div class="border-t border-parchment-700/30 pt-3">
+            <label class="flex items-center gap-2 font-semibold">
+              <UCheckbox v-model="magic.enabled" />
+              <UIcon name="i-lucide-sparkles" class="size-4 text-[var(--color-accent)]" />
+              Magie-Modul
+            </label>
+            <div v-if="magic.enabled" class="mt-3 space-y-3 pl-1">
+              <div class="grid sm:grid-cols-3 gap-3">
+                <UFormField label="Ressourcen-Name">
+                  <UInput v-model="magic.resourceName" placeholder="Mana" :maxlength="30" />
+                </UFormField>
+                <UFormField label="Ressource max (Formel)" :help="resourceMaxValid ? 'z.B. „GEI * 5“' : 'Formel ungültig.'">
+                  <UInput v-model="magic.resourceMaxFormula" placeholder="GEI * 5" :color="resourceMaxValid ? undefined : 'error'" />
+                </UFormField>
+                <UFormField label="Zauberprobe gegen">
+                  <USelect v-model="magic.castStat" :items="statSelectItems" value-key="value" />
+                </UFormField>
+              </div>
+
+              <div>
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-sm font-semibold">Zauber-Katalog</span>
+                  <UButton size="xs" variant="outline" icon="i-lucide-plus" @click="addSpell">Zauber</UButton>
+                </div>
+                <div class="space-y-2">
+                  <div v-for="(sp, i) in magic.spells" :key="sp.id" class="rounded border border-parchment-700/30 bg-white/50 p-2 space-y-1.5">
+                    <div class="flex items-center gap-1.5 flex-wrap">
+                      <UInput v-model="sp.name" size="xs" class="w-40" placeholder="Name" :maxlength="60" />
+                      <USelect
+                        v-model="sp.kind"
+                        :items="[
+                          { label: 'Schaden', value: 'damage' },
+                          { label: 'Heilung', value: 'heal' },
+                          { label: 'Effekt', value: 'utility' },
+                        ]"
+                        value-key="value"
+                        size="xs"
+                        class="w-28"
+                      />
+                      <span class="text-[10px] text-ink-300">Kosten</span>
+                      <UInput v-model.number="sp.cost" type="number" size="xs" class="w-16" />
+                      <span class="text-[10px] text-ink-300">Erschwernis</span>
+                      <UInput v-model.number="sp.difficulty" type="number" size="xs" class="w-16" />
+                      <UButton size="xs" variant="ghost" color="error" icon="i-lucide-trash-2" @click="removeSpell(i)" />
+                    </div>
+                    <div v-if="sp.kind !== 'utility'" class="flex items-center gap-1.5">
+                      <span class="text-[10px] text-ink-300 w-14">Effekt</span>
+                      <UInput v-model="sp.effectFormula" size="xs" class="flex-1" placeholder="2d6 + GEI" :color="spellEffectValid(sp) ? undefined : 'error'" />
+                    </div>
+                    <UInput v-model="sp.note" size="xs" placeholder="Notiz (optional)" :maxlength="200" />
+                  </div>
+                  <p v-if="!magic.spells.length" class="text-xs text-ink-300 italic">Noch keine Zauber.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Kampf-Modul -->
+          <div class="border-t border-parchment-700/30 pt-3">
+            <label class="flex items-center gap-2 font-semibold">
+              <UCheckbox v-model="combat.enabled" />
+              <UIcon name="i-lucide-swords" class="size-4 text-[var(--color-accent)]" />
+              Kampf-Modul
+            </label>
+            <div v-if="combat.enabled" class="mt-3 pl-1">
+              <UFormField label="Angriffsprobe gegen" help="Waffen (mit Schadensformel) legen die Spieler auf ihrem Bogen an.">
+                <USelect v-model="combat.attackStat" :items="statSelectItems" value-key="value" class="max-w-xs" />
+              </UFormField>
             </div>
           </div>
 

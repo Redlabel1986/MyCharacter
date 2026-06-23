@@ -194,6 +194,41 @@ export function evalFormula(
   }
 }
 
+export interface RollResult {
+  total: number
+  /** Lesbares Detail der Wuerfe, z.B. "2W6[3,5] + 4". */
+  detail: string
+}
+
+/**
+ * Wuerfelt eine Formel mit Wuerfelnotation aus. Unterstuetzt NdM bzw. NWM
+ * (z.B. "2d6", "1W10", "d20") plus die Arithmetik/Variablen von evalFormula
+ * (z.B. "2d6 + GEI"). Jede Wuerfelgruppe wird gewuerfelt, durch ihre Summe
+ * ersetzt und der Rest ausgewertet.
+ */
+export function rollFormula(formula: string, vars: Record<string, number> = {}): RollResult {
+  const src = (formula ?? '').trim()
+  if (!src) return { total: 0, detail: '' }
+  const parts: string[] = []
+  const replaced = src.replace(/(\d*)\s*[dDwW]\s*(\d+)/g, (_m, nStr: string, mStr: string) => {
+    const n = Math.min(100, Math.max(1, Number.parseInt(nStr || '1', 10) || 1))
+    const sides = Math.min(1000, Math.max(2, Number.parseInt(mStr, 10) || 2))
+    const rolls: number[] = []
+    let sum = 0
+    for (let i = 0; i < n; i++) {
+      const r = Math.floor(Math.random() * sides) + 1
+      rolls.push(r)
+      sum += r
+    }
+    parts.push(`${n}W${sides}[${rolls.join(',')}]`)
+    return String(sum)
+  })
+  const total = Math.round(evalFormula(replaced, vars, 0))
+  // Wenn keine Wuerfel vorkamen, ist das Detail die reine Formel/Zahl.
+  const detail = parts.length ? parts.join(' + ') : replaced
+  return { total, detail }
+}
+
 /** Prueft, ob eine Formel syntaktisch gueltig ist (fuer den Builder-Editor). */
 export function isValidFormula(formula: string, sampleVars: Record<string, number> = {}): boolean {
   const src = (formula ?? '').trim()
@@ -206,4 +241,16 @@ export function isValidFormula(formula: string, sampleVars: Record<string, numbe
   } catch {
     return false
   }
+}
+
+/**
+ * Wie isValidFormula, aber toleriert Wuerfelnotation (NdM / NWM). Fuer Effekt-/
+ * Schadensformeln im Modul-Editor.
+ */
+export function isValidRollFormula(formula: string, sampleVars: Record<string, number> = {}): boolean {
+  const src = (formula ?? '').trim()
+  if (!src) return true
+  // Wuerfel durch eine Zahl ersetzen, dann normal validieren.
+  const replaced = src.replace(/(\d*)\s*[dDwW]\s*(\d+)/g, '1')
+  return isValidFormula(replaced, sampleVars)
 }

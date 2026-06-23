@@ -56,14 +56,52 @@ export interface RsHpConfig {
   maxFormula: string
 }
 
+/* ----------------------------------------------------------------------------
+ *  Module (Phase 2): Magie + Kampf
+ * ------------------------------------------------------------------------- */
+export interface RsSpellDef {
+  id: string
+  name: string
+  /** Ressourcen-Kosten (z.B. Mana). */
+  cost: number
+  kind: 'damage' | 'heal' | 'utility'
+  /** Effekt-Wuerfelformel, z.B. "2d6 + GEI". Bei 'utility' leer erlaubt. */
+  effectFormula: string
+  /** Modifikator/Erschwernis auf die Zauberprobe (siehe Wuerfelmechanik). */
+  difficulty: number
+  note?: string
+}
+
+export interface RsMagicModule {
+  enabled: boolean
+  /** Anzeigename der Ressource, z.B. "Mana" oder "Arkanum". */
+  resourceName: string
+  /** Maximum der Ressource als Zahl/Formel ueber Attribute, z.B. "GEI * 5". */
+  resourceMaxFormula: string
+  /** Key eines Attributs ODER einer Fertigkeit, gegen die die Zauberprobe geht. */
+  castStat: string
+  /** Zauber-Katalog des Regelwerks (allen Charakteren dieses Systems verfuegbar). */
+  spells: RsSpellDef[]
+}
+
+export interface RsCombatModule {
+  enabled: boolean
+  /** Key eines Attributs/Skills fuer die Angriffsprobe. */
+  attackStat: string
+}
+
+export interface RsModules {
+  magic?: RsMagicModule
+  combat?: RsCombatModule
+}
+
 /** Das gesamte Regelwerk-Dokument (rule_systems.definition JSONB). */
 export interface RuleSystemDefinition {
   attributes: RsAttributeDef[]
   skills: RsSkillDef[]
   hp: RsHpConfig
   dice: RsDiceConfig
-  /** Phase 2: Module (Magie/Kampf). Heute optional/leer. */
-  modules?: Record<string, unknown>
+  modules?: RsModules
 }
 
 /* ----------------------------------------------------------------------------
@@ -76,9 +114,25 @@ export interface CustomCharacterData {
   skills: Record<string, number>
   resources: {
     hp: { current: number; max: number }
+    /** Nur wenn das Magie-Modul aktiv ist. */
+    mana?: { current: number; max: number }
   }
+  /** Waffen des Charakters (nur wenn Kampf-Modul aktiv). */
+  weapons?: Array<{ id: string; name: string; damageFormula: string }>
   inventory: string
   notes: string
+}
+
+/** Loest einen Stat-Key gegen die aktuellen Charakterwerte auf (Attribut vor Skill). */
+export function resolveStatValue(data: CustomCharacterData, key: string): number {
+  if (data?.attributes && typeof data.attributes[key] === 'number') return data.attributes[key]
+  if (data?.skills && typeof data.skills[key] === 'number') return data.skills[key]
+  return 0
+}
+
+/** Aktueller Variablen-Kontext (Attribute + Fertigkeiten) fuer Formeln. */
+export function statContext(data: CustomCharacterData): Record<string, number> {
+  return { ...(data?.attributes ?? {}), ...(data?.skills ?? {}) }
 }
 
 /* ----------------------------------------------------------------------------
@@ -99,7 +153,16 @@ export function createDefaultRuleSystemDefinition(): RuleSystemDefinition {
     ],
     hp: { maxFormula: '20 + KOR' },
     dice: { mechanic: 'roll-over', dieSize: 20 },
-    modules: {},
+    modules: {
+      magic: {
+        enabled: false,
+        resourceName: 'Mana',
+        resourceMaxFormula: 'GEI * 5',
+        castStat: 'wissen',
+        spells: [],
+      },
+      combat: { enabled: false, attackStat: 'kampf' },
+    },
   }
 }
 
@@ -117,14 +180,24 @@ export function createBlankCustomCharacter(def: RuleSystemDefinition): CustomCha
   const skills: Record<string, number> = {}
   for (const s of def.skills) skills[s.key] = s.default
 
-  const max = Math.max(1, Math.round(evalFormula(def.hp.maxFormula, defaultAttributeContext(def), 10)))
-  return {
+  const ctx = defaultAttributeContext(def)
+  const max = Math.max(1, Math.round(evalFormula(def.hp.maxFormula, ctx, 10)))
+  const data: CustomCharacterData = {
     attributes,
     skills,
     resources: { hp: { current: max, max } },
     inventory: '',
     notes: '',
   }
+  // Magie-Modul aktiv -> Mana-Pool initialisieren.
+  const magic = def.modules?.magic
+  if (magic?.enabled) {
+    const manaMax = Math.max(0, Math.round(evalFormula(magic.resourceMaxFormula, ctx, 0)))
+    data.resources.mana = { current: manaMax, max: manaMax }
+  }
+  // Kampf-Modul aktiv -> leere Waffenliste.
+  if (def.modules?.combat?.enabled) data.weapons = []
+  return data
 }
 
 /* ----------------------------------------------------------------------------
@@ -162,6 +235,27 @@ export function validateRuleSystemDefinition(def: RuleSystemDefinition): string[
   } else if (mechanic !== 'pool-3d20') {
     const ds = def.dice?.dieSize ?? 0
     if (!Number.isFinite(ds) || ds < 2 || ds > 1000) errors.push('Würfelgröße muss zwischen 2 und 1000 liegen.')
+  }
+
+  // Module
+  const statKeys = new Set<string>([...attrKeys, ...skillKeys])
+  const magic = def?.modules?.magic
+  if (magic?.enabled) {
+    if (!magic.resourceName?.trim()) errors.push('Magie: Ressourcen-Name fehlt.')
+    if (!statKeys.has(magic.castStat)) errors.push('Magie: Zauberprobe-Wert muss ein Attribut/Fertigkeit-Key sein.')
+    if ((magic.spells?.length ?? 0) > 200) errors.push('Magie: Maximal 200 Zauber.')
+    const spellIds = new Set<string>()
+    for (const sp of magic.spells ?? []) {
+      if (!sp.name?.trim()) errors.push('Magie: Ein Zauber hat keinen Namen.')
+      if (spellIds.has(sp.id)) errors.push(`Magie: Doppelte Zauber-ID "${sp.id}".`)
+      spellIds.add(sp.id)
+      if (sp.cost < 0) errors.push(`Magie: Zauber "${sp.name}" hat negative Kosten.`)
+      if (!['damage', 'heal', 'utility'].includes(sp.kind)) errors.push(`Magie: Zauber "${sp.name}" hat ungültige Wirkung.`)
+    }
+  }
+  const combat = def?.modules?.combat
+  if (combat?.enabled) {
+    if (!statKeys.has(combat.attackStat)) errors.push('Kampf: Angriffs-Wert muss ein Attribut/Fertigkeit-Key sein.')
   }
   return errors
 }
