@@ -138,6 +138,13 @@ const props = defineProps<{
    * Reichweite wuerfeln (Storytelling, Edge-Cases).
    */
   isDm?: boolean
+  /**
+   * Von der Battle-Page per Rechtsklick auf einen Token gesetztes Ziel.
+   * Wird in das interne Ziel (damageTargetId / uniTargetId) uebernommen, damit
+   * Schaden/Angriff/Zauber in JEDEM System direkt auf das angeklickte Token
+   * gehen — ohne das Dropdown.
+   */
+  targetTokenId?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -714,6 +721,19 @@ const damageApplyResult = ref<string | null>(null)
 // Vollstaendige Token-Liste: bevorzugt die vom Parent gelieferte allTokens-
 // Prop (alle Spieler + NPCs auf der Karte), fallback auf die eigenen Tokens.
 const damageTargetTokens = computed<Token[]>(() => props.allTokens ?? props.tokens)
+
+// Rechtsklick-Ziel von der Battle-Page uebernehmen: setzt das Ziel fuer
+// Schaden/Angriff/Zauber in JEDEM System (damageTargetId + uniTargetId).
+watch(
+  () => props.targetTokenId,
+  (id) => {
+    if (!id) return
+    const tok = damageTargetTokens.value.find((t) => t.id === id)
+    if (!tok) return
+    damageTargetId.value = id
+    uniTargetId.value = id
+  },
+)
 
 /* ==========================================================================
  *  CUSTOM-REGELWERK — Kampf-Block (Zauber/Waffen an Ziel anwenden, Probe)

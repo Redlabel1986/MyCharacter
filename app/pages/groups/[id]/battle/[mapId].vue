@@ -649,6 +649,9 @@ const findMovableTokenAt = (localX: number, localY: number): Token | null => {
 }
 
 const startDrag = (e: PointerEvent, t: Token) => {
+  // Nur die linke Maustaste zieht — Rechtsklick (Button 2) ist fuers Ziel-
+  // Markieren (contextmenu) reserviert, Mittelklick ignorieren wir.
+  if (e.button !== undefined && e.button !== 0) return
   // Im Zeichnen-/Erase-Modus ignorieren wir Token-Drags — der Klick fliesst
   // dann zur Stage durch und triggert das jeweilige Werkzeug.
   if (toolMode.value !== 'select') return
@@ -2187,6 +2190,15 @@ const myTokensOnMap = computed<Token[]>(() => {
     return a.id - b.id
   })
 })
+
+// --- Kampf-Ziel per Rechtsklick ---
+// Rechtsklick auf einen Token waehlt ihn als Ziel fuer Schaden/Angriff/Zauber
+// im MiniCharSheet (alle Systeme). Erneuter Rechtsklick auf dasselbe Ziel hebt
+// die Auswahl auf.
+const combatTargetId = ref<number | null>(null)
+const setCombatTarget = (t: Token) => {
+  combatTargetId.value = combatTargetId.value === t.id ? null : t.id
+}
 
 // --- Initiative-Tracker ---
 // Tracking-Map fuer fehlgeschlagene Bild-Ladungen (alte Eintraege koennten
@@ -4416,10 +4428,13 @@ const endResize = () => {
               @pointerdown="startDrag($event, t)"
               @click="toolMode === 'select' && openInfoFromClick(t)"
               @dblclick="toolMode === 'select' && startEdit(t)"
+              @contextmenu.prevent="setCombatTarget(t)"
             >
               <!-- „Am Zug"-Highlight: pulsierender Ring um das Token, das gerade
                    in der Initiative-Reihenfolge dran ist. -->
               <div v-if="t.id === currentTurnTokenId" class="token-turn-ring pointer-events-none" />
+              <!-- Kampf-Ziel-Markierung (per Rechtsklick gesetzt). -->
+              <div v-if="t.id === combatTargetId" class="token-target-ring pointer-events-none" />
               <!-- Visueller Kreis: Rand, Bild, Wund-Schleier, Tot-X. Wird per
                    clip-path auf einen vertikalen Streifen reduziert, wenn das
                    Token mit anderen auf demselben Feld stapelt — so bleiben
@@ -4853,7 +4868,7 @@ const endResize = () => {
         class="text-xs text-ink-300"
         :class="appMode ? 'app-mode-hide' : ''"
       >
-        Klick = Info-Karte · Ziehen = bewegen · Doppelklick = bearbeiten · Shift = nicht ans Raster snappen · <strong>Alt+Klick = Ping</strong>
+        Klick = Info-Karte · Ziehen = bewegen · Doppelklick = bearbeiten · Shift = nicht ans Raster snappen · <strong>Rechtsklick = Kampf-Ziel</strong> · <strong>Alt+Klick = Ping</strong>
       </p>
 
       <!-- Initiative-Tracker -->
@@ -5064,6 +5079,7 @@ const endResize = () => {
           :awaiting-initiative-for="initiativeState?.awaitingFromCharacters ?? []"
           :grid-size="map?.gridSize"
           :is-dm="isDm"
+          :target-token-id="combatTargetId"
           @token-updated="fetchMap"
         />
       </div>
@@ -6121,6 +6137,9 @@ const endResize = () => {
             :all-tokens="tokens"
             :time-of-day="currentTimeOfDay"
             :awaiting-initiative-for="initiativeState?.awaitingFromCharacters ?? []"
+            :grid-size="map?.gridSize"
+            :is-dm="isDm"
+            :target-token-id="combatTargetId"
             @token-updated="fetchMap"
           />
         </div>
@@ -6185,6 +6204,24 @@ const endResize = () => {
 }
 @media (prefers-reduced-motion: reduce) {
   .token-turn-ring { animation: none; }
+}
+
+/* Kampf-Ziel-Markierung (per Rechtsklick gesetzt): roter Fadenkreuz-Ring. */
+.token-target-ring {
+  position: absolute;
+  inset: -5px;
+  border-radius: 9999px;
+  border: 3px dashed #dc2626;
+  box-shadow: 0 0 10px 2px rgba(220, 38, 38, 0.6);
+  animation: token-target-pulse 1.4s ease-in-out infinite;
+  z-index: 6;
+}
+@keyframes token-target-pulse {
+  0%, 100% { opacity: 0.95; }
+  50%      { opacity: 0.4; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .token-target-ring { animation: none; }
 }
 
 /* ===== Treffer-/Heilungs-Effekte =========================================== */
