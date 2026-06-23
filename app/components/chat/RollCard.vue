@@ -4,7 +4,7 @@
  * an, je nachdem ob Erfolg/Misserfolg/Krit/Patzer.
  */
 interface RollPayload {
-  system: 'dnd5e' | 'dnd2024' | 'dsa5' | 'dsa41' | 'htbah'
+  system: 'dnd5e' | 'dnd2024' | 'dsa5' | 'dsa41' | 'htbah' | 'custom'
   label: string
   characterId?: number
   characterName?: string

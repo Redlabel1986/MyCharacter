@@ -162,7 +162,7 @@ export interface CharacterSharePayload {
  */
 export interface RollPayload {
   /** Regelwerk, in dem gewuerfelt wurde (entspricht GameSystem). */
-  system: 'dnd5e' | 'dnd2024' | 'dsa5' | 'dsa41' | 'htbah'
+  system: 'dnd5e' | 'dnd2024' | 'dsa5' | 'dsa41' | 'htbah' | 'custom'
   /** Anzeigename, z.B. Skillname oder "Begabungsprobe Handeln". */
   label: string
   /** Optionaler Bezug zu einem Charakter (fuer Click-Through). */

@@ -63,12 +63,6 @@ export default defineEventHandler(async (event) => {
   if (char.userId !== user.id) {
     throw createError({ statusCode: 403, statusMessage: 'Nicht dein Charakter.' })
   }
-  if (char.system !== 'htbah') {
-    throw createError({
-      statusCode: 400,
-      statusMessage: 'Initiative-Wurf nur fuer HtbaH-Charaktere.',
-    })
-  }
 
   // Gruppe + Initiative-State laden.
   const [grp] = await db
@@ -93,18 +87,26 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  // Initiative-Wurf, ruleset-abhaengig:
+  // Initiative-Wurf, system-/ruleset-abhaengig:
   //  - HtbaH-Standard: 1W10 + Handeln-Begabungswert (− Ruestungs-Init-Malus,
   //    bereits in htbahInitiativeBonus eingerechnet, Regelwerk §2.2 + §6.2.3).
-  //  - Battlebuben-Modus: flach 1W20, kein Begabungs-/Ruestungs-Bonus.
-  // Stangenwaffen-Bonus (+10) kommt obendrauf, wenn der Client das Flag setzt.
-  const data = char.data as unknown as HtbahCharacterData
-  const battlebuben = data.battlebuben === true
-  const handelnBonus = battlebuben ? 0 : htbahInitiativeBonus(data)
-  const stangenwaffeBonus = body.stangenwaffe ? 10 : 0
-  const die = battlebuben
-    ? Math.floor(Math.random() * 20) + 1
-    : Math.floor(Math.random() * 10) + 1
+  //  - Battlebuben-Modus: flach 1W20.
+  //  - Alle anderen Systeme (D&D / DSA / Custom): flach 1W20 (universelle
+  //    Reihenfolge — der SL kann den Wert im Tracker manuell feinjustieren).
+  // Stangenwaffen-Bonus (+10) kommt nur bei HtbaH obendrauf.
+  const isHtbahChar = char.system === 'htbah'
+  let die: number
+  let handelnBonus = 0
+  let stangenwaffeBonus = 0
+  if (isHtbahChar) {
+    const data = char.data as unknown as HtbahCharacterData
+    const battlebuben = data.battlebuben === true
+    handelnBonus = battlebuben ? 0 : htbahInitiativeBonus(data)
+    stangenwaffeBonus = body.stangenwaffe ? 10 : 0
+    die = battlebuben ? Math.floor(Math.random() * 20) + 1 : Math.floor(Math.random() * 10) + 1
+  } else {
+    die = Math.floor(Math.random() * 20) + 1
+  }
   const total = die + handelnBonus + stangenwaffeBonus
 
   // Bild-URL fuer den Initiative-Tracker. Der rohe `battleTokens.imageUrl` ist
@@ -160,7 +162,7 @@ export default defineEventHandler(async (event) => {
     ? `Stangenwaffe +${stangenwaffeBonus}`
     : undefined
   const payload: RollPayload = {
-    system: 'htbah',
+    system: char.system,
     label: `Initiative — ${char.name}`,
     characterId: char.id,
     characterName: char.name,

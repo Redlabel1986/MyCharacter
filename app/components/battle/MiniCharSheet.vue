@@ -64,6 +64,14 @@ import {
   type DsaAbility,
 } from '~~/shared/engines/dsa5'
 import type { GameSystem } from '~~/shared/systems'
+import {
+  resolveStatValue,
+  statContext,
+  type RuleSystemDefinition,
+  type CustomCharacterData,
+  type RsSpellDef,
+} from '~~/shared/rule-system'
+import { rollFormula } from '~~/shared/formula'
 import type { NpcAbility } from '~~/shared/npc'
 import { htbahConditionModsFromStatusText } from '~~/shared/conditions'
 import { timeBonusFor, isDayTime, type TimeOfDay } from '~~/shared/time-of-day'
@@ -92,7 +100,8 @@ interface Token {
 
 interface CharacterFull {
   id: number
-  system: GameSystem
+  system: GameSystem | 'custom'
+  ruleSystemId?: number | null
   name: string
   portraitUrl: string | null
   data: Record<string, unknown>
@@ -705,6 +714,204 @@ const damageApplyResult = ref<string | null>(null)
 // Vollstaendige Token-Liste: bevorzugt die vom Parent gelieferte allTokens-
 // Prop (alle Spieler + NPCs auf der Karte), fallback auf die eigenen Tokens.
 const damageTargetTokens = computed<Token[]>(() => props.allTokens ?? props.tokens)
+
+/* ==========================================================================
+ *  CUSTOM-REGELWERK — Kampf-Block (Zauber/Waffen an Ziel anwenden, Probe)
+ * ======================================================================== */
+const isCustom = computed(() => character.value?.system === 'custom')
+const customDef = ref<RuleSystemDefinition | null>(null)
+const customData = computed<CustomCharacterData | null>(() =>
+  isCustom.value && character.value ? (character.value.data as unknown as CustomCharacterData) : null,
+)
+const customMagic = computed(() => customDef.value?.modules?.magic ?? null)
+const customCombat = computed(() => customDef.value?.modules?.combat ?? null)
+const customResult = ref<string | null>(null)
+
+// Definition laden, sobald ein Custom-Charakter mit ruleSystemId aktiv ist.
+watch(
+  () => (isCustom.value ? character.value?.ruleSystemId ?? null : null),
+  async (rsId) => {
+    customDef.value = null
+    if (!rsId) return
+    try {
+      const res = await $fetch<{ ruleSystem: { definition: RuleSystemDefinition } }>(
+        `/api/rule-systems/${rsId}`,
+      )
+      customDef.value = res.ruleSystem.definition
+    } catch {
+      customDef.value = null
+    }
+  },
+  { immediate: true },
+)
+
+const dRoll = (size: number) => Math.floor(Math.random() * size) + 1
+// Probe nach Systemmechanik. Liefert {success, text}.
+const customCheck = (statVal: number, difficulty: number) => {
+  const def = customDef.value!
+  const m = def.dice.mechanic
+  if (m === 'roll-under') {
+    const roll = dRoll(def.dice.dieSize)
+    const target = statVal - difficulty
+    return { success: roll <= target, text: `1W${def.dice.dieSize}=${roll} ≤ ${target}` }
+  }
+  if (m === 'roll-over') {
+    const roll = dRoll(def.dice.dieSize)
+    const dc = 10 + difficulty
+    return { success: roll + statVal >= dc, text: `1W${def.dice.dieSize}=${roll}+${statVal} vs ${dc}` }
+  }
+  const rolls = [dRoll(20), dRoll(20), dRoll(20)]
+  const succ = rolls.filter((r) => r <= statVal).length
+  return { success: succ >= 1, text: `3W20=[${rolls.join(',')}] → ${succ} Erfolge` }
+}
+
+// Whole-data-Patch fuer den eigenen Charakter (z.B. Mana abziehen). PUTtet die
+// Daten und aktualisiert den lokalen Cache. HP-Aenderungen laufen NICHT hierueber
+// (die macht apply-damage serverseitig).
+const patchCustomData = async (mutate: (d: CustomCharacterData) => void) => {
+  if (!character.value) return
+  const next = JSON.parse(JSON.stringify(character.value.data)) as CustomCharacterData
+  mutate(next)
+  character.value = { ...character.value, data: next as unknown as Record<string, unknown> }
+  cacheByCharId.set(character.value.id, character.value)
+  try {
+    await $fetch(`/api/characters/${character.value.id}`, { method: 'PUT', body: { data: next } })
+  } catch {
+    // nicht-kritisch fuer die Anzeige
+  }
+}
+
+// Chat-Roll-Card posten (freier Wurf, Custom-System).
+const postCustomRoll = async (label: string, amount: number, opts?: { targetTokenId?: number; damageKind?: 'damage' | 'heal' }) => {
+  try {
+    await $fetch(`/api/groups/${props.groupId}/rolls`, {
+      method: 'POST',
+      body: {
+        kind: 'free',
+        diceCount: 0,
+        diceSides: 1,
+        modifier: amount,
+        label,
+        system: 'custom',
+        characterId: character.value?.id,
+        targetTokenId: opts?.targetTokenId,
+        damageKind: opts?.damageKind,
+      },
+    })
+  } catch {
+    // Chat-Post nicht-kritisch
+  }
+}
+
+// Effekt (Schaden/Heilung) auf ein Ziel-Token anwenden + Chat-Card.
+const applyCustomEffect = async (target: Token, amount: number, kind: 'damage' | 'heal', label: string) => {
+  if (amount <= 0) return
+  await postCustomRoll(label, amount, { targetTokenId: target.id, damageKind: kind })
+  if (target.hp === null || target.hpMax === null || target.hpMax === undefined) return
+  try {
+    const res = (await $fetch(
+      `/api/groups/${props.groupId}/maps/${props.mapId}/tokens/${target.id}/apply-damage`,
+      { method: 'POST', body: { amount, kind } },
+    )) as { hp: number }
+    target.hp = res.hp
+    emit('token-updated')
+  } catch {
+    // ignore
+  }
+}
+
+const selectedCustomTarget = computed<Token | null>(() =>
+  damageTargetId.value ? damageTargetTokens.value.find((t) => t.id === damageTargetId.value) ?? null : null,
+)
+// Eigenes Token (fuer Selbst-Heilung als Default-Ziel).
+const ownToken = computed<Token | null>(() =>
+  character.value ? props.tokens.find((t) => t.characterId === character.value!.id) ?? null : null,
+)
+
+const customCastSpell = async (sp: RsSpellDef) => {
+  const def = customDef.value
+  const mag = customMagic.value
+  const cd = customData.value
+  if (!def || !mag || !cd || !character.value) return
+  const mana = cd.resources.mana
+  if (mana && mana.current < sp.cost) {
+    customResult.value = `${sp.name}: nicht genug ${mag.resourceName}.`
+    return
+  }
+  const statVal = resolveStatValue(cd, mag.castStat)
+  const check = customCheck(statVal, sp.difficulty)
+  // Mana abziehen (persistiert).
+  if (sp.cost > 0) await patchCustomData((d) => {
+    if (d.resources.mana) d.resources.mana.current = Math.max(0, d.resources.mana.current - sp.cost)
+  })
+  const costNote = sp.cost ? ` (−${sp.cost} ${mag.resourceName})` : ''
+  if (!check.success) {
+    await postCustomRoll(`${sp.name} — Probe misslungen${costNote}`, 0)
+    customResult.value = `${sp.name}: ${check.text} → misslungen.${costNote}`
+    return
+  }
+  if (sp.kind === 'utility') {
+    await postCustomRoll(`${sp.name} — gewirkt${costNote}`, 0)
+    customResult.value = `${sp.name}: ${check.text} → gelungen.${costNote}`
+    return
+  }
+  const eff = rollFormula(sp.effectFormula, statContext(cd))
+  // Heilung: Ziel = gewaehltes Ziel ODER eigenes Token. Schaden: gewaehltes Ziel.
+  const target = sp.kind === 'heal' ? (selectedCustomTarget.value ?? ownToken.value) : selectedCustomTarget.value
+  if (!target) {
+    customResult.value = `${sp.name}: ${check.text} → ${eff.total} (${eff.detail}). Kein Ziel gewählt.${costNote}`
+    return
+  }
+  await applyCustomEffect(target, eff.total, sp.kind === 'heal' ? 'heal' : 'damage', `${sp.name} → ${target.name}`)
+  const verb = sp.kind === 'heal' ? `+${eff.total} HP` : `${eff.total} Schaden`
+  customResult.value = `${sp.name}: ${check.text} → ${verb} an ${target.name} (${eff.detail}).${costNote}`
+}
+
+const customWeaponAttack = async (w: { name: string }) => {
+  const def = customDef.value
+  const cb = customCombat.value
+  const cd = customData.value
+  if (!def || !cb || !cd) return
+  const statVal = resolveStatValue(cd, cb.attackStat)
+  const check = customCheck(statVal, 0)
+  await postCustomRoll(`${w.name} — Angriff: ${check.success ? 'Treffer' : 'daneben'}`, statVal)
+  customResult.value = `${w.name} — Angriff: ${check.text} → ${check.success ? 'Treffer ✓' : 'daneben ✗'}`
+}
+
+const customWeaponDamage = async (w: { name: string; damageFormula: string }) => {
+  const cd = customData.value
+  if (!cd) return
+  const target = selectedCustomTarget.value
+  const eff = rollFormula(w.damageFormula, statContext(cd))
+  if (!target) {
+    customResult.value = `${w.name} — Schaden: ${eff.total} (${eff.detail}). Kein Ziel gewählt.`
+    return
+  }
+  await applyCustomEffect(target, eff.total, 'damage', `${w.name} → ${target.name}`)
+  customResult.value = `${w.name} — ${eff.total} Schaden an ${target.name} (${eff.detail}).`
+}
+
+const customProbeTargetKey = ref<string>('')
+const customProbeDc = ref(10)
+const customProbeTargets = computed(() => {
+  const def = customDef.value
+  const cd = customData.value
+  if (!def || !cd) return [] as { label: string; value: string; val: number }[]
+  const out: { label: string; value: string; val: number }[] = []
+  for (const a of def.attributes) out.push({ label: `${a.label} (Attribut)`, value: `attr:${a.key}`, val: cd.attributes[a.key] ?? a.default })
+  for (const s of def.skills) out.push({ label: `${s.label} (Fertigkeit)`, value: `skill:${s.key}`, val: cd.skills[s.key] ?? s.default })
+  return out
+})
+const customProbe = async () => {
+  const t = customProbeTargets.value.find((x) => x.value === customProbeTargetKey.value)
+  if (!t) {
+    customResult.value = 'Bitte ein Ziel der Probe wählen.'
+    return
+  }
+  const check = customCheck(t.val, customDef.value?.dice.mechanic === 'roll-over' ? customProbeDc.value - 10 : 0)
+  await postCustomRoll(`Probe ${t.label}: ${check.success ? 'Erfolg' : 'Misserfolg'}`, t.val)
+  customResult.value = `Probe ${t.label}: ${check.text} → ${check.success ? 'Erfolg ✓' : 'Misserfolg ✗'}`
+}
 // Token-Haendler (NPC-Token mit aktiver Haendler-Konfig) auf der Karte — fuer
 // den Shop. Versteckte Token sind im Snapshot schon ausgefiltert.
 const tokenMerchants = computed(() =>
@@ -2286,6 +2493,78 @@ const onImageError = (tokenId: number) => {
           </div>
         </div>
       </div>
+
+      <!-- ===== CUSTOM-REGELWERK: Kampf-Block ===== -->
+      <template v-if="isCustom">
+        <div v-if="!customDef" class="text-xs text-ink-400 italic">Regelwerk wird geladen …</div>
+        <template v-else>
+          <!-- Ziel-Auswahl (für Schaden/Heilung an Token) -->
+          <UFormField label="Ziel (für Schaden/Heilung)">
+            <USelect
+              v-model="damageTargetId"
+              :items="[{ label: '— kein Ziel —', value: 0 }, ...damageTargetTokens.filter((t) => t.hpMax).map((t) => ({ label: `${t.name} (${t.hp}/${t.hpMax})`, value: t.id }))]"
+              value-key="value"
+              size="sm"
+            />
+          </UFormField>
+
+          <!-- Magie -->
+          <div v-if="customMagic && customData?.resources.mana" class="rounded border border-parchment-700/30 bg-white/40 p-2">
+            <div class="flex items-center justify-between mb-1">
+              <span class="font-serif text-sm flex items-center gap-1">
+                <UIcon name="i-lucide-sparkles" class="size-3.5 text-[var(--color-accent)]" /> Magie
+              </span>
+              <span class="text-xs text-ink-400">{{ customMagic.resourceName }} {{ customData.resources.mana.current }}/{{ customData.resources.mana.max }}</span>
+            </div>
+            <div v-if="!customMagic.spells.length" class="text-[11px] text-ink-300 italic">Keine Zauber im Katalog.</div>
+            <div v-else class="space-y-1">
+              <div v-for="sp in customMagic.spells" :key="sp.id" class="flex items-center gap-2 text-xs">
+                <span class="flex-1 truncate">{{ sp.name }} <span class="text-ink-300">· {{ sp.cost }} {{ customMagic.resourceName }}</span></span>
+                <UButton
+                  size="xs"
+                  color="primary"
+                  icon="i-lucide-wand-2"
+                  :disabled="!!customData.resources.mana && customData.resources.mana.current < sp.cost"
+                  @click="customCastSpell(sp)"
+                >
+                  Zaubern
+                </UButton>
+              </div>
+            </div>
+          </div>
+
+          <!-- Kampf / Waffen -->
+          <div v-if="customCombat" class="rounded border border-parchment-700/30 bg-white/40 p-2">
+            <div class="font-serif text-sm flex items-center gap-1 mb-1">
+              <UIcon name="i-lucide-swords" class="size-3.5 text-[var(--color-accent)]" /> Kampf
+            </div>
+            <div v-if="!customData?.weapons || !customData.weapons.length" class="text-[11px] text-ink-300 italic">
+              Keine Waffen — leg welche auf dem Charakterbogen an.
+            </div>
+            <div v-else class="space-y-1">
+              <div v-for="w in customData.weapons" :key="w.id" class="flex items-center gap-1.5 text-xs">
+                <span class="flex-1 truncate">{{ w.name }} <span class="text-ink-300">· {{ w.damageFormula }}</span></span>
+                <UButton size="xs" variant="outline" icon="i-lucide-dices" @click="customWeaponAttack(w)">Angriff</UButton>
+                <UButton size="xs" color="error" variant="soft" icon="i-lucide-swords" @click="customWeaponDamage(w)">Schaden</UButton>
+              </div>
+            </div>
+          </div>
+
+          <!-- Probe -->
+          <div class="rounded border border-parchment-700/30 bg-white/40 p-2">
+            <div class="font-serif text-sm mb-1">Probe</div>
+            <div class="flex items-end gap-2 flex-wrap">
+              <USelect v-model="customProbeTargetKey" :items="customProbeTargets.map((t) => ({ label: t.label, value: t.value }))" value-key="value" size="xs" class="w-44" />
+              <UInput v-if="customDef.dice.mechanic === 'roll-over'" v-model.number="customProbeDc" type="number" size="xs" class="w-16" />
+              <UButton size="xs" color="primary" icon="i-lucide-dices" @click="customProbe">Würfeln</UButton>
+            </div>
+          </div>
+
+          <p v-if="customResult" class="font-mono text-xs bg-[var(--color-accent-soft)] border border-[var(--color-accent)]/30 rounded px-2 py-1.5">
+            {{ customResult }}
+          </p>
+        </template>
+      </template>
 
       <!-- Schadensstufen-Badge: zeigt, welcher Wunden-Malus aktuell auf jeden
            Wurf wirkt. Wird nur eingeblendet, wenn der Wuerfler tatsaechlich

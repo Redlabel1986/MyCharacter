@@ -121,7 +121,7 @@ const freeSchema = baseSchema.extend({
   diceCount: z.number().int().min(0).max(20),
   diceSides: z.number().int().min(1).max(1000),
   label: z.string().min(1).max(80),
-  system: z.enum(['dnd5e', 'dnd2024', 'dsa5', 'dsa41', 'htbah']),
+  system: z.enum(['dnd5e', 'dnd2024', 'dsa5', 'dsa41', 'htbah', 'custom']),
   /**
    * Wenn der freie Wurf von einem NPC-Token kommt (kein Charakter), kann der
    * Client hier die Token-ID mitschicken — der Schadensstufen-Malus wird dann
