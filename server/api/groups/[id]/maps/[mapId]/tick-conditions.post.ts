@@ -1,17 +1,18 @@
 /**
- * POST /api/groups/:id/maps/:mapId/tick-conditions — Schaden-ueber-Zeit-Tick.
+ * POST /api/groups/:id/maps/:mapId/tick-conditions — Zustands-Tick pro Runde.
  *
  * Nur SL (Gruppen-Owner). Wird beim "Naechste Runde"-Klick im Initiative-
- * Tracker aufgerufen. Fuer jeden Token mit DoT-Parametern im statusText
- * (dmg:<cond>:<schaden>:<runden>, siehe shared/damage-over-time.ts):
+ * Tracker aufgerufen. Fuer jeden Token mit Zustands-Laufzeit-Parametern
+ * (dmg:* / dur:*, siehe shared/damage-over-time.ts):
  *
- *   1. Schaden pro Effekt serverseitig wuerfeln/berechnen (fest oder Wuerfel).
- *   2. Summe vom Token (bzw. Charakter-HP) abziehen — Ruestung wirkt NICHT.
- *   3. Bluten (ohne Dauer) zaehlt kumulativ hoch (+1/Runde).
- *   4. Dauer −1; bei 0 laufen Effekt UND Zustands-Marker automatisch aus.
+ *   1. Schaden je DoT-Zustand serverseitig wuerfeln/berechnen und die Summe
+ *      vom Token (bzw. Charakter-HP) abziehen — Ruestung wirkt NICHT.
+ *   2. Bluten ohne Dauer zaehlt kumulativ hoch (+1/Runde).
+ *   3. Jede Zustands-Dauer −1; bei 0 laeuft der Zustand automatisch aus
+ *      (Marker + zugehoerige dmg/dur-Parameter werden entfernt).
  *
- * Postet eine Sammel-Nachricht in den Gruppen-Chat und liefert die Liste der
- * angepassten Tokens zurueck.
+ * Postet eine Sammel-Nachricht in den Gruppen-Chat (Schaden + Ablaeufe) und
+ * liefert die Liste der angepassten Tokens zurueck.
  */
 import { and, eq } from 'drizzle-orm'
 import { useDb } from '~~/server/utils/db'
@@ -19,10 +20,10 @@ import { requireGroupOwner } from '~~/server/utils/group-access'
 import { battleMaps, battleTokens, characters, messages } from '~~/server/database/schema'
 import { parseStatusText, buildStatusText, CONDITION_BY_ID } from '~~/shared/conditions'
 import {
-  parseDotEffects,
-  buildDotLabel,
-  rollDotDamage,
-  type DotEffect,
+  parseConditionParams,
+  buildConditionParamLabels,
+  rollConditionDamage,
+  isCumulativeBleed,
 } from '~~/shared/damage-over-time'
 import {
   readCharacterHp,
@@ -35,11 +36,11 @@ interface TickResult {
   tokenId: number
   name: string
   damage: number
-  oldHp: number
-  newHp: number
-  /** Aufschluesselung je Effekt fuer Chat/Debug. */
+  oldHp: number | null
+  newHp: number | null
+  /** Schaden-Aufschluesselung je Effekt. */
   parts: string[]
-  /** Zustaende, die in dieser Runde ausgelaufen sind. */
+  /** Zustaende, die in dieser Runde ausgelaufen sind (Labels). */
   expired: string[]
 }
 
@@ -71,76 +72,91 @@ export default defineEventHandler(async (event) => {
   for (const tok of tokens) {
     const status = tok.statusText ?? ''
     const { conditions, customLabels } = parseStatusText(status)
-    const { effects, rest } = parseDotEffects(customLabels)
-    if (!effects.length) continue
+    const params = parseConditionParams(customLabels)
+    const damageConds = Object.keys(params.damage)
+    const durationConds = Object.keys(params.duration)
+    if (!damageConds.length && !durationConds.length) continue
 
-    // HP des Ziels ermitteln (Charakter oder NPC-Token).
-    let currentHp: number | null = null
-    let maxHp: number | null = null
-    let charSystem: CharSystem | null = null
-    let charData: unknown = null
-    if (tok.characterId !== null) {
-      const [c] = await db
-        .select({ system: characters.system, data: characters.data })
-        .from(characters)
-        .where(eq(characters.id, tok.characterId))
-        .limit(1)
-      if (c) {
-        charSystem = c.system as CharSystem
-        charData = c.data
-        const hp = readCharacterHp(charSystem, charData)
-        currentHp = hp.current
-        maxHp = hp.max
-      }
-    } else {
-      currentHp = tok.hp
-      maxHp = tok.hpMax
-    }
-    if (currentHp === null || maxHp === null) continue
-
-    // Effekte abarbeiten: Schaden summieren, Folgezustand ermitteln.
+    // --- Schaden berechnen ---
     let totalDamage = 0
     const parts: string[] = []
-    const expiredConds: string[] = []
-    const survivingEffects: DotEffect[] = []
-    for (const eff of effects) {
-      const tick = rollDotDamage(eff)
-      totalDamage += tick.damage
-      parts.push(`${condLabel(eff.cond)} ${tick.detail}`)
-      if (tick.expired) {
-        expiredConds.push(eff.cond)
-      } else {
-        survivingEffects.push({
-          cond: eff.cond,
-          amount: tick.nextAmount,
-          roundsLeft: tick.nextRoundsLeft,
-        })
+    const nextDamage: Record<string, string> = { ...params.damage }
+    for (const cond of damageConds) {
+      const amount = params.damage[cond]!
+      const roll = rollConditionDamage(amount)
+      totalDamage += roll.damage
+      parts.push(`${condLabel(cond)} ${roll.detail}`)
+      // Kumulatives Bluten: Wert fuer naechste Runde +1.
+      if (isCumulativeBleed(cond, amount, params.duration[cond] !== undefined)) {
+        nextDamage[cond] = String(roll.damage + 1)
       }
     }
 
-    const newHp = Math.max(0, currentHp - totalDamage)
+    // --- Dauer dekrementieren + Ablauf ---
+    const expiredConds: string[] = []
+    const nextDuration: Record<string, number> = {}
+    for (const cond of durationConds) {
+      const left = (params.duration[cond] ?? 0) - 1
+      if (left <= 0) expiredConds.push(cond)
+      else nextDuration[cond] = left
+    }
+    // Ausgelaufene Zustaende: Marker + dmg-Parameter entfernen.
+    for (const cond of expiredConds) delete nextDamage[cond]
 
-    // HP-Update.
-    if (tok.characterId !== null && charSystem && charData) {
-      const nextData = writeCharacterHp(charSystem, charData, { current: newHp, max: maxHp })
-      await db
-        .update(characters)
-        .set({ data: nextData, updatedAt: new Date() })
-        .where(eq(characters.id, tok.characterId))
-    } else {
-      await db
-        .update(battleTokens)
-        .set({ hp: newHp, updatedAt: new Date() })
-        .where(eq(battleTokens.id, tok.id))
+    // --- HP anwenden (nur wenn Schaden) ---
+    let oldHp: number | null = null
+    let newHp: number | null = null
+    if (totalDamage > 0) {
+      let currentHp: number | null = null
+      let maxHp: number | null = null
+      let charSystem: CharSystem | null = null
+      let charData: unknown = null
+      if (tok.characterId !== null) {
+        const [c] = await db
+          .select({ system: characters.system, data: characters.data })
+          .from(characters)
+          .where(eq(characters.id, tok.characterId))
+          .limit(1)
+        if (c) {
+          charSystem = c.system as CharSystem
+          charData = c.data
+          const hp = readCharacterHp(charSystem, charData)
+          currentHp = hp.current
+          maxHp = hp.max
+        }
+      } else {
+        currentHp = tok.hp
+        maxHp = tok.hpMax
+      }
+      if (currentHp !== null && maxHp !== null) {
+        oldHp = currentHp
+        newHp = Math.max(0, currentHp - totalDamage)
+        if (tok.characterId !== null && charSystem && charData) {
+          const nextData = writeCharacterHp(charSystem, charData, { current: newHp, max: maxHp })
+          await db
+            .update(characters)
+            .set({ data: nextData, updatedAt: new Date() })
+            .where(eq(characters.id, tok.characterId))
+        } else {
+          await db
+            .update(battleTokens)
+            .set({ hp: newHp, updatedAt: new Date() })
+            .where(eq(battleTokens.id, tok.id))
+        }
+      } else {
+        // Kein HP-Traeger — Schaden verfaellt (z.B. Token ohne HP).
+        totalDamage = 0
+      }
     }
 
-    // statusText neu bauen: ausgelaufene Zustands-Marker entfernen, ueberlebende
-    // DoT-Parameter (mit Folgewerten) sowie echte Frei-Text-Labels behalten.
+    // --- statusText neu bauen ---
     const nextCondIds = conditions
       .map((c) => c.id)
       .filter((id) => !expiredConds.includes(id))
-    const nextCustom = [...rest, ...survivingEffects.map(buildDotLabel)]
-    const newStatusText = buildStatusText(nextCondIds, nextCustom)
+    const newStatusText = buildStatusText(
+      nextCondIds,
+      buildConditionParamLabels({ damage: nextDamage, duration: nextDuration, rest: params.rest }),
+    )
     if (newStatusText !== status) {
       await db
         .update(battleTokens)
@@ -148,31 +164,37 @@ export default defineEventHandler(async (event) => {
         .where(eq(battleTokens.id, tok.id))
     }
 
-    results.push({
-      tokenId: tok.id,
-      name: tok.name,
-      damage: totalDamage,
-      oldHp: currentHp,
-      newHp,
-      parts,
-      expired: expiredConds.map(condLabel),
-    })
+    // Nur Tokens mit Schaden ODER Ablauf in die Sammelmeldung aufnehmen.
+    if (totalDamage > 0 || expiredConds.length) {
+      results.push({
+        tokenId: tok.id,
+        name: tok.name,
+        damage: totalDamage,
+        oldHp,
+        newHp,
+        parts,
+        expired: expiredConds.map(condLabel),
+      })
+    }
   }
 
   if (results.length) {
-    // Sammel-Chat-Nachricht (whitespace-pre-wrap → Zeilenumbrueche bleiben).
     const lines = results.map((r) => {
-      const exp = r.expired.length ? ` · ausgelaufen: ${r.expired.join(', ')}` : ''
-      return `• ${r.name}: −${r.damage} LP (${r.parts.join(' · ')}) → ${r.oldHp} → ${r.newHp} LP${exp}`
+      const segs: string[] = [`• ${r.name}`]
+      if (r.damage > 0 && r.oldHp !== null && r.newHp !== null) {
+        segs.push(`−${r.damage} LP (${r.parts.join(' · ')}) → ${r.oldHp} → ${r.newHp} LP`)
+      }
+      if (r.expired.length) segs.push(`ausgelaufen: ${r.expired.join(', ')}`)
+      return segs.join(' · ')
     })
-    const content = `🩸 Rundenschaden (Zustände)\n${lines.join('\n')}`
+    const content = `🩸 Zustände (Rundenwechsel)\n${lines.join('\n')}`
     await db.insert(messages).values({
       groupId,
       userId: user.id,
       type: 'text',
       content,
     })
-    await pushMapChanged(mapId, 'token-dot')
+    await pushMapChanged(mapId, 'token-conditions')
   }
 
   return { applied: results }

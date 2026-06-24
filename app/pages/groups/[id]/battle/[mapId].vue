@@ -22,9 +22,9 @@ import {
 import {
   isDotCondition,
   DOT_DEFAULT_AMOUNT,
-  parseDotEffects,
-  buildDotLabel,
-  type DotEffect,
+  parseConditionParams,
+  buildConditionParamLabels,
+  type TokenConditionParams,
 } from '~~/shared/damage-over-time'
 import { audioEmbedUrl, parseAudioUrl, YOUTUBE_NOCOOKIE_HOST } from '~~/shared/audio'
 import { loadYouTubeApi, type YouTubePlayer } from '~/composables/useYouTubeApi'
@@ -1102,12 +1102,17 @@ const deleteCustomTemplate = async (id: number | undefined) => {
 
 // --- Conditions ---
 const tokenConditions = (t: Token) => parseStatusText(t.statusText ?? '').conditions
-// Frei-Text-Labels OHNE die internen DoT-Parameter (dmg:*).
+// Frei-Text-Labels OHNE die internen Schaden-/Dauer-Parameter (dmg:*/dur:*).
 const tokenCustomLabels = (t: Token) =>
-  parseDotEffects(parseStatusText(t.statusText ?? '').customLabels).rest
-// Aktive DoT-Effekte eines Tokens (fuer die Schaden/Runde-Anzeige).
-const tokenDotEffects = (t: Token): DotEffect[] =>
-  parseDotEffects(parseStatusText(t.statusText ?? '').customLabels).effects
+  parseConditionParams(parseStatusText(t.statusText ?? '').customLabels).rest
+// Schaden-/Dauer-Parameter eines Tokens (fuer die Anzeige).
+const tokenCondParams = (t: Token): TokenConditionParams =>
+  parseConditionParams(parseStatusText(t.statusText ?? '').customLabels)
+// Zustands-IDs eines Tokens mit Schaden ODER Dauer (fuer die Detail-Liste).
+const tokenTimedCondIds = (t: Token): string[] => {
+  const p = tokenCondParams(t)
+  return Array.from(new Set([...Object.keys(p.damage), ...Object.keys(p.duration)]))
+}
 
 /**
  * Wunden-Info pro Token (Schadensstufe + Malus). Wird sowohl fuer die
@@ -1437,82 +1442,69 @@ const isConditionActive = (id: string) => editingActiveCondIds.value.includes(id
 const toggleCondition = (id: string) => {
   if (!editing.value) return
   const parsed = parseStatusText(editing.value.statusText ?? '')
-  const { effects, rest } = parseDotEffects(parsed.customLabels)
+  const params = parseConditionParams(parsed.customLabels)
   const has = parsed.conditions.some((c) => c.id === id)
   const newIds = has
     ? parsed.conditions.filter((c) => c.id !== id).map((c) => c.id)
     : [...parsed.conditions.map((c) => c.id), id]
-  // DoT-Zustand: beim Einschalten Default-Schaden anlegen, beim Ausschalten entfernen.
-  let newEffects = effects
-  if (isDotCondition(id)) {
-    if (has) {
-      newEffects = effects.filter((e) => e.cond !== id)
-    } else if (!effects.some((e) => e.cond === id)) {
-      newEffects = [...effects, { cond: id, amount: DOT_DEFAULT_AMOUNT[id] ?? '1W6', roundsLeft: null }]
-    }
+  if (has) {
+    // Ausschalten: zugehoerige Schaden-/Dauer-Parameter mit entfernen.
+    delete params.damage[id]
+    delete params.duration[id]
+  } else if (isDotCondition(id) && params.damage[id] === undefined) {
+    // DoT-Zustand einschalten: Default-Schaden anlegen (Dauer bleibt optional).
+    params.damage[id] = DOT_DEFAULT_AMOUNT[id] ?? '1W6'
   }
-  editing.value.statusText = buildStatusText(newIds, [...rest, ...newEffects.map(buildDotLabel)])
+  editing.value.statusText = buildStatusText(newIds, buildConditionParamLabels(params))
 }
 
-// --- DoT-Parameter (Schaden pro Runde) im Edit-Modal ---
-const editingDotEffects = computed<DotEffect[]>(() => {
-  if (!editing.value) return []
-  const { customLabels } = parseStatusText(editing.value.statusText ?? '')
-  return parseDotEffects(customLabels).effects
+// --- Schaden-/Dauer-Parameter im Edit-Modal (Dauer fuer JEDEN Zustand) ---
+const editingCondParams = computed<TokenConditionParams>(() => {
+  if (!editing.value) return { damage: {}, duration: {}, rest: [] }
+  return parseConditionParams(parseStatusText(editing.value.statusText ?? '').customLabels)
 })
-const editingActiveDotCondIds = computed<string[]>(() =>
-  editingActiveCondIds.value.filter((id) => isDotCondition(id)),
-)
-const dotEffectFor = (cond: string): DotEffect | undefined =>
-  editingDotEffects.value.find((e) => e.cond === cond)
+const condDamageFor = (cond: string): string | undefined => editingCondParams.value.damage[cond]
+const condDurationFor = (cond: string): number | undefined => editingCondParams.value.duration[cond]
 
-const writeDotEffects = (effects: DotEffect[]) => {
+const writeCondParams = (mutate: (p: TokenConditionParams) => void) => {
   if (!editing.value) return
   const parsed = parseStatusText(editing.value.statusText ?? '')
-  const { rest } = parseDotEffects(parsed.customLabels)
+  const params = parseConditionParams(parsed.customLabels)
+  mutate(params)
   editing.value.statusText = buildStatusText(
     parsed.conditions.map((c) => c.id),
-    [...rest, ...effects.map(buildDotLabel)],
+    buildConditionParamLabels(params),
   )
 }
-const setDotAmount = (cond: string, amount: string) => {
+const setCondDamage = (cond: string, amount: string) => {
   const clean = amount.trim() || '1'
-  const effects = editingDotEffects.value.map((e) =>
-    e.cond === cond ? { ...e, amount: clean } : e,
-  )
-  if (!effects.some((e) => e.cond === cond)) effects.push({ cond, amount: clean, roundsLeft: null })
-  writeDotEffects(effects)
+  writeCondParams((p) => {
+    p.damage[cond] = clean
+  })
 }
-const setDotRounds = (cond: string, rounds: number | null) => {
-  const r = rounds == null || rounds <= 0 ? null : Math.floor(rounds)
-  const effects = editingDotEffects.value.map((e) =>
-    e.cond === cond ? { ...e, roundsLeft: r } : e,
-  )
-  if (!effects.some((e) => e.cond === cond)) {
-    effects.push({ cond, amount: DOT_DEFAULT_AMOUNT[cond] ?? '1W6', roundsLeft: r })
-  }
-  writeDotEffects(effects)
+const setCondDuration = (cond: string, rounds: number | null) => {
+  writeCondParams((p) => {
+    if (rounds == null || rounds <= 0) delete p.duration[cond]
+    else p.duration[cond] = Math.floor(rounds)
+  })
 }
 
 const customStatusText = computed<string>({
   get: () => {
     if (!editing.value) return ''
-    // DoT-Parameter (dmg:*) NICHT im Frei-Text-Feld zeigen — nur echte Tags.
+    // Schaden-/Dauer-Parameter NICHT im Frei-Text-Feld zeigen — nur echte Tags.
     const { customLabels } = parseStatusText(editing.value.statusText ?? '')
-    return parseDotEffects(customLabels).rest.join(', ')
+    return parseConditionParams(customLabels).rest.join(', ')
   },
   set: (val: string) => {
     if (!editing.value) return
     const parsed = parseStatusText(editing.value.statusText ?? '')
-    // Bestehende DoT-Parameter erhalten, nur die echten Frei-Text-Tags ersetzen.
-    const { effects } = parseDotEffects(parsed.customLabels)
-    const newCustom = val
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
+    // Bestehende Schaden-/Dauer-Parameter erhalten, nur echte Frei-Text-Tags ersetzen.
+    const params = parseConditionParams(parsed.customLabels)
+    params.rest = val.split(',').map((s) => s.trim()).filter(Boolean)
     editing.value.statusText = buildStatusText(
       parsed.conditions.map((c) => c.id),
-      [...newCustom, ...effects.map(buildDotLabel)],
+      buildConditionParamLabels(params),
     )
   },
 })
@@ -5636,39 +5628,47 @@ const endResize = () => {
             </div>
           </div>
 
-          <!-- Schaden pro Runde (DoT) fuer aktive Gift/Brennen/Bluten/Saeure/… -->
-          <div v-if="editingActiveDotCondIds.length" class="space-y-1.5">
-            <div class="text-xs uppercase tracking-widest text-ink-300">Rundenschaden (Schaden über Zeit)</div>
+          <!-- Schaden & Dauer pro aktivem Zustand. Dauer fuer JEDEN Zustand,
+               Schaden/Runde nur fuer DoT-Zustaende (Gift/Brennen/Bluten/Saeure/…). -->
+          <div v-if="editingActiveCondIds.length" class="space-y-1.5">
+            <div class="text-xs uppercase tracking-widest text-ink-300">Schaden &amp; Dauer pro Runde</div>
+            <div class="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-widest text-ink-300">
+              <div class="col-span-4">Zustand</div>
+              <div class="col-span-4">Schaden/Runde</div>
+              <div class="col-span-4">Dauer (Runden)</div>
+            </div>
             <div
-              v-for="cond in editingActiveDotCondIds"
+              v-for="cond in editingActiveCondIds"
               :key="cond"
               class="grid grid-cols-12 gap-2 items-center"
             >
               <div class="col-span-4 text-xs font-semibold flex items-center gap-1 min-w-0">
-                <UIcon :name="CONDITION_BY_ID[cond]?.icon ?? 'i-lucide-heart-crack'" class="size-3.5 shrink-0" />
+                <UIcon :name="CONDITION_BY_ID[cond]?.icon ?? 'i-lucide-circle'" class="size-3.5 shrink-0" />
                 <span class="truncate">{{ CONDITION_BY_ID[cond]?.label ?? cond }}</span>
               </div>
               <UInput
+                v-if="isDotCondition(cond)"
                 class="col-span-4"
                 size="xs"
-                :model-value="dotEffectFor(cond)?.amount ?? ''"
+                :model-value="condDamageFor(cond) ?? ''"
                 placeholder="z.B. 1W6 oder 5"
                 :maxlength="20"
-                @update:model-value="(v) => setDotAmount(cond, String(v))"
+                @update:model-value="(v) => setCondDamage(cond, String(v))"
               />
+              <div v-else class="col-span-4 text-[11px] text-ink-300 italic self-center">kein Schaden</div>
               <UInput
                 class="col-span-4"
                 size="xs"
                 type="number"
                 min="0"
-                :model-value="dotEffectFor(cond)?.roundsLeft ?? undefined"
-                placeholder="Dauer (leer = ∞)"
-                @update:model-value="(v) => setDotRounds(cond, Number(v) || null)"
+                :model-value="condDurationFor(cond) ?? undefined"
+                placeholder="leer = ∞"
+                @update:model-value="(v) => setCondDuration(cond, Number(v) || null)"
               />
             </div>
             <p class="text-[10px] text-ink-300">
-              Schaden je Runde beim Rundenwechsel (würfelt z.B. 1W6 jede Runde). Bluten ohne Dauer steigt kumulativ.
-              Dauer 0/leer = unbegrenzt; bei Ablauf wird der Zustand automatisch entfernt. Rüstung wird ignoriert.
+              Dauer −1 je Rundenwechsel; bei 0 wird der Zustand automatisch entfernt (leer = unbegrenzt).
+              DoT-Zustände würfeln zusätzlich Schaden je Runde (z.B. 1W6); Bluten ohne Dauer steigt kumulativ. Rüstung wird ignoriert.
             </p>
           </div>
 
@@ -5850,14 +5850,14 @@ const endResize = () => {
                 </span>
               </div>
               <ul
-                v-if="tokenDotEffects(infoToken).length"
+                v-if="tokenTimedCondIds(infoToken).length"
                 class="mt-1.5 text-[11px] text-ink-400 space-y-0.5"
               >
-                <li v-for="e in tokenDotEffects(infoToken)" :key="e.cond" class="flex items-center gap-1">
-                  <UIcon :name="CONDITION_BY_ID[e.cond]?.icon ?? 'i-lucide-heart-crack'" class="size-3" />
-                  <span class="font-semibold">{{ CONDITION_BY_ID[e.cond]?.label ?? e.cond }}:</span>
-                  <span class="font-mono">{{ e.amount }}/Runde</span>
-                  <span v-if="e.roundsLeft !== null" class="opacity-70">· noch {{ e.roundsLeft }} Runden</span>
+                <li v-for="cond in tokenTimedCondIds(infoToken)" :key="cond" class="flex items-center gap-1 flex-wrap">
+                  <UIcon :name="CONDITION_BY_ID[cond]?.icon ?? 'i-lucide-circle'" class="size-3" />
+                  <span class="font-semibold">{{ CONDITION_BY_ID[cond]?.label ?? cond }}:</span>
+                  <span v-if="tokenCondParams(infoToken).damage[cond]" class="font-mono">{{ tokenCondParams(infoToken).damage[cond] }}/Runde</span>
+                  <span v-if="tokenCondParams(infoToken).duration[cond]" class="opacity-70">· noch {{ tokenCondParams(infoToken).duration[cond] }} Runden</span>
                   <span v-else class="opacity-70">· dauerhaft</span>
                 </li>
               </ul>
