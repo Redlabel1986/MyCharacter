@@ -28,6 +28,7 @@ import {
 } from '~~/shared/damage-over-time'
 import { useBattleAudio, type AudioState } from '~/composables/useBattleAudio'
 import { useBattleInitiative, type InitiativeState } from '~/composables/useBattleInitiative'
+import type { BattleMap, Token, MapObject, CustomObjectTemplate } from '~~/shared/battle-types'
 import type { NpcAbility } from '~~/shared/npc'
 import type { HtbahMerchant } from '~~/shared/engines/htbah'
 import {
@@ -78,58 +79,6 @@ definePageMeta({
   pageTransition: { name: 'map-fade', mode: 'out-in' },
 })
 
-interface BattleMap {
-  id: number
-  groupId: number
-  name: string
-  imageUrl: string
-  gridType: 'square' | 'hex'
-  gridSize: number
-  gridColor: string
-  visible: boolean
-  gridVisible: boolean
-  showTokenNames: boolean
-  fogEnabled: boolean
-  fogMemory: boolean
-  fogRevealed: Array<[number, number]>
-  fogExplored: Array<[number, number]>
-  fogBlackout: Array<[number, number]>
-  startCells: Array<[number, number]>
-  walls: Wall[]
-  timeOfDay: TimeOfDay
-  /** DM-Spawn-Punkt fuer neue Charakter-Tokens (Pixel am Originalbild). */
-  spawnX: number | null
-  spawnY: number | null
-}
-interface Token {
-  id: number
-  mapId: number
-  ownerUserId: number
-  characterId: number | null
-  name: string
-  imageUrl: string | null
-  /** Zusaetzliche Galerie-Bilder. Werden in der Info-Karte als Thumbnails gezeigt. */
-  images: string[]
-  x: number
-  y: number
-  sizeMultiplier: number
-  hidden: boolean
-  hp: number | null
-  hpMax: number | null
-  /** Mana / Fokus — nur fuer HtbaH-Charakter-Tokens mit aktivem Magie-Modul. */
-  mana?: number | null
-  manaMax?: number | null
-  statusText: string
-  description: string
-  system: 'htbah' | 'dnd' | 'dsa5' | null
-  npcAbilities: NpcAbility[]
-  /** Haendler-Konfiguration (NPC-Token-Haendler). null = kein Haendler. */
-  merchant?: HtbahMerchant | null
-  visionRadius: number
-  hpVisibleToPlayers: boolean
-  /** Bewegungsfeld in Rasterzellen (Chebyshev). Default 8. */
-  moveRange: number
-}
 interface Drawing {
   id: number
   mapId: number
@@ -154,36 +103,6 @@ interface CharacterSummary {
   name: string
   system: string
   portraitUrl?: string | null
-}
-
-interface MapObject {
-  id: number
-  mapId: number
-  ownerUserId: number
-  templateKey: string | null
-  templateId: number | null
-  name: string
-  imageUrl: string | null
-  width: number
-  height: number
-  rotation: number
-  lightRadius: number
-  x: number
-  y: number
-  hidden: boolean
-}
-
-interface CustomObjectTemplate {
-  id: number
-  groupId: number | null
-  builtInKey?: string | null
-  name: string
-  category: string
-  imageUrl: string | null
-  width: number
-  height: number
-  rotatable: boolean
-  lightRadius: number
 }
 
 const route = useRoute()
