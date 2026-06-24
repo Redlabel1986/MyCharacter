@@ -66,6 +66,7 @@ export async function loadAccessibleCharacter(
     id: c.id,
     userId: c.userId,
     system: c.system!,
+    ruleSystemId: c.ruleSystemId ?? null,
     name: c.name,
     portraitUrl: c.portraitUrl,
     data: c.data as Record<string, unknown>,

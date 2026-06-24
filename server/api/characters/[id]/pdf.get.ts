@@ -13,6 +13,12 @@ export default defineEventHandler(async (event) => {
   if (!char) {
     throw createError({ statusCode: 404, statusMessage: 'Charakter nicht gefunden.' })
   }
+  if (char.system === 'custom') {
+    throw createError({
+      statusCode: 501,
+      statusMessage: 'PDF-Export für eigene Regelwerke ist noch nicht verfügbar.',
+    })
+  }
 
   const pdfBytes = await buildSheetPdf({
     name: char.name,

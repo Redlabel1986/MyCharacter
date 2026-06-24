@@ -1726,7 +1726,7 @@ const castReachBlocked = computed<boolean>(
 function rollDie(sides: number): number {
   return Math.floor(Math.random() * sides) + 1
 }
-function rollFormula(p: { count: number; sides: number; mod: number }): {
+function rollParsedDice(p: { count: number; sides: number; mod: number }): {
   dice: number[]
   total: number
 } {
@@ -1893,12 +1893,12 @@ const castSpell = async () => {
       // in jede RollCard, damit der Chat-Eintrag identisch und nachvollziehbar
       // ist (Spieler sehen: "Erdwall 3W10 = 17 — Ziel A: 17, Ziel B: 17").
       let sharedRoll: { dice: number[]; total: number } | null = null
-      if (!castDamagePerTarget.value) sharedRoll = rollFormula(dmgParsed)
+      if (!castDamagePerTarget.value) sharedRoll = rollParsedDice(dmgParsed)
       const results: string[] = []
       for (const tId of castTargetIds.value) {
         const target = damageTargetTokens.value.find((t: Token) => t.id === tId)
         if (!target) continue
-        const r = sharedRoll ?? rollFormula(dmgParsed)
+        const r = sharedRoll ?? rollParsedDice(dmgParsed)
         const targetSuffix = ` → ${target.name}`
         const label = `${castSpellName.value.trim()}${targetSuffix}`
         try {
