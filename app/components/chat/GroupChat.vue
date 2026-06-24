@@ -174,14 +174,19 @@ const roleBadge = (r: 'player' | 'dm' | 'admin') =>
   r === 'admin' ? 'Admin' : r === 'dm' ? 'DM' : 'Spieler'
 
 const isWhisper = (m: ChatMessage) => !!m.targetUserId
+
+// Nur frisch eingetroffene Würfe (innerhalb der letzten 5s) animieren ihre
+// Würfel — beim initialen Chat-Laden sollen alte Würfe ruhig bleiben.
+const isFreshRoll = (iso: string) => Date.now() - new Date(iso).getTime() < 5000
 </script>
 
 <template>
   <div class="flex flex-col h-full min-h-0">
-    <div ref="messagesEl" class="flex-1 overflow-y-auto pr-1 space-y-2 min-h-0">
+    <div ref="messagesEl" class="flex-1 overflow-y-auto pr-1 min-h-0">
       <div v-if="!messages.length" class="text-sm text-ink-400 text-center py-8">
         Noch keine Nachrichten.
       </div>
+      <TransitionGroup name="chat-msg" tag="div" class="space-y-2">
       <div
         v-for="m in messages"
         :key="m.id"
@@ -203,6 +208,7 @@ const isWhisper = (m: ChatMessage) => !!m.targetUserId
           v-if="m.type === 'roll' && m.payload"
           :payload="(m.payload as RollPayload)"
           :mine="m.user.id === user?.id"
+          :animate="isFreshRoll(m.createdAt)"
         />
         <div
           v-else
@@ -214,6 +220,7 @@ const isWhisper = (m: ChatMessage) => !!m.targetUserId
         </div>
         <div class="text-[10px] text-ink-300 mt-1 px-1">{{ formatTime(m.createdAt) }}</div>
       </div>
+      </TransitionGroup>
     </div>
 
     <form class="mt-3 space-y-2" @submit.prevent="send">
@@ -235,3 +242,32 @@ const isWhisper = (m: ChatMessage) => !!m.targetUserId
     </form>
   </div>
 </template>
+
+<style scoped>
+/* Neu eintreffende Nachrichten gleiten sanft ein; verschwindende faden aus.
+   Ohne `appear` bleibt der initiale Chat-Load ruhig (nur echte Neuzugänge
+   animieren). `-move` sorgt fuer fluessiges Nachrücken bestehender Einträge. */
+.chat-msg-enter-active {
+  transition: opacity 280ms ease, transform 280ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.chat-msg-leave-active {
+  transition: opacity 180ms ease;
+}
+.chat-msg-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.chat-msg-leave-to {
+  opacity: 0;
+}
+.chat-msg-move {
+  transition: transform 280ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-msg-enter-active,
+  .chat-msg-leave-active,
+  .chat-msg-move {
+    transition: none;
+  }
+}
+</style>

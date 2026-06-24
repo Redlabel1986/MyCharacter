@@ -46,7 +46,64 @@ interface RollPayload {
   damageCrit?: boolean
 }
 
-const props = defineProps<{ payload: RollPayload; mine: boolean }>()
+const props = defineProps<{ payload: RollPayload; mine: boolean; animate?: boolean }>()
+
+// --- Würfel-Animation -------------------------------------------------------
+// Bei einem frisch eintreffenden Wurf (animate=true) „rollen" die Würfel kurz
+// durch Zufallswerte, bevor sie auf das echte Ergebnis einrasten. Danach folgt
+// der Payoff: Krit → goldener Flash, Patzer → roter Shake. Alte Würfe beim
+// Chat-Laden bekommen animate=false und werden sofort final angezeigt.
+const displayDice = ref<number[]>([...props.payload.dice])
+const settled = ref(true)
+const critFlash = ref(false)
+const fumbleShake = ref(false)
+
+// Während des Tumbelns spiegelt die freie-Wurf-Summe den Live-Zwischenstand;
+// nach dem Einrasten gilt wieder der autoritative Server-Wert (payload.target).
+const displayTarget = computed(() =>
+  settled.value
+    ? props.payload.target
+    : displayDice.value.reduce((a: number, b: number) => a + b, 0) + (props.payload.modifier ?? 0),
+)
+
+onMounted(() => {
+  const dice = props.payload.dice
+  const prefersReduced =
+    typeof window !== 'undefined' &&
+    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  // Nicht animieren: ohne animate-Flag, ohne Würfel oder bei reduced-motion.
+  if (!props.animate || dice.length === 0 || prefersReduced) {
+    triggerPayoff()
+    return
+  }
+  settled.value = false
+  // Zufalls-Obergrenze fuer das Tumbeln aus den echten Augen ableiten (mind. d6).
+  const sides = Math.max(6, ...dice)
+  let elapsed = 0
+  const STEP = 55
+  const DURATION = 650
+  const timer = setInterval(() => {
+    elapsed += STEP
+    displayDice.value = dice.map(() => 1 + Math.floor(Math.random() * sides))
+    if (elapsed >= DURATION) {
+      clearInterval(timer)
+      displayDice.value = [...dice] // auf echtes Ergebnis einrasten
+      settled.value = true
+      triggerPayoff()
+    }
+  }, STEP)
+})
+
+// Krit/Patzer-Hervorhebung nach dem Einrasten kurz aufblitzen lassen.
+function triggerPayoff() {
+  if (props.payload.critical || props.payload.damageCrit) {
+    critFlash.value = true
+    setTimeout(() => (critFlash.value = false), 900)
+  } else if (props.payload.fumble) {
+    fumbleShake.value = true
+    setTimeout(() => (fumbleShake.value = false), 600)
+  }
+}
 
 const tone = computed(() => {
   if (props.payload.freeRoll) return 'free'
@@ -116,14 +173,16 @@ const qualityLabel = computed(() => {
   return s >= 7 ? 'Maximaler Erfolg' : `Qualitätsstufe ${s}`
 })
 
-const formattedDice = computed(() => props.payload.dice.join(', '))
+// Anzeige basiert auf displayDice, damit die Werte waehrend des Tumbelns
+// „rollen" und nach dem Einrasten das echte Ergebnis zeigen.
+const formattedDice = computed(() => displayDice.value.join(', '))
 
 // Freie Wuerfe (Schaden/Heilung) zeigen die Wuerfel mit " + " verkettet,
 // damit der Spieler die Summe direkt nachvollziehen kann.
 const freeDiceSum = computed(() =>
-  props.payload.dice.reduce((a: number, b: number) => a + b, 0),
+  displayDice.value.reduce((a: number, b: number) => a + b, 0),
 )
-const freeDiceFormula = computed(() => props.payload.dice.join(' + '))
+const freeDiceFormula = computed(() => displayDice.value.join(' + '))
 
 // Ist das ein Schaden-Wurf gegen ein Ziel mit ausgewerteter Rüstung?
 // Wird auch dann als true angesehen, wenn die Rüstung 0 ist — wir wollen
@@ -145,11 +204,11 @@ const hasHealBreakdown = computed(
 
 <template>
   <div
-    class="max-w-[90%] px-3 py-2 rounded-lg border text-sm shadow-sm"
-    :class="toneClass"
+    class="roll-card max-w-[90%] px-3 py-2 rounded-lg border text-sm shadow-sm"
+    :class="[toneClass, { 'roll-crit-flash': critFlash, 'roll-fumble-shake': fumbleShake }]"
   >
     <div class="flex items-center gap-2 mb-1">
-      <UIcon v-if="iconName" :name="iconName" class="text-lg" />
+      <UIcon v-if="iconName" :name="iconName" class="text-lg" :class="{ 'roll-icon-spin': !settled }" />
       <span class="font-semibold">{{ headlineText }}</span>
       <span class="text-xs opacity-80">·</span>
       <span class="text-xs opacity-90">{{ payload.label }}</span>
@@ -171,10 +230,10 @@ const hasHealBreakdown = computed(
           </template>
           <template v-if="payload.modifier">
             + Mod {{ payload.modifier > 0 ? '+' : '' }}{{ payload.modifier }}
-            = <span class="font-mono font-semibold">{{ payload.target }}</span>
+            = <span class="font-mono font-semibold">{{ displayTarget }}</span>
           </template>
           <template v-else-if="payload.dice.length === 1">
-            = <span class="font-mono font-semibold">{{ payload.target }}</span>
+            = <span class="font-mono font-semibold">{{ displayTarget }}</span>
           </template>
         </template>
         <template v-if="payload.characterName"> · {{ payload.characterName }}</template>
@@ -260,3 +319,58 @@ const hasHealBreakdown = computed(
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Sanfte Entrance: die Karte „landet" beim Erscheinen kurz. */
+.roll-card {
+  animation: roll-card-in 260ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  transform-origin: center;
+}
+@keyframes roll-card-in {
+  0%   { opacity: 0; transform: translateY(6px) scale(0.96); }
+  60%  { opacity: 1; transform: translateY(0) scale(1.02); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Würfel-Icon dreht sich, solange die Werte noch tumblen. */
+.roll-icon-spin {
+  animation: roll-icon-spin 0.5s linear infinite;
+}
+@keyframes roll-icon-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* Krit-Payoff: goldener Flash-Ring + kurzer „Pop". */
+.roll-crit-flash {
+  animation: roll-crit-flash 0.9s ease-out;
+}
+@keyframes roll-crit-flash {
+  0%   { box-shadow: 0 0 0 0 rgba(250, 204, 21, 0); }
+  20%  { box-shadow: 0 0 22px 7px rgba(250, 204, 21, 0.9); transform: scale(1.05); }
+  60%  { box-shadow: 0 0 12px 3px rgba(250, 204, 21, 0.5); transform: scale(1); }
+  100% { box-shadow: 0 0 0 0 rgba(250, 204, 21, 0); }
+}
+
+/* Patzer-Payoff: kurzer roter Shake. */
+.roll-fumble-shake {
+  animation: roll-fumble-shake 0.6s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+@keyframes roll-fumble-shake {
+  0%, 100% { transform: translateX(0); }
+  15% { transform: translateX(-4px) rotate(-1deg); }
+  30% { transform: translateX(4px) rotate(1deg); }
+  45% { transform: translateX(-3px); }
+  60% { transform: translateX(3px); }
+  75% { transform: translateX(-2px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .roll-card,
+  .roll-icon-spin,
+  .roll-crit-flash,
+  .roll-fumble-shake {
+    animation: none;
+  }
+}
+</style>
