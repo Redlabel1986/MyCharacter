@@ -37,6 +37,14 @@ import {
 } from '~~/shared/fog'
 import { computeDamageLevel, damageLevelColor } from '~~/shared/damage-level'
 import {
+  snapToGrid,
+  clampToMoveRange as clampToMoveRangeGeo,
+  distancePointToSegment as distancePointToSegmentGeo,
+  polygonPointsAttr as polygonPointsAttrGeo,
+  pointsToPath as pointsToPathGeo,
+  buildGridSvg,
+} from '~~/shared/battle-geometry'
+import {
   subscribeMap,
   subscribeGroup,
   subscribePresenceGroup,
@@ -500,38 +508,14 @@ const onStageWheel = (e: WheelEvent) => {
 
 // --- Grid-Overlay ---
 const gridSvg = computed(() => {
-  if (!map.value || !imgW.value || !imgH.value) return ''
-  const g = map.value.gridSize
-  const color = map.value.gridColor
-  if (map.value.gridType === 'square') {
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${imgW.value}" height="${imgH.value}" viewBox="0 0 ${imgW.value} ${imgH.value}">
-      <defs>
-        <pattern id="grid" width="${g}" height="${g}" patternUnits="userSpaceOnUse">
-          <path d="M ${g} 0 L 0 0 0 ${g}" fill="none" stroke="${color}" stroke-width="1"/>
-        </pattern>
-      </defs>
-      <rect width="100%" height="100%" fill="url(#grid)" />
-    </svg>`
-  }
-  const s = g / 2
-  const colStep = 1.5 * s
-  const rowStep = Math.sqrt(3) * s
-  const cols = Math.ceil(imgW.value / colStep) + 1
-  const rows = Math.ceil(imgH.value / rowStep) + 1
-  const polys: string[] = []
-  for (let c = 0; c < cols; c++) {
-    for (let r = 0; r < rows; r++) {
-      const cx = c * colStep
-      const cy = r * rowStep + (c % 2 ? rowStep / 2 : 0)
-      const pts = []
-      for (let i = 0; i < 6; i++) {
-        const a = (Math.PI / 3) * i
-        pts.push(`${cx + s * Math.cos(a)},${cy + s * Math.sin(a)}`)
-      }
-      polys.push(`<polygon points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1"/>`)
-    }
-  }
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${imgW.value}" height="${imgH.value}" viewBox="0 0 ${imgW.value} ${imgH.value}">${polys.join('')}</svg>`
+  if (!map.value) return ''
+  return buildGridSvg(
+    map.value.gridType,
+    map.value.gridSize,
+    map.value.gridColor,
+    imgW.value,
+    imgH.value,
+  )
 })
 const gridSvgUrl = computed(() => {
   if (!gridSvg.value) return 'none'
@@ -553,20 +537,7 @@ const gridShouldRender = computed(() => {
 // schon immer auf das Zentrum.
 const snap = (x: number, y: number) => {
   if (!map.value) return { x, y }
-  const g = map.value.gridSize
-  if (map.value.gridType === 'square') {
-    return {
-      x: Math.floor(x / g) * g + g / 2,
-      y: Math.floor(y / g) * g + g / 2,
-    }
-  }
-  const s = g / 2
-  const colStep = 1.5 * s
-  const rowStep = Math.sqrt(3) * s
-  const c = Math.round(x / colStep)
-  const yOffset = c % 2 ? rowStep / 2 : 0
-  const r = Math.round((y - yOffset) / rowStep)
-  return { x: c * colStep, y: r * rowStep + yOffset }
+  return snapToGrid(x, y, map.value.gridType, map.value.gridSize)
 }
 
 // --- Drag ---
@@ -607,16 +578,8 @@ const clampToMoveRange = (
   y: number,
   start: { x: number; y: number; moveRange: number },
 ): { x: number; y: number } => {
-  if (!map.value || start.moveRange <= 0) return { x, y }
-  const g = map.value.gridSize
-  if (g <= 0) return { x, y }
-  const maxPx = start.moveRange * g
-  const dx = x - start.x
-  const dy = y - start.y
-  // Chebyshev-Box (max-Norm): erlaubt diagonale Bewegung gleich teuer wie gerade.
-  const clampedDx = Math.max(-maxPx, Math.min(maxPx, dx))
-  const clampedDy = Math.max(-maxPx, Math.min(maxPx, dy))
-  return { x: start.x + clampedDx, y: start.y + clampedDy }
+  if (!map.value) return { x, y }
+  return clampToMoveRangeGeo(x, y, start, map.value.gridSize)
 }
 
 const canMoveToken = (t: Token) => isDm.value || t.ownerUserId === user.value?.id
@@ -2707,14 +2670,7 @@ const eraseWallAt = (px: number, py: number) => {
   }
 }
 
-const polygonPointsAttr = (pts: Array<{ x: number; y: number }>): string => {
-  let s = ''
-  for (let i = 0; i < pts.length; i++) {
-    const p = pts[i]!
-    s += (i > 0 ? ' ' : '') + p.x.toFixed(2) + ',' + p.y.toFixed(2)
-  }
-  return s
-}
+const polygonPointsAttr = polygonPointsAttrGeo
 
 const clearAllWalls = async () => {
   if (!map.value || !isDm.value) return
@@ -2723,22 +2679,7 @@ const clearAllWalls = async () => {
 }
 
 // Punkt-zu-Segment-Distanz (fuer Klick-Hit-Test auf Mauern).
-const distancePointToSegment = (
-  px: number,
-  py: number,
-  ax: number,
-  ay: number,
-  bx: number,
-  by: number,
-): number => {
-  const dx = bx - ax
-  const dy = by - ay
-  const lenSq = dx * dx + dy * dy
-  if (lenSq < 1e-6) return Math.hypot(px - ax, py - ay)
-  let t = ((px - ax) * dx + (py - ay) * dy) / lenSq
-  t = Math.max(0, Math.min(1, t))
-  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
-}
+const distancePointToSegment = distancePointToSegmentGeo
 
 // --- Fog of War ---
 const fogCellSize = computed(() => map.value?.gridSize ?? 50)
@@ -3332,12 +3273,7 @@ const clearAllDrawings = async () => {
 }
 
 // SVG-Pfad-d aus Punkte-Array
-const pointsToPath = (pts: Array<{ x: number; y: number }>) => {
-  if (!pts.length) return ''
-  let d = `M ${pts[0]!.x} ${pts[0]!.y}`
-  for (let i = 1; i < pts.length; i++) d += ` L ${pts[i]!.x} ${pts[i]!.y}`
-  return d
-}
+const pointsToPath = pointsToPathGeo
 
 // --- Pan per Drag (im Select-Mode auf leerer Flaeche) ---
 const stageWrapperEl = ref<HTMLElement | null>(null)
