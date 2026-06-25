@@ -149,3 +149,16 @@ export function pushMapChanged(mapId: number, kind?: string) {
 export function pushGroupChanged(groupId: number, kind?: string) {
   return safeTrigger(`private-group-${groupId}`, 'changed', { kind })
 }
+
+/**
+ * Publish: kurzlebige, rein kosmetische Token-Reaktion (Emoji / Effekt-
+ * Animation). Eigenes Event `'fx'` statt `'changed'`, weil der Client den
+ * Effekt direkt aus dem Payload abspielt und NICHT refetcht. Nichts wird in der
+ * DB gespeichert — der Effekt ist transient.
+ */
+export function pushMapFx(
+  mapId: number,
+  payload: { tokenId: number; kind: string; emoji?: string; fxId: string },
+) {
+  return safeTrigger(`private-map-${mapId}`, 'fx', payload)
+}

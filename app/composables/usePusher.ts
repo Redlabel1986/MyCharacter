@@ -74,6 +74,7 @@ export interface RealtimeSubscription {
 export function subscribeChanged(
   channelName: string,
   onChange: (payload: { kind?: string }) => void,
+  onFx?: (payload: TokenFxPayload) => void,
 ): RealtimeSubscription | null {
   const p = getPusher()
   if (!p) return null
@@ -81,6 +82,10 @@ export function subscribeChanged(
   const isConnected = ref(false)
   const handler = (data: { kind?: string }) => onChange(data ?? {})
   channel.bind('changed', handler)
+  // Optionales transientes Effekt-Event (Token-Reaktionen): wird direkt aus dem
+  // Payload abgespielt, KEIN Refetch.
+  const fxHandler = onFx ? (data: TokenFxPayload) => onFx(data) : null
+  if (fxHandler) channel.bind('fx', fxHandler)
   const onSuccess = () => {
     isConnected.value = true
     if (typeof window !== 'undefined') {
@@ -100,6 +105,7 @@ export function subscribeChanged(
     unsubscribe: () => {
       try {
         channel.unbind('changed', handler)
+        if (fxHandler) channel.unbind('fx', fxHandler)
         channel.unbind('pusher:subscription_succeeded', onSuccess)
         channel.unbind('pusher:subscription_error', onError)
         p.unsubscribe(channelName)
@@ -110,12 +116,21 @@ export function subscribeChanged(
   }
 }
 
+/** Payload eines transienten Token-Reaktions-Events (Emoji / Effekt). */
+export interface TokenFxPayload {
+  tokenId: number
+  kind: 'emoji' | 'slice' | 'heal' | 'spell' | 'love'
+  emoji?: string
+  fxId: string
+}
+
 /** Convenience: subscribiert auf einen Battle-Map-Channel. */
 export function subscribeMap(
   mapId: number,
   onChange: (payload: { kind?: string }) => void,
+  onFx?: (payload: TokenFxPayload) => void,
 ): RealtimeSubscription | null {
-  return subscribeChanged(`private-map-${mapId}`, onChange)
+  return subscribeChanged(`private-map-${mapId}`, onChange, onFx)
 }
 
 /** Convenience: subscribiert auf einen Gruppen-Channel. */

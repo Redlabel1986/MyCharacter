@@ -47,6 +47,7 @@ import {
   subscribePresenceGroup,
   type RealtimeSubscription,
   type PresenceSubscription,
+  type TokenFxPayload,
 } from '~/composables/usePusher'
 import {
   TIMES_OF_DAY,
@@ -210,7 +211,10 @@ interface HitFx {
   amount: number
 }
 const floatingFx = ref<HitFx[]>([])
-const tokenFx = reactive<Record<number, { kind: 'damage' | 'heal'; nonce: number }>>({})
+const tokenFx = reactive<Record<number, { kind: 'damage' | 'heal' | 'spell' | 'love'; nonce: number }>>({})
+// Emoji-Reaktionen ueber einem Token (10s sichtbar). Getrennt von tokenFx, da
+// sie laenger leben und parallel zu einem Effekt erscheinen koennen.
+const tokenEmoji = reactive<Record<number, { emoji: string; nonce: number }>>({})
 let fxSeq = 0
 
 const spawnHpFx = (t: Token, kind: 'damage' | 'heal', amount: number) => {
@@ -363,7 +367,7 @@ onMounted(() => {
     // Lokal gerade gezogene/editierte Resourcen werden in fetchMap durch
     // protectedIds-Check geschuetzt — wir koennen also "blind" refetchen.
     fetchMap()
-  })
+  }, onMapFx)
   groupSub = subscribeGroup(groupId, (payload) => {
     // Aktive Karte hat sich geaendert → ggf. Spieler umleiten.
     if (payload.kind === 'active-map') {
@@ -1601,6 +1605,103 @@ const persistCombatTarget = () => {
 const setCombatTarget = (t: Token) => {
   combatTargetId.value = combatTargetId.value === t.id ? null : t.id
   persistCombatTarget()
+}
+
+// --- Token-Reaktionen (Emojis & Effekt-Animationen) -------------------------
+// Rein kosmetisch, transient ueber Pusher (Event 'fx'), KEINE DB, KEINE
+// HP-Aenderung. Slice/Heal nutzen die vorhandene tokenFx-Maschinerie wieder;
+// Zauber/Love sind neue Arten. Ausgeloest per Strg+Rechtsklick auf ein Token.
+type ReactionKind = 'emoji' | 'slice' | 'heal' | 'spell' | 'love'
+const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😱', '😡', '⚔️', '🛡️', '🎲', '💀', '🤔', '🎉']
+
+// Spielt einen Effekt lokal auf einem Token ab — egal ob lokal ausgeloest oder
+// per Realtime empfangen.
+const playTokenFx = (tokenId: number, kind: ReactionKind, emoji?: string) => {
+  if (kind === 'emoji') {
+    const nonce = fxSeq++
+    tokenEmoji[tokenId] = { emoji: emoji || '❓', nonce }
+    setTimeout(() => {
+      if (tokenEmoji[tokenId]?.nonce === nonce) delete tokenEmoji[tokenId]
+    }, 10000)
+    return
+  }
+  // 'slice' nutzt den bestehenden 'damage'-Effekt (Shake + Slice-Overlay).
+  const fxKind = kind === 'slice' ? 'damage' : kind
+  // Erst entfernen (Reflow erzwingen), dann im naechsten Frame setzen — so
+  // startet die CSS-Animation auch bei Folge-Reaktionen zuverlaessig neu.
+  delete tokenFx[tokenId]
+  const nonce = fxSeq++
+  requestAnimationFrame(() => {
+    tokenFx[tokenId] = { kind: fxKind, nonce }
+    setTimeout(
+      () => {
+        if (tokenFx[tokenId]?.nonce === nonce) delete tokenFx[tokenId]
+      },
+      fxKind === 'damage' ? 650 : 1150,
+    )
+  })
+}
+
+// Eigene fxIds, um das Pusher-Echo des Senders zu erkennen und nicht doppelt
+// abzuspielen.
+const recentFxIds = new Set<string>()
+let lastReactionAt = 0
+const sendReaction = async (token: Token, kind: ReactionKind, emoji?: string) => {
+  const now = Date.now()
+  if (now - lastReactionAt < 300) return // leichtes Throttle gegen Spam
+  lastReactionAt = now
+  const fxId =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${token.id}-${fxSeq++}-${now}`
+  recentFxIds.add(fxId)
+  setTimeout(() => recentFxIds.delete(fxId), 15000)
+  // Sofort lokal abspielen — der Sender sieht die Reaktion ohne Latenz und auch
+  // dann, wenn Pusher gerade nicht verbunden ist.
+  playTokenFx(token.id, kind, emoji)
+  closeReactionMenu()
+  try {
+    await $fetch(`/api/groups/${groupId}/maps/${mapId}/fx`, {
+      method: 'POST',
+      body: { tokenId: token.id, kind, emoji, fxId },
+    })
+  } catch (err) {
+    console.error('reaction failed', err)
+  }
+}
+
+// Empfang eines transienten fx-Events von anderen (oder Echo von uns selbst).
+const onMapFx = (payload: TokenFxPayload) => {
+  if (recentFxIds.has(payload.fxId)) return // eigenes Echo, schon lokal gespielt
+  if (!tokens.value.some((t: Token) => t.id === payload.tokenId)) return // Token weg
+  playTokenFx(payload.tokenId, payload.kind, payload.emoji)
+}
+
+// Reaktionsmenue (Popover an Cursorposition bei Strg+Rechtsklick).
+const reactionMenu = reactive<{ open: boolean; tokenId: number | null; x: number; y: number }>({
+  open: false,
+  tokenId: null,
+  x: 0,
+  y: 0,
+})
+const reactionMenuToken = computed(() => tokens.value.find((t: Token) => t.id === reactionMenu.tokenId) ?? null)
+const openReactionMenu = (e: MouseEvent, t: Token) => {
+  // Innerhalb des Viewports halten (Menue ~ 264x150).
+  const maxX = (typeof window !== 'undefined' ? window.innerWidth : 9999) - 270
+  const maxY = (typeof window !== 'undefined' ? window.innerHeight : 9999) - 170
+  reactionMenu.x = Math.max(8, Math.min(e.clientX, maxX))
+  reactionMenu.y = Math.max(8, Math.min(e.clientY, maxY))
+  reactionMenu.tokenId = t.id
+  reactionMenu.open = true
+}
+const closeReactionMenu = () => {
+  reactionMenu.open = false
+  reactionMenu.tokenId = null
+}
+// Strg/Cmd+Rechtsklick → Reaktionsmenue, sonst Kampf-Ziel (bisheriges Verhalten).
+const onTokenContext = (e: MouseEvent, t: Token) => {
+  if (e.ctrlKey || e.metaKey) openReactionMenu(e, t)
+  else setCombatTarget(t)
 }
 // Beim Laden den Stand zuruecksetzen, damit kein veraltetes Ziel aus einer
 // frueheren Sitzung ins frisch geoeffnete Pop-out leakt.
@@ -3072,7 +3173,7 @@ const endResizeSheet = () => {
               @pointerdown="startDrag($event, t)"
               @click="toolMode === 'select' && openInfoFromClick(t)"
               @dblclick="toolMode === 'select' && startEdit(t)"
-              @contextmenu.prevent="setCombatTarget(t)"
+              @contextmenu.prevent="onTokenContext($event, t)"
             >
               <!-- „Am Zug"-Highlight: pulsierender Ring um das Token, das gerade
                    in der Initiative-Reihenfolge dran ist. -->
@@ -3089,7 +3190,11 @@ const endResizeSheet = () => {
                 :class="[
                   t.hidden ? 'opacity-60 border-amber-500' : 'border-[var(--color-accent)]',
                   t.characterId !== null && !t.hidden ? 'token-player-glow' : '',
-                  tokenFx[t.id]?.kind === 'damage' ? 'fx-shake' : (tokenFx[t.id]?.kind === 'heal' ? 'fx-heal-glow' : ''),
+                  tokenFx[t.id]?.kind === 'damage' ? 'fx-shake'
+                    : tokenFx[t.id]?.kind === 'heal' ? 'fx-heal-glow'
+                    : tokenFx[t.id]?.kind === 'spell' ? 'fx-spell-glow'
+                    : tokenFx[t.id]?.kind === 'love' ? 'fx-love-pulse'
+                    : '',
                 ]"
                 :style="{ clipPath: tokenSliceClip(t) }"
               >
@@ -3129,13 +3234,33 @@ const endResizeSheet = () => {
                 class="absolute inset-0 pointer-events-none flex items-center justify-center overflow-visible"
               >
                 <div v-if="tokenFx[t.id]?.kind === 'damage'" class="fx-slice" />
-                <template v-else>
+                <template v-else-if="tokenFx[t.id]?.kind === 'heal'">
                   <UIcon name="i-lucide-plus" class="fx-heal-cross" />
                   <span class="fx-spark fx-spark-1">✦</span>
                   <span class="fx-spark fx-spark-2">✦</span>
                   <span class="fx-spark fx-spark-3">✦</span>
                   <span class="fx-spark fx-spark-4">✦</span>
                 </template>
+                <template v-else-if="tokenFx[t.id]?.kind === 'spell'">
+                  <span class="fx-spell-rune">✷</span>
+                  <span class="fx-spell-spark fx-spell-spark-1">✨</span>
+                  <span class="fx-spell-spark fx-spell-spark-2">✨</span>
+                  <span class="fx-spell-spark fx-spell-spark-3">✨</span>
+                </template>
+                <template v-else-if="tokenFx[t.id]?.kind === 'love'">
+                  <span class="fx-love-heart fx-love-heart-1">❤️</span>
+                  <span class="fx-love-heart fx-love-heart-2">💖</span>
+                  <span class="fx-love-heart fx-love-heart-3">💕</span>
+                </template>
+              </div>
+              <!-- Emoji-Reaktion ueber dem Token (10s). :key=nonce startet die
+                   Pop-in-Animation bei Folge-Emojis sauber neu. -->
+              <div
+                v-if="tokenEmoji[t.id]"
+                :key="'emoji-' + tokenEmoji[t.id]?.nonce"
+                class="token-emoji-bubble pointer-events-none"
+              >
+                {{ tokenEmoji[t.id]?.emoji }}
               </div>
               <div
                 v-if="t.hp !== null && t.hpMax"
@@ -4838,6 +4963,73 @@ const endResizeSheet = () => {
         Schließen
       </UButton>
     </div>
+
+    <!-- Reaktionsmenue (Strg+Rechtsklick auf ein Token): Emoji + Effekte.
+         Vollflaechiges Backdrop schliesst bei Klick/Rechtsklick daneben. -->
+    <div
+      v-if="reactionMenu.open && reactionMenuToken"
+      class="fixed inset-0 z-[90]"
+      @click="closeReactionMenu"
+      @contextmenu.prevent="closeReactionMenu"
+    >
+      <div
+        class="reaction-menu parchment-card no-ornament p-2"
+        :style="{ position: 'fixed', left: reactionMenu.x + 'px', top: reactionMenu.y + 'px' } as Record<string, string>"
+        @click.stop
+        @contextmenu.stop.prevent
+      >
+        <div class="grid grid-cols-6 gap-0.5 mb-1">
+          <button
+            v-for="em in REACTION_EMOJIS"
+            :key="em"
+            type="button"
+            class="text-xl leading-none p-1 rounded hover:bg-[var(--color-accent)]/15 transition"
+            @click="sendReaction(reactionMenuToken!, 'emoji', em)"
+          >
+            {{ em }}
+          </button>
+        </div>
+        <div class="accent-rule my-1" />
+        <div class="grid grid-cols-4 gap-1">
+          <button
+            type="button"
+            class="flex flex-col items-center gap-0.5 text-[10px] p-1 rounded hover:bg-[var(--color-accent)]/15 transition"
+            title="Slice (Schaden)"
+            @click="sendReaction(reactionMenuToken!, 'slice')"
+          >
+            <UIcon name="i-lucide-swords" class="size-4 text-red-700" />
+            Slice
+          </button>
+          <button
+            type="button"
+            class="flex flex-col items-center gap-0.5 text-[10px] p-1 rounded hover:bg-[var(--color-accent)]/15 transition"
+            title="Heilung"
+            @click="sendReaction(reactionMenuToken!, 'heal')"
+          >
+            <UIcon name="i-lucide-heart-pulse" class="size-4 text-emerald-600" />
+            Heilung
+          </button>
+          <button
+            type="button"
+            class="flex flex-col items-center gap-0.5 text-[10px] p-1 rounded hover:bg-[var(--color-accent)]/15 transition"
+            title="Zauber"
+            @click="sendReaction(reactionMenuToken!, 'spell')"
+          >
+            <UIcon name="i-lucide-sparkles" class="size-4 text-violet-600" />
+            Zauber
+          </button>
+          <button
+            type="button"
+            class="flex flex-col items-center gap-0.5 text-[10px] p-1 rounded hover:bg-[var(--color-accent)]/15 transition"
+            title="Love"
+            @click="sendReaction(reactionMenuToken!, 'love')"
+          >
+            <UIcon name="i-lucide-heart" class="size-4 text-pink-500" />
+            Love
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -5003,6 +5195,109 @@ const endResizeSheet = () => {
 .fx-spark-3 { --spark-end: translate(-13px, 13px); }
 .fx-spark-4 { --spark-end: translate(15px, 12px); }
 
+/* === Reaktions-Effekte (manuell ausgeloest, rein kosmetisch) =============== */
+
+/* Zauber: violetter Glow-Puls um das Token. */
+@keyframes fx-spell-glow {
+  0%   { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0); }
+  30%  { box-shadow: 0 0 18px 7px rgba(139, 92, 246, 0.8); }
+  100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0); }
+}
+.fx-spell-glow { animation: fx-spell-glow 1.15s ease-out; }
+
+/* Zauber: rotierende Rune im Zentrum, die ein-/ausfadet. */
+.fx-spell-rune {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  font-size: 30px;
+  line-height: 1;
+  color: #a78bfa;
+  opacity: 0;
+  text-shadow: 0 0 8px rgba(139, 92, 246, 0.95);
+  animation: fx-spell-rune 1.15s ease-out;
+}
+@keyframes fx-spell-rune {
+  0%   { opacity: 0; transform: translate(-50%, -50%) rotate(-90deg) scale(0.3); }
+  30%  { opacity: 1; transform: translate(-50%, -50%) rotate(0deg) scale(1.1); }
+  70%  { opacity: 1; transform: translate(-50%, -50%) rotate(20deg) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) rotate(60deg) scale(1.2); }
+}
+
+/* Zauber: glitzernde Funken, die nach aussen wirbeln. */
+.fx-spell-spark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0;
+  text-shadow: 0 0 5px rgba(139, 92, 246, 0.9);
+  animation: fx-spell-spark 1.15s ease-out;
+}
+@keyframes fx-spell-spark {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
+  35%  { opacity: 1; }
+  100% { opacity: 0; transform: var(--spell-end) scale(1.15); }
+}
+.fx-spell-spark-1 { --spell-end: translate(-130%, -180%); }
+.fx-spell-spark-2 { --spell-end: translate(80%, -200%); }
+.fx-spell-spark-3 { --spell-end: translate(160%, 20%); }
+
+/* Love: sanfter rosa Glow-Puls um das Token. */
+@keyframes fx-love-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(244, 114, 182, 0); }
+  30%  { box-shadow: 0 0 16px 6px rgba(244, 114, 182, 0.7); }
+  100% { box-shadow: 0 0 0 0 rgba(244, 114, 182, 0); }
+}
+.fx-love-pulse { animation: fx-love-pulse 1.15s ease-out; }
+
+/* Love: Herzchen, die vom Token aufsteigen und ausfaden. */
+.fx-love-heart {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0;
+  animation: fx-love-heart 1.3s ease-out;
+}
+@keyframes fx-love-heart {
+  0%   { opacity: 0; transform: translate(-50%, -30%) scale(0.4); }
+  25%  { opacity: 1; transform: translate(-50%, -90%) scale(1.05); }
+  100% { opacity: 0; transform: translate(var(--love-x, -50%), -230%) scale(0.9); }
+}
+.fx-love-heart-1 { --love-x: -110%; animation-delay: 0s; }
+.fx-love-heart-2 { --love-x: -50%; animation-delay: 0.12s; }
+.fx-love-heart-3 { --love-x: 10%; animation-delay: 0.24s; }
+
+/* Emoji-Reaktion: Bubble ueber dem Token, ploppt rein, bleibt 10s, fadet aus. */
+.token-emoji-bubble {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translate(-50%, -4px);
+  font-size: 26px;
+  line-height: 1;
+  z-index: 6;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.5));
+  animation: token-emoji-bubble 10s ease-out forwards;
+}
+@keyframes token-emoji-bubble {
+  0%   { opacity: 0; transform: translate(-50%, 6px) scale(0.3); }
+  6%   { opacity: 1; transform: translate(-50%, -4px) scale(1.15); }
+  12%  { transform: translate(-50%, -4px) scale(1); }
+  90%  { opacity: 1; transform: translate(-50%, -4px) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -10px) scale(0.95); }
+}
+
+/* Reaktionsmenue (Strg+Rechtsklick): kompaktes Popover. */
+.reaction-menu {
+  z-index: 91;
+  width: 252px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
 /* Schwebende Schadens-/Heilungszahl: steigt auf und fadet aus. */
 .fx-float-dmg,
 .fx-float-heal {
@@ -5024,9 +5319,20 @@ const endResizeSheet = () => {
   .fx-heal-glow,
   .fx-heal-cross,
   .fx-spark,
+  .fx-spell-glow,
+  .fx-spell-rune,
+  .fx-spell-spark,
+  .fx-love-pulse,
+  .fx-love-heart,
   .fx-float-dmg,
   .fx-float-heal {
     animation: none;
+  }
+  /* Emoji bleibt sichtbar (statisch eingeblendet), nur ohne Pop/Float. */
+  .token-emoji-bubble {
+    animation: none;
+    opacity: 1;
+    transform: translate(-50%, -4px);
   }
 }
 
