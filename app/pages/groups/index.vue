@@ -67,7 +67,7 @@ const create = async () => {
         v-for="g in data.groups"
         :key="g.id"
         :to="`/groups/${g.id}`"
-        class="parchment-card p-5 flex flex-col gap-1 hover:ring-2 hover:ring-[var(--color-accent)] transition"
+        class="parchment-card hover-lift p-5 flex flex-col gap-1 hover:ring-2 hover:ring-[var(--color-accent)]"
       >
         <div class="font-serif text-xl">{{ g.name }}</div>
         <div class="text-xs text-ink-400">{{ g.memberCount }} Mitglieder</div>

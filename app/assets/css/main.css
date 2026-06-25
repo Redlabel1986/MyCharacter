@@ -579,3 +579,37 @@ html.app-mode-active .battle-stage-wrap {
     transition: none;
   }
 }
+
+/* Karten in Listen/Übersichten heben sich beim Hover leicht an — gibt der
+   App ein „greifbares", reaktives Gefühl. Per Utility-Klasse `hover-lift`. */
+.hover-lift {
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+.hover-lift:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 22px -8px rgba(0, 0, 0, 0.28);
+}
+@media (prefers-reduced-motion: reduce) {
+  .hover-lift {
+    transition: none;
+  }
+  .hover-lift:hover {
+    transform: none;
+  }
+}
+
+/* Modal-Öffnen mit dezentem Spring-Pop. Die Klasse wird global via app.config
+   (ui.modal.slots.content) an den Modal-Content gehängt; Reka UI setzt beim
+   Öffnen data-state="open". */
+.modal-spring[data-state='open'] {
+  animation: modal-spring-in 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes modal-spring-in {
+  0%   { opacity: 0; transform: scale(0.92) translateY(10px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .modal-spring[data-state='open'] {
+    animation: none;
+  }
+}

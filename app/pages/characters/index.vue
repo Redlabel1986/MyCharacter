@@ -59,7 +59,7 @@ const remove = async (id: number, name: string) => {
         v-for="c in data.characters"
         :key="c.id"
         :data-system="c.system"
-        class="parchment-card p-5 flex flex-col gap-2"
+        class="parchment-card hover-lift p-5 flex flex-col gap-2"
       >
         <div class="text-xs uppercase tracking-widest text-[var(--color-accent)] font-semibold">
           {{ SYSTEM_META[c.system as GameSystem]?.shortLabel ?? 'Eigenes Regelwerk' }}
