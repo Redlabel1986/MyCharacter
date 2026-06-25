@@ -2961,6 +2961,7 @@ const endResize = () => {
               </div>
             </div>
 
+            <TransitionGroup tag="div" name="token-pop" class="contents">
             <div
               v-for="t in tokens"
               v-show="isTokenVisibleToViewer(t)"
@@ -3125,6 +3126,7 @@ const endResize = () => {
                 </div>
               </div>
             </div>
+            </TransitionGroup>
 
             <!-- Schwebende Schadens-/Heilungszahlen: steigen auf und faden aus.
                  Eigene Schicht ueber den Tokens, in Karten-Pixel-Koordinaten. -->
@@ -3579,7 +3581,7 @@ const endResize = () => {
             {{ c.name }}
           </UButton>
         </div>
-        <ol v-if="initEntries.length" class="space-y-1">
+        <TransitionGroup v-if="initEntries.length" tag="ol" name="init-flip" class="space-y-1">
           <li
             v-for="(e, idx) in initEntries"
             :key="e.id"
@@ -3620,7 +3622,7 @@ const endResize = () => {
               @click="initRemoveEntry(e.id)"
             />
           </li>
-        </ol>
+        </TransitionGroup>
       </div>
 
       <!-- Mein Mini-Charbogen (HP-Sync, Skill-Würfler, Inventar) — im App-Modus
@@ -4913,5 +4915,59 @@ const endResize = () => {
     linear-gradient(-45deg, transparent 75%, rgba(0, 0, 0, 0.08) 75%);
   background-size: 14px 14px;
   background-position: 0 0, 0 7px, 7px -7px, -7px 0;
+}
+
+/* ===== Initiative-Reihenfolge (FLIP) ======================================= */
+/* Aendert sich die Sortierung (Wurf/Wert geaendert, Zug weiter), gleiten die
+   Eintraege weich an ihre neue Position statt zu springen. Verlassende Eintraege
+   werden absolut positioniert, damit die uebrigen sauber nachruecken koennen. */
+.init-flip-move,
+.init-flip-enter-active,
+.init-flip-leave-active {
+  transition: all 360ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.init-flip-enter-from {
+  opacity: 0;
+  transform: translateX(-12px);
+}
+.init-flip-leave-to {
+  opacity: 0;
+  transform: translateX(12px);
+}
+.init-flip-leave-active {
+  position: absolute;
+  width: calc(100% - 1rem);
+}
+@media (prefers-reduced-motion: reduce) {
+  .init-flip-move,
+  .init-flip-enter-active,
+  .init-flip-leave-active {
+    transition: none;
+  }
+}
+
+/* ===== Token Spawn / Despawn =============================================== */
+/* Neu platzierte/aufgedeckte Tokens „ploppen" herein, entfernte faden weg.
+   Kein -move (Tokens bewegen sich ueber left/top via .token-walk, nicht ueber
+   Layout), daher nur Enter/Leave. */
+.token-pop-enter-active {
+  transition: opacity 240ms ease, transform 240ms cubic-bezier(0.2, 1.2, 0.4, 1);
+}
+.token-pop-leave-active {
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+.token-pop-enter-from {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.4);
+}
+.token-pop-leave-to {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.6);
+}
+@media (prefers-reduced-motion: reduce) {
+  .token-pop-enter-active,
+  .token-pop-leave-active {
+    transition: none;
+  }
 }
 </style>
