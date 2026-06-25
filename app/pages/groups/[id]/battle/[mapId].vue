@@ -1520,8 +1520,9 @@ onMounted(() => {
     const n = Number(savedSheet)
     if (Number.isFinite(n)) sheetWidth.value = Math.min(SHEET_MAX, Math.max(SHEET_MIN, n))
   }
-  // Kompaktansicht wiederherstellen (App-Modus hat Vorrang, falls beide gesetzt).
-  if (localStorage.getItem('battlemap.compact') === '1' && !appMode.value) {
+  // Kompaktansicht ist Standard: aktiv beim Laden, sofern nicht ausdruecklich
+  // abgewaehlt ('0') und der App-Modus nicht laeuft.
+  if (localStorage.getItem('battlemap.compact') !== '0' && !appMode.value) {
     compact.value = true
     document.documentElement.classList.add('compact-active')
   }
