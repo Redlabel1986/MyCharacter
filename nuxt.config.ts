@@ -3,6 +3,13 @@ export default defineNuxtConfig({
   compatibilityDate: '2026-05-01',
   devtools: { enabled: true },
 
+  app: {
+    // Dezenter globaler Seiten-Uebergang (Fade + leichtes Anheben). Einzelne
+    // Seiten koennen das per definePageMeta ueberschreiben — die Battle-Map
+    // nutzt z.B. weiterhin ihr eigenes `map-fade`.
+    pageTransition: { name: 'page', mode: 'out-in' },
+  },
+
   // Aktiviert die Nuxt-4-Defaults: srcDir = 'app/', shared/, etc.
   future: {
     compatibilityVersion: 4,

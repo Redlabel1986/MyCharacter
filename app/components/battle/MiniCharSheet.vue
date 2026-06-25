@@ -2440,7 +2440,7 @@ const onImageError = (tokenId: number) => {
           v-if="t.hp !== null && t.hpMax"
           class="text-[10px] tabular-nums opacity-70"
         >
-          {{ t.hp }}/{{ t.hpMax }}
+          <AnimatedNumber :value="t.hp ?? 0" />/{{ t.hpMax }}
         </span>
       </button>
     </div>
@@ -2801,8 +2801,8 @@ const onImageError = (tokenId: number) => {
         >
           Zaubern
           <span class="ml-1 font-mono text-[10px] opacity-80">
-            <template v-if="isBattlebubenMagic">{{ bbArkanumCurrent }}/{{ bbArkanumMax }}</template>
-            <template v-else>{{ mana }}/{{ manaMax }}</template>
+            <template v-if="isBattlebubenMagic"><AnimatedNumber :value="bbArkanumCurrent" />/{{ bbArkanumMax }}</template>
+            <template v-else><AnimatedNumber :value="mana" />/{{ manaMax }}</template>
           </span>
         </UButton>
         <div
