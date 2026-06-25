@@ -1364,10 +1364,31 @@ const settingsOpen = ref(false)
 // Toggle wird auf <html>.classList eingehaengt, damit das wide-Layout
 // Header/Footer per globaler CSS verstecken kann.
 const appMode = ref(false)
+// Kompaktansicht (3-Spalten: Sheet | Karte | Chat auf einem Screen). Schliesst
+// sich mit dem App-Modus gegenseitig aus.
+const compact = ref(false)
 const toggleAppMode = () => {
   appMode.value = !appMode.value
+  if (appMode.value && compact.value) {
+    compact.value = false
+    if (typeof document !== 'undefined') document.documentElement.classList.remove('compact-active')
+    if (typeof window !== 'undefined') localStorage.setItem('battlemap.compact', '0')
+  }
   if (typeof document !== 'undefined') {
     document.documentElement.classList.toggle('app-mode-active', appMode.value)
+  }
+}
+const toggleCompact = () => {
+  compact.value = !compact.value
+  if (compact.value && appMode.value) {
+    appMode.value = false
+    if (typeof document !== 'undefined') document.documentElement.classList.remove('app-mode-active')
+  }
+  if (typeof document !== 'undefined') {
+    document.documentElement.classList.toggle('compact-active', compact.value)
+  }
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('battlemap.compact', compact.value ? '1' : '0')
   }
 }
 // Beim Verlassen der Seite sicher wieder aufraeumen, damit andere Pages den
@@ -1375,6 +1396,7 @@ const toggleAppMode = () => {
 onBeforeUnmount(() => {
   if (typeof document !== 'undefined') {
     document.documentElement.classList.remove('app-mode-active')
+    document.documentElement.classList.remove('compact-active')
   }
 })
 
@@ -1481,6 +1503,10 @@ const showChat = ref(true)
 const chatWidth = ref(420)
 const CHAT_MIN = 280
 const CHAT_MAX = 800
+// Sheet-Spalte (links) in der Kompaktansicht — ebenfalls resizable.
+const sheetWidth = ref(360)
+const SHEET_MIN = 280
+const SHEET_MAX = 560
 
 onMounted(() => {
   if (typeof window === 'undefined') return
@@ -1489,10 +1515,25 @@ onMounted(() => {
     const n = Number(saved)
     if (Number.isFinite(n)) chatWidth.value = Math.min(CHAT_MAX, Math.max(CHAT_MIN, n))
   }
+  const savedSheet = localStorage.getItem('battlemap.sheetWidth')
+  if (savedSheet) {
+    const n = Number(savedSheet)
+    if (Number.isFinite(n)) sheetWidth.value = Math.min(SHEET_MAX, Math.max(SHEET_MIN, n))
+  }
+  // Kompaktansicht wiederherstellen (App-Modus hat Vorrang, falls beide gesetzt).
+  if (localStorage.getItem('battlemap.compact') === '1' && !appMode.value) {
+    compact.value = true
+    document.documentElement.classList.add('compact-active')
+  }
 })
 watch(chatWidth, (v) => {
   if (typeof window !== 'undefined') {
     localStorage.setItem('battlemap.chatWidth', String(v))
+  }
+})
+watch(sheetWidth, (v: number) => {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('battlemap.sheetWidth', String(v))
   }
 })
 
@@ -2144,12 +2185,32 @@ const onResize = (e: PointerEvent) => {
 const endResize = () => {
   resizing.value = false
 }
+
+// Sheet-Spalte (links) resizen: Breite = Mausposition minus linker Aussenrand.
+const resizingSheet = ref(false)
+const startResizeSheet = (e: PointerEvent) => {
+  resizingSheet.value = true
+  ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+  e.preventDefault()
+}
+const onResizeSheet = (e: PointerEvent) => {
+  if (!resizingSheet.value) return
+  const newWidth = e.clientX - 8
+  sheetWidth.value = Math.min(SHEET_MAX, Math.max(SHEET_MIN, Math.round(newWidth)))
+}
+const endResizeSheet = () => {
+  resizingSheet.value = false
+}
 </script>
 
 <template>
-  <div v-if="map" class="flex flex-col lg:flex-row gap-3">
+  <div
+    v-if="map"
+    class="flex flex-col lg:flex-row gap-3 battle-compact-root"
+    :style="{ '--sheet-w': sheetWidth + 'px', '--chat-w': chatWidth + 'px' } as Record<string, string>"
+  >
     <!-- Hauptbereich: Karte -->
-    <div class="space-y-3 min-w-0 flex-1">
+    <div class="space-y-3 min-w-0 flex-1 battle-main-col">
       <div class="parchment-card no-ornament p-2 px-3 flex items-center gap-3 flex-wrap">
         <NuxtLink
           :to="`/groups/${groupId}/battle`"
@@ -2196,6 +2257,18 @@ const endResize = () => {
             :title="appMode ? 'App-Modus verlassen' : 'Vollbild-Karte (App-Modus)'"
             @click="toggleAppMode"
           />
+          <!-- Kompaktansicht: Sheet | Karte | Chat auf einem Screen (nur lg+) -->
+          <UButton
+            size="xs"
+            class="hidden lg:inline-flex"
+            :variant="compact ? 'solid' : 'outline'"
+            :color="compact ? 'primary' : 'neutral'"
+            icon="i-lucide-columns-3"
+            :title="compact ? 'Kompaktansicht verlassen' : 'Kompaktansicht: Sheet | Karte | Chat auf einem Screen'"
+            @click="toggleCompact"
+          >
+            Kompakt
+          </UButton>
           <UButton
             size="xs"
             variant="outline"
@@ -2682,7 +2755,7 @@ const endResize = () => {
         </div>
       </div>
 
-      <div class="parchment-card p-2 relative">
+      <div class="parchment-card p-2 relative compact-col-map">
         <!-- Sonnen-/Mondanzeige oben mittig der Karte. Klick (DM) zyklisiert
              die Tageszeit. Spieler sehen sie nur als Information. -->
         <div
@@ -2730,7 +2803,7 @@ const endResize = () => {
         </div>
         <div
           ref="stageWrapperEl"
-          class="overflow-auto bg-black/5 rounded flex"
+          class="overflow-auto bg-black/5 rounded flex compact-stage"
           style="max-height: 78vh; place-content: safe center; place-items: safe center;"
           @wheel="onStageWheel"
         >
@@ -3640,7 +3713,7 @@ const endResize = () => {
 
       <!-- Mein Mini-Charbogen (HP-Sync, Skill-Würfler, Inventar) — im App-Modus
            im Bottom-Sheet (siehe unten) statt inline. -->
-      <div :class="appMode ? 'app-mode-hide' : ''">
+      <div class="compact-col-sheet" :class="appMode ? 'app-mode-hide' : ''">
         <MiniCharSheet
           :group-id="groupId"
           :map-id="mapId"
@@ -3652,6 +3725,23 @@ const endResize = () => {
           :is-dm="isDm"
           :target-token-id="combatTargetId"
           @token-updated="fetchMap"
+        />
+      </div>
+
+      <!-- Sheet-Resize-Handle (nur Kompaktansicht): zieht die linke Spalte breiter -->
+      <div
+        class="compact-handle-sheet hidden w-3 cursor-col-resize self-stretch rounded items-center justify-center group flex-none touch-none"
+        :class="resizingSheet ? 'bg-[var(--color-accent)]/30' : 'hover:bg-[var(--color-accent)]/15'"
+        @pointerdown="startResizeSheet"
+        @pointermove="onResizeSheet"
+        @pointerup="endResizeSheet"
+        @pointercancel="endResizeSheet"
+        title="Sheet-Breite ziehen"
+      >
+        <UIcon
+          name="i-lucide-grip-vertical"
+          class="size-4 transition-colors"
+          :class="resizingSheet ? 'text-[var(--color-accent)]' : 'text-ink-300 group-hover:text-[var(--color-accent)]'"
         />
       </div>
 
@@ -3962,7 +4052,7 @@ const endResize = () => {
 
     <!-- Resize-Handle (nur lg+) -->
     <div
-      class="hidden lg:flex w-3 cursor-col-resize self-stretch rounded items-center justify-center group flex-none touch-none"
+      class="compact-handle-chat hidden lg:flex w-3 cursor-col-resize self-stretch rounded items-center justify-center group flex-none touch-none"
       :class="[
         resizing ? 'bg-[var(--color-accent)]/30' : 'hover:bg-[var(--color-accent)]/15',
         appMode ? 'app-mode-hide' : '',
@@ -3982,7 +4072,7 @@ const endResize = () => {
 
     <!-- Rechte Spalte: Chat (auf mobile volle Breite, auf lg+ resizable Breite) -->
     <aside
-      class="parchment-card p-3 flex-col flex-none w-full lg:w-[var(--chat-w)]"
+      class="parchment-card p-3 flex-col flex-none w-full lg:w-[var(--chat-w)] compact-col-chat"
       :class="[showChat ? 'flex' : 'hidden lg:flex', appMode ? 'app-mode-hide' : '']"
       :style="{ height: '80vh', '--chat-w': chatWidth + 'px' } as Record<string, string>"
     >
@@ -4724,6 +4814,29 @@ const endResize = () => {
         </div>
       </template>
     </template>
+
+    <!-- Kompaktansicht: schwebende Mini-Toolbar, da die normale Toolbar
+         ausgeblendet ist. Zoom + Verlassen bleiben so immer erreichbar. -->
+    <div
+      v-if="compact"
+      class="compact-toolbar fixed top-2 left-1/2 -translate-x-1/2 z-[80] flex items-center gap-1 parchment-card no-ornament px-2 py-1 shadow-lg"
+    >
+      <UButton size="xs" variant="outline" icon="i-lucide-zoom-out" @click="zoomOut" />
+      <span class="text-xs tabular-nums w-10 text-center">{{ Math.round(zoom * 100) }}%</span>
+      <UButton size="xs" variant="outline" icon="i-lucide-zoom-in" @click="zoomIn" />
+      <UButton size="xs" variant="ghost" @click="zoomReset">100%</UButton>
+      <div class="w-px h-4 bg-ink-300/40 mx-1" />
+      <UButton
+        size="xs"
+        variant="solid"
+        color="primary"
+        icon="i-lucide-minimize-2"
+        title="Kompaktansicht verlassen"
+        @click="toggleCompact"
+      >
+        Schließen
+      </UButton>
+    </div>
   </div>
 </template>
 

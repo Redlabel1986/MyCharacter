@@ -338,6 +338,93 @@ html.app-mode-active .battle-stage-wrap {
   background: var(--bg-paper);
 }
 
+/* ============================================================
+   Kompaktansicht (Battle-Map: Sheet | Karte | Chat auf einem Screen)
+   Aktiviert per document.documentElement.classList.add('compact-active').
+   Reflowt das bestehende Layout rein per CSS, ohne das Template umzubauen:
+   die Hauptspalte wird display:contents, ihre Kinder werden dadurch direkte
+   Flex-Items des Root-Containers und werden per `order` angeordnet.
+   Nur ab lg sinnvoll — der Kompakt-Button ist darunter ohnehin ausgeblendet.
+   ============================================================ */
+@media (min-width: 1024px) {
+  html.compact-active header.no-print,
+  html.compact-active footer.no-print {
+    display: none !important;
+  }
+  html.compact-active main {
+    padding: 0 !important;
+  }
+
+  /* Root: voller Viewport, kein Seiten-Scroll, drei Spalten nebeneinander. */
+  html.compact-active .battle-compact-root {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    margin: 0;
+    padding: 0.5rem;
+    gap: 0.5rem;
+    flex-direction: row;
+    align-items: stretch;
+    background: var(--bg-paper);
+    overflow: hidden;
+  }
+
+  /* Hauptspalte aufloesen -> ihre Kinder werden Flex-Items des Roots. */
+  html.compact-active .battle-main-col {
+    display: contents;
+  }
+  /* Standardmaessig alle Hauptspalten-Kinder verstecken … */
+  html.compact-active .battle-main-col > * {
+    display: none !important;
+  }
+  /* … nur die drei Kompakt-Bausteine bleiben sichtbar. */
+  html.compact-active .battle-main-col > .compact-col-sheet {
+    display: block !important;
+    order: 1;
+    width: var(--sheet-w, 360px);
+    flex: 0 0 auto;
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    margin: 0;
+  }
+  html.compact-active .battle-main-col > .compact-handle-sheet {
+    display: flex !important;
+    order: 2;
+  }
+  html.compact-active .battle-main-col > .compact-col-map {
+    display: flex !important;
+    flex-direction: column;
+    order: 3;
+    flex: 1 1 0;
+    min-width: 0;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  /* Resize-Handle (Chat) und Chat-Spalte sind Geschwister des Roots. */
+  html.compact-active .compact-handle-chat {
+    order: 4;
+  }
+  html.compact-active .compact-col-chat {
+    order: 5;
+    width: var(--chat-w, 420px) !important;
+    flex: 0 0 auto;
+    height: 100% !important;
+    overflow-y: auto;
+    margin: 0;
+  }
+
+  /* Karte fuellt ihre Spalte komplett, statt auf 78vh begrenzt zu sein. */
+  html.compact-active .compact-col-map .compact-stage {
+    max-height: none !important;
+    height: 100% !important;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+}
+
 /* Floating Action Button (Bottom-Sheet-Trigger im App-Modus) */
 .fab-bottom {
   position: fixed;
