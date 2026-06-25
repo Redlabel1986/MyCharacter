@@ -423,6 +423,14 @@ html.app-mode-active .battle-stage-wrap {
     flex: 1 1 auto;
     min-height: 0;
   }
+
+  /* Schwebende Mini-Toolbar: .parchment-card setzt position:relative und wuerde
+     Tailwinds `fixed` ueberschreiben — das machte die Toolbar zu einem
+     in-flow-Flex-Element (reservierter Platz links + verschobener "Balken" in
+     der Mitte). Wir erzwingen daher echtes fixed. */
+  html.compact-active .compact-toolbar {
+    position: fixed !important;
+  }
 }
 
 /* Floating Action Button (Bottom-Sheet-Trigger im App-Modus) */
