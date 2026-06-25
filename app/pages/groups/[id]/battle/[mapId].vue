@@ -1547,9 +1547,22 @@ const myTokensOnMap = computed<Token[]>(() => {
 // im MiniCharSheet (alle Systeme). Erneuter Rechtsklick auf dasselbe Ziel hebt
 // die Auswahl auf.
 const combatTargetId = ref<number | null>(null)
+// Kampf-Ziel an das ausgeklappte Charakterblatt (/play, eigenes Fenster)
+// spiegeln. Gleiche Origin → via localStorage + storage-Event (Schluessel pro
+// Karte). Das Pop-out liest den Wert und reagiert live auf Aenderungen.
+const COMBAT_TARGET_KEY = `battlemap.combatTarget.${mapId}`
+const persistCombatTarget = () => {
+  if (typeof window === 'undefined') return
+  if (combatTargetId.value === null) localStorage.removeItem(COMBAT_TARGET_KEY)
+  else localStorage.setItem(COMBAT_TARGET_KEY, String(combatTargetId.value))
+}
 const setCombatTarget = (t: Token) => {
   combatTargetId.value = combatTargetId.value === t.id ? null : t.id
+  persistCombatTarget()
 }
+// Beim Laden den Stand zuruecksetzen, damit kein veraltetes Ziel aus einer
+// frueheren Sitzung ins frisch geoeffnete Pop-out leakt.
+onMounted(persistCombatTarget)
 
 // --- Tool-Mode ---
 type ToolMode =
@@ -3054,7 +3067,7 @@ const endResize = () => {
                 v-if="t.hp !== null && t.hpMax"
                 class="absolute -bottom-3 left-1/2 -translate-x-1/2 text-[10px] bg-black/70 text-white px-1 rounded whitespace-nowrap pointer-events-none"
               >
-                {{ t.hp }}/{{ t.hpMax }}
+                <AnimatedNumber :value="t.hp ?? 0" />/{{ t.hpMax }}
               </div>
               <!-- Mana / Fokus: nur Charakter-Tokens mit aktivem Magie-Modul.
                    Lila Chip direkt unter dem HP-Chip, damit Spieler auf einen

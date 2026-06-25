@@ -2482,7 +2482,7 @@ const onImageError = (tokenId: number) => {
           <div class="text-[10px] uppercase tracking-widest text-ink-300">
             {{ character ? character.system.toUpperCase() : 'NPC / Token' }}
             <span v-if="activeToken.hp !== null && activeToken.hpMax">
-              · {{ activeToken.hp }}/{{ activeToken.hpMax }} HP
+              · <AnimatedNumber :key="activeToken.id" :value="activeToken.hp ?? 0" />/{{ activeToken.hpMax }} HP
             </span>
           </div>
           <div

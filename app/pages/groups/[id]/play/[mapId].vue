@@ -68,6 +68,20 @@ interface InitiativeState {
 const route = useRoute()
 const groupId = Number(route.params.id)
 const mapId = Number(route.params.mapId)
+
+// Kampf-Ziel wird im Map-Fenster per Rechtsklick gesetzt; da das Pop-out ein
+// eigenes Fenster ist, kommt es ueber localStorage (gleiche Origin) herein. Wir
+// lesen es beim Start und reagieren live auf storage-Events des Map-Fensters.
+const targetTokenId = ref<number | null>(null)
+const COMBAT_TARGET_KEY = `battlemap.combatTarget.${mapId}`
+const readCombatTarget = () => {
+  if (typeof window === 'undefined') return
+  const raw = localStorage.getItem(COMBAT_TARGET_KEY)
+  targetTokenId.value = raw === null ? null : Number(raw) || null
+}
+const onCombatTargetStorage = (e: StorageEvent) => {
+  if (e.key === COMBAT_TARGET_KEY) readCombatTarget()
+}
 const { user } = useUserSession()
 
 const mapName = ref<string>('')
@@ -142,12 +156,20 @@ onMounted(() => {
   }
   // Gruppenweit als „im Spiel" anzeigen (Online-Status auf der Gruppenseite).
   presenceSub = subscribePresenceGroup(groupId, { playing: true })
+  // Kampf-Ziel aus dem Map-Fenster initial lesen + live mitziehen.
+  readCombatTarget()
+  if (typeof window !== 'undefined') {
+    window.addEventListener('storage', onCombatTargetStorage)
+  }
 })
 onBeforeUnmount(() => {
   if (typeof document !== 'undefined') {
     document.removeEventListener('visibilitychange', onVisible)
   }
   if (pollTimer) clearInterval(pollTimer)
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('storage', onCombatTargetStorage)
+  }
   mapSub?.unsubscribe()
   groupSub?.unsubscribe()
   presenceSub?.unsubscribe()
@@ -199,6 +221,7 @@ onBeforeUnmount(() => {
         :awaiting-initiative-for="initiativeState?.awaitingFromCharacters ?? []"
         :grid-size="gridSize"
         :is-dm="isDm"
+        :target-token-id="targetTokenId"
         @token-updated="fetchMap"
       />
     </main>
