@@ -5,6 +5,7 @@ import { useDb } from '~~/server/utils/db'
 import { characters } from '~~/server/database/schema'
 import { GAME_SYSTEMS, createBlankCharacter, type GameSystem } from '~~/shared/systems'
 import { rateLimit } from '~~/server/utils/rate-limit'
+import { deepMerge } from '~~/server/utils/deep-merge'
 
 const MAX_PDF_BYTES = 10 * 1024 * 1024 // 10 MB
 const MAX_TEXT_CHARS = 50_000
@@ -365,23 +366,4 @@ function summarizeData(system: string, data: Record<string, unknown>): string {
     parts.push(`${(data as { weapons: unknown[] }).weapons.length} Waffen`)
   }
   return parts.join(' · ') || 'keine Listen extrahiert'
-}
-
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
-
-function deepMerge(
-  target: Record<string, unknown>,
-  source: Record<string, unknown>,
-): Record<string, unknown> {
-  const out = { ...target }
-  for (const [k, v] of Object.entries(source)) {
-    if (isPlainObject(v) && isPlainObject(out[k])) {
-      out[k] = deepMerge(out[k] as Record<string, unknown>, v)
-    } else if (v !== undefined) {
-      out[k] = v
-    }
-  }
-  return out
 }
