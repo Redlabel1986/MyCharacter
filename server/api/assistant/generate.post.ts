@@ -12,6 +12,7 @@ import {
   buildGeneratePrompt,
   parseAiJson,
   clampCustomData,
+  clampHtbahData,
   type GenerateInput,
 } from '~~/server/utils/assistant'
 
@@ -103,7 +104,9 @@ export default defineEventHandler(async (event) => {
   )
   const mergedData = body.system === 'custom'
     ? clampCustomData(deepMerge(blank, data), ctx.definition!)
-    : deepMerge(blank, data)
+    : body.system === 'htbah'
+      ? clampHtbahData(deepMerge(blank, data), body.level)
+      : deepMerge(blank, data)
 
   const db = useDb()
   const inserted = await db

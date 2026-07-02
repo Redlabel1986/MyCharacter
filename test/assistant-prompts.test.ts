@@ -5,6 +5,8 @@ import {
   parseAiJson,
   normalizeSuggestion,
   clampCustomData,
+  clampHtbahData,
+  htbahPoolForLevel,
   type AssistantInput,
   type GenerateInput,
 } from '../server/utils/assistant'
@@ -175,5 +177,96 @@ describe('clampCustomData', () => {
     const snapshot = JSON.parse(JSON.stringify(input))
     clampCustomData(input, def)
     expect(input).toEqual(snapshot)
+  })
+})
+
+describe('htbahPoolForLevel', () => {
+  it('Level 1 = 400, +50 pro Level darueber', () => {
+    expect(htbahPoolForLevel(1)).toBe(400)
+    expect(htbahPoolForLevel(3)).toBe(500)
+    expect(htbahPoolForLevel(5)).toBe(600)
+  })
+})
+
+describe('clampHtbahData', () => {
+  const skill = (id: string, spentPoints: unknown) => ({
+    id, name: `Skill ${id}`, talent: 'handeln', spentPoints,
+    modifier: 0, dayBonus: 0, nightBonus: 0, note: '',
+  })
+  const sumSpent = (out: Record<string, unknown>) =>
+    (out.skills as { spentPoints: number }[]).reduce((a, s) => a + s.spentPoints, 0)
+
+  it('setzt pointsPool.total hart auf den Level-Wert', () => {
+    const out = clampHtbahData({ pointsPool: { total: 9000, racePoints: 0 }, skills: [] }, 1)
+    expect((out.pointsPool as { total: number }).total).toBe(400)
+    const out3 = clampHtbahData({ pointsPool: { total: 100, racePoints: 0 }, skills: [] }, 3)
+    expect((out3.pointsPool as { total: number }).total).toBe(500)
+  })
+
+  it('skaliert spentPoints herunter, wenn die Summe den Pool uebersteigt', () => {
+    const out = clampHtbahData({
+      pointsPool: { total: 400, racePoints: 0 },
+      skills: [skill('s1', 100), skill('s2', 100), skill('s3', 100), skill('s4', 100), skill('s5', 100), skill('s6', 100)],
+    }, 1)
+    expect(sumSpent(out)).toBeLessThanOrEqual(400)
+    // Proportional: 600 -> 400 => jeder Skill floor(100 * 2/3) = 66
+    expect((out.skills as { spentPoints: number }[])[0]!.spentPoints).toBe(66)
+  })
+
+  it('laesst Verteilungen innerhalb des Budgets unveraendert', () => {
+    const out = clampHtbahData({
+      pointsPool: { total: 400, racePoints: 0 },
+      skills: [skill('s1', 80), skill('s2', 70), skill('s3', 50)],
+    }, 1)
+    expect(sumSpent(out)).toBe(200)
+    expect((out.skills as { spentPoints: number }[])[0]!.spentPoints).toBe(80)
+  })
+
+  it('Nachteile und Vorgeschichte vergroessern den Pool, Vorteile verkleinern ihn', () => {
+    const out = clampHtbahData({
+      pointsPool: { total: 400, racePoints: 10 },
+      advantages: [{ id: 'a1', name: 'Reich', cost: 30, note: '' }],
+      disadvantages: [{ id: 'd1', name: 'Arm', cost: 50, note: '' }],
+      backstory: { text: 'harte Kindheit', points: 20 },
+      skills: [skill('s1', 100), skill('s2', 100), skill('s3', 100), skill('s4', 100), skill('s5', 100)],
+    }, 1)
+    // Pool = 400 + 10 + 50 - 30 + 20 = 450 < 500 verteilt => runterskaliert
+    expect(sumSpent(out)).toBeLessThanOrEqual(450)
+  })
+
+  it('klammert einzelne Skills auf max. 100 Punkte', () => {
+    const out = clampHtbahData({
+      pointsPool: { total: 400, racePoints: 0 },
+      skills: [skill('s1', 250)],
+    }, 1)
+    expect((out.skills as { spentPoints: number }[])[0]!.spentPoints).toBe(100)
+  })
+
+  it('normalisiert kaputte Werte (Strings, negative Zahlen) auf sichere Defaults', () => {
+    const out = clampHtbahData({
+      pointsPool: { total: 400, racePoints: -50 },
+      advantages: [{ id: 'a1', name: 'X', cost: -20, note: '' }],
+      backstory: { text: '', points: 'viele' },
+      skills: [skill('s1', 'achtzig'), skill('s2', -10)],
+    }, 1)
+    expect((out.pointsPool as { racePoints: number }).racePoints).toBe(0)
+    expect((out.advantages as { cost: number }[])[0]!.cost).toBe(0)
+    expect((out.backstory as { points: number }).points).toBe(0)
+    expect((out.skills as { spentPoints: number }[])[0]!.spentPoints).toBe(0)
+    expect((out.skills as { spentPoints: number }[])[1]!.spentPoints).toBe(0)
+  })
+
+  it('mutiert die Eingabe nicht und laesst andere Felder unangetastet', () => {
+    const input = {
+      pointsPool: { total: 999, racePoints: 0 },
+      skills: [skill('s1', 500)],
+      inventory: 'Seil, Fackel',
+      hp: { max: 100, current: 100 },
+    }
+    const snapshot = JSON.parse(JSON.stringify(input))
+    const out = clampHtbahData(input, 1)
+    expect(input).toEqual(snapshot)
+    expect(out.inventory).toBe('Seil, Fackel')
+    expect(out.hp).toEqual({ max: 100, current: 100 })
   })
 })

@@ -10,6 +10,7 @@ import {
   createBlankCustomCharacter,
   type RuleSystemDefinition,
 } from '../../shared/rule-system'
+import { HTBAH_DEFAULT_POOL, HTBAH_SKILL_CAP } from '../../shared/engines/htbah'
 import { isPlainObject } from './deep-merge'
 
 /** Beide Endpoints teilen sich ein Limit: ein Charakter braucht 2-3 Aufrufe. */
@@ -74,7 +75,7 @@ const LEVEL_HINTS: Record<GameSystem | 'custom', string> = {
   dsa41:
     'Startlevel 1 = normale Startgenerierung (ca. 110 GP). Jedes Level darueber entspricht grob +1000 zusaetzlichen AP an Steigerungen — Talente/Eigenschaften entsprechend hoeher.',
   htbah:
-    'Startlevel 1 = 400 Verteilungspunkte (pointsPool.total = 400). Pro Level darueber +50 Punkte (Level 3 => 500). Kein Skill ueber 100. Punkte muessen mit den skills[].spentPoints konsistent sein.',
+    'Startlevel 1 = 400 Verteilungspunkte (pointsPool.total = 400). Pro Level darueber +50 Punkte (Level 3 => 500). Kein Skill ueber 100. HARTES BUDGET: Die Summe ALLER skills[].spentPoints darf den effektiven Pool (total + racePoints + Nachteile-Kosten - Vorteile-Kosten + backstory.points) NICHT ueberschreiten — rechne die Summe vor der Antwort nach und reduziere notfalls Skills.',
   custom:
     'Startlevel ist ein Richtwert fuer die Hoehe der Attribute/Skills INNERHALB der min/max-Grenzen der Definition: Level 1 = nahe den Default-Werten, hoehere Level = spuerbar staerker, aber NIE ueber max.',
 }
@@ -251,6 +252,77 @@ export function clampCustomData(
     }
     out.skills = skillsOut
   }
+
+  return out
+}
+
+/** HtbaH-Punktepool nach Startlevel: 400 Basis, +50 pro Level darueber. */
+export function htbahPoolForLevel(level: number): number {
+  return HTBAH_DEFAULT_POOL + Math.max(0, Math.round(level) - 1) * 50
+}
+
+const toInt = (v: unknown, fallback = 0): number =>
+  typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : fallback
+
+/**
+ * Clamp-Postprocessing fuer HtbaH-Charaktere: erzwingt das Punktebudget der
+ * Charaktererstellung, damit die KI nicht mehr Punkte verteilt als verfuegbar.
+ * - pointsPool.total wird hart auf den Level-Wert gesetzt (400 + 50/Level).
+ * - racePoints, backstory.points und Vor-/Nachteil-Kosten werden auf
+ *   nicht-negative Ganzzahlen normalisiert.
+ * - Jeder skills[].spentPoints wird auf 0..HTBAH_SKILL_CAP geklammert.
+ * - Uebersteigt die Summe der vergebenen Punkte den effektiven Pool
+ *   (Formel wie htbahPoolTotal: total + racePoints + Nachteile - Vorteile
+ *   + backstory.points), werden alle spentPoints proportional
+ *   herunterskaliert (abgerundet), bis das Budget eingehalten ist.
+ * Gibt ein neues Objekt zurueck, mutiert `data` nicht.
+ */
+export function clampHtbahData(
+  data: Record<string, unknown>,
+  level: number,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...data }
+
+  const poolIn = isPlainObject(data.pointsPool) ? data.pointsPool : {}
+  const total = htbahPoolForLevel(level)
+  const racePoints = Math.max(0, toInt(poolIn.racePoints))
+  out.pointsPool = { ...poolIn, total, racePoints }
+
+  const sanitizePerks = (v: unknown): Record<string, unknown>[] =>
+    Array.isArray(v)
+      ? v.filter(isPlainObject).map((p) => ({ ...p, cost: Math.max(0, toInt(p.cost)) }))
+      : []
+  const advantages = sanitizePerks(data.advantages)
+  const disadvantages = sanitizePerks(data.disadvantages)
+  out.advantages = advantages
+  out.disadvantages = disadvantages
+
+  const backstoryIn = isPlainObject(data.backstory) ? data.backstory : {}
+  const backstoryPoints = Math.max(0, toInt(backstoryIn.points))
+  out.backstory = { ...backstoryIn, points: backstoryPoints }
+
+  let skills = Array.isArray(data.skills)
+    ? data.skills.filter(isPlainObject).map((s) => ({
+        ...s,
+        spentPoints: Math.min(HTBAH_SKILL_CAP, Math.max(0, toInt(s.spentPoints))),
+      }))
+    : []
+
+  const costSum = (perks: Record<string, unknown>[]) =>
+    perks.reduce((a, p) => a + (p.cost as number), 0)
+  const pool = Math.max(
+    0,
+    total + racePoints + costSum(disadvantages) - costSum(advantages) + backstoryPoints,
+  )
+  const spent = skills.reduce((a, s) => a + (s.spentPoints as number), 0)
+  if (spent > pool) {
+    const factor = pool / spent
+    skills = skills.map((s) => ({
+      ...s,
+      spentPoints: Math.floor((s.spentPoints as number) * factor),
+    }))
+  }
+  out.skills = skills
 
   return out
 }
