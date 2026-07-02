@@ -10,6 +10,21 @@ export const HTBAH_TALENT_LABELS: Record<HtbahTalent, string> = {
   soziales: 'Soziales',
 }
 
+/**
+ * Mappt einen beliebigen talent-Wert auf die drei gueltigen Begabungen.
+ * Toleriert Gross-/Kleinschreibung und Label-Schreibweisen (z.B. aus
+ * KI-generierten oder importierten Daten); Fallback ist 'handeln'. Wichtig,
+ * weil die Skill-Listen im Bogen nach talent gruppieren und Eintraege mit
+ * unbekanntem Wert sonst stillschweigend unsichtbar sind.
+ */
+export function htbahNormalizeTalent(v: unknown): HtbahTalent {
+  const t = String(v ?? '').trim().toLowerCase()
+  if ((HTBAH_TALENTS as readonly string[]).includes(t)) return t as HtbahTalent
+  if (t.startsWith('sozial')) return 'soziales'
+  if (t.startsWith('wiss') || t.startsWith('knowledge')) return 'wissen'
+  return 'handeln'
+}
+
 /** Regelwerk-Richtwert für den Fähigkeitswert (Punkte + Begabung). Wird nicht hart erzwungen. */
 export const HTBAH_SKILL_CAP = 100
 

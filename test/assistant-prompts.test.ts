@@ -276,6 +276,39 @@ describe('clampHtbahData', () => {
     expect(sumSpent(out)).toBe(450)
   })
 
+  it('normalisiert talent-Werte, damit Skills im Bogen sichtbar bleiben', () => {
+    const out = clampHtbahData({
+      pointsPool: { total: 400, racePoints: 0 },
+      skills: [
+        { id: 's1', name: 'Recherche', talent: 'Wissen', spentPoints: 100 },
+        { id: 's2', name: 'Verhandeln', talent: 'SOZIALES', spentPoints: 100 },
+        { id: 's3', name: 'Klettern', talent: 'Action', spentPoints: 100 },
+        { id: 's4', name: 'Schleichen', talent: 'handeln', spentPoints: 100 },
+      ],
+    }, 1)
+    const talents = (out.skills as { talent: string }[]).map((s) => s.talent)
+    expect(talents).toEqual(['wissen', 'soziales', 'handeln', 'handeln'])
+  })
+
+  it('fuellt fehlende Skill-Pflichtfelder auf (id, modifier, note, ...)', () => {
+    const out = clampHtbahData({
+      pointsPool: { total: 400, racePoints: 0 },
+      skills: [
+        { name: 'Beobachten', talent: 'wissen', spentPoints: 100 },
+        { name: 'Reden', talent: 'soziales', spentPoints: 100 },
+        { name: 'Laufen', talent: 'handeln', spentPoints: 100 },
+        { name: 'Werfen', talent: 'handeln', spentPoints: 100 },
+      ],
+    }, 1)
+    const s = (out.skills as Record<string, unknown>[])[0]!
+    expect(s.id).toBe('s1')
+    expect(s.modifier).toBe(0)
+    expect(s.dayBonus).toBe(0)
+    expect(s.nightBonus).toBe(0)
+    expect(s.note).toBe('')
+    expect((out.skills as Record<string, unknown>[])[1]!.id).toBe('s2')
+  })
+
   it('akzeptiert spentPoints als numerische Strings', () => {
     const out = clampHtbahData({
       pointsPool: { total: 400, racePoints: 0 },

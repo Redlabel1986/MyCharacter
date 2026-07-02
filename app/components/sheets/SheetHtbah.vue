@@ -43,6 +43,7 @@ import {
   htbahFumbleThreshold,
   htbahQualityLabel,
   normalizeHtbahPurse,
+  htbahNormalizeTalent,
   createBlankHtbah,
   htbahTotalArmor,
   htbahArmorParadeBonus,
@@ -123,14 +124,17 @@ const sheet = computed<HtbahCharacterData>(() => {
         insightCurrent: incoming.talents?.soziales?.insightCurrent ?? 0,
       },
     },
-    skills: (incoming.skills ?? []).map((s) => ({
-      id: s.id,
+    // talent normalisieren: Skills mit unbekanntem talent (z.B. aus KI-
+    // Generierung oder Import) waeren sonst unsichtbar, weil die Listen
+    // nach talent gruppieren.
+    skills: (incoming.skills ?? []).map((s, i) => ({
+      id: s.id || `s${i + 1}`,
       name: s.name,
-      talent: s.talent,
-      spentPoints: s.spentPoints || 0,
-      modifier: s.modifier || 0,
-      dayBonus: s.dayBonus || 0,
-      nightBonus: s.nightBonus || 0,
+      talent: htbahNormalizeTalent(s.talent),
+      spentPoints: Number(s.spentPoints) || 0,
+      modifier: Number(s.modifier) || 0,
+      dayBonus: Number(s.dayBonus) || 0,
+      nightBonus: Number(s.nightBonus) || 0,
       note: s.note || '',
     })),
     advantages: incoming.advantages ?? [],

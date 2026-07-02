@@ -10,7 +10,11 @@ import {
   createBlankCustomCharacter,
   type RuleSystemDefinition,
 } from '../../shared/rule-system'
-import { HTBAH_DEFAULT_POOL, HTBAH_SKILL_CAP } from '../../shared/engines/htbah'
+import {
+  HTBAH_DEFAULT_POOL,
+  HTBAH_SKILL_CAP,
+  htbahNormalizeTalent,
+} from '../../shared/engines/htbah'
 import { isPlainObject } from './deep-merge'
 
 /** Beide Endpoints teilen sich ein Limit: ein Charakter braucht 2-3 Aufrufe. */
@@ -75,7 +79,7 @@ const LEVEL_HINTS: Record<GameSystem | 'custom', string> = {
   dsa41:
     'Startlevel 1 = normale Startgenerierung (ca. 110 GP). Jedes Level darueber entspricht grob +1000 zusaetzlichen AP an Steigerungen — Talente/Eigenschaften entsprechend hoeher.',
   htbah:
-    'Startlevel 1 = 400 Verteilungspunkte (pointsPool.total = 400). Pro Level darueber +50 Punkte (Level 3 => 500). Kein Skill ueber 100. HARTES BUDGET: Die Summe ALLER skills[].spentPoints muss den effektiven Pool (total + racePoints + Nachteile-Kosten - Vorteile-Kosten + backstory.points) EXAKT ausschoepfen — nicht mehr und nicht weniger; rechne die Summe vor der Antwort nach. Vorteile kosten Punkte vom Pool (cost-Feld), Nachteile bringen Punkte; setze cost sparsam und nur, wenn das Konzept es verlangt (sonst cost 0).',
+    'Startlevel 1 = 400 Verteilungspunkte (pointsPool.total = 400). Pro Level darueber +50 Punkte (Level 3 => 500). Kein Skill ueber 100. HARTES BUDGET: Die Summe ALLER skills[].spentPoints muss den effektiven Pool (total + racePoints + Nachteile-Kosten - Vorteile-Kosten + backstory.points) EXAKT ausschoepfen — nicht mehr und nicht weniger; rechne die Summe vor der Antwort nach. Vorteile kosten Punkte vom Pool (cost-Feld), Nachteile bringen Punkte; setze cost sparsam und nur, wenn das Konzept es verlangt (sonst cost 0). skills[]-Eintraege haben EXAKT diese Form: {"id":"s1","name":"<Fertigkeit>","talent":"handeln"|"wissen"|"soziales" (klein geschrieben!),"spentPoints":<Zahl>,"modifier":0,"dayBonus":0,"nightBonus":0,"note":""} — 10 bis 16 Skills, sinnvoll auf die drei Begabungen verteilt.',
   custom:
     'Startlevel ist ein Richtwert fuer die Hoehe der Attribute/Skills INNERHALB der min/max-Grenzen der Definition: Level 1 = nahe den Default-Werten, hoehere Level = spuerbar staerker, aber NIE ueber max.',
 }
@@ -322,10 +326,20 @@ export function clampHtbahData(
   out.advantages = advantages
   out.disadvantages = disadvantages
 
+  // Skills normalisieren: der Bogen gruppiert nach talent und blendet
+  // Eintraege mit unbekanntem talent stillschweigend aus — deshalb talent
+  // hart auf die drei gueltigen Werte mappen und Pflichtfelder auffuellen.
   const skills = Array.isArray(data.skills)
-    ? data.skills.filter(isPlainObject).map((s) => ({
+    ? data.skills.filter(isPlainObject).map((s, i) => ({
         ...s,
+        id: typeof s.id === 'string' && s.id.trim() ? s.id : `s${i + 1}`,
+        name: typeof s.name === 'string' && s.name.trim() ? s.name : `Fertigkeit ${i + 1}`,
+        talent: htbahNormalizeTalent(s.talent),
         spentPoints: Math.min(HTBAH_SKILL_CAP, Math.max(0, toInt(s.spentPoints))),
+        modifier: toInt(s.modifier),
+        dayBonus: toInt(s.dayBonus),
+        nightBonus: toInt(s.nightBonus),
+        note: typeof s.note === 'string' ? s.note : '',
       }))
     : []
 
