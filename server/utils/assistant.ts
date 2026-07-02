@@ -13,7 +13,10 @@ import {
 import {
   HTBAH_DEFAULT_POOL,
   HTBAH_SKILL_CAP,
+  HTBAH_TALENTS,
+  htbahInsightMax,
   htbahNormalizeTalent,
+  type HtbahCharacterData,
 } from '../../shared/engines/htbah'
 import { isPlainObject } from './deep-merge'
 
@@ -345,6 +348,21 @@ export function clampHtbahData(
 
   const pool = Math.max(0, gross - costSum(advantages))
   out.skills = fillHtbahPool(skills, pool)
+
+  // Geistesblitzpunkte: aktueller Stand darf das Maximum (Begabungswert / 10,
+  // kaufmaennisch gerundet) nicht ueberschreiten. Muss NACH fillHtbahPool
+  // passieren, weil der Begabungswert aus den finalen spentPoints entsteht.
+  const talentsIn = isPlainObject(data.talents) ? data.talents : {}
+  const talentsOut: Record<string, unknown> = {}
+  for (const t of HTBAH_TALENTS) {
+    const blockIn = isPlainObject(talentsIn[t]) ? talentsIn[t] : {}
+    const max = htbahInsightMax(out as unknown as HtbahCharacterData, t)
+    talentsOut[t] = {
+      ...blockIn,
+      insightCurrent: Math.min(max, Math.max(0, toInt(blockIn.insightCurrent))),
+    }
+  }
+  out.talents = talentsOut
 
   return out
 }

@@ -309,6 +309,35 @@ describe('clampHtbahData', () => {
     expect((out.skills as Record<string, unknown>[])[1]!.id).toBe('s2')
   })
 
+  it('clampt Geistesblitzpunkte auf das Maximum aus dem Begabungswert', () => {
+    const out = clampHtbahData({
+      pointsPool: { total: 400, racePoints: 0 },
+      talents: {
+        handeln: { insightCurrent: 9 },
+        wissen: { insightCurrent: -2 },
+        soziales: { insightCurrent: 1 },
+      },
+      // 4 handeln-Skills, Pool 400 => Begabungswert handeln = 40 => Max 4 GBP.
+      // wissen/soziales ohne Skills => Begabungswert 0 => Max 0 GBP.
+      skills: [skill('s1', 100), skill('s2', 100), skill('s3', 100), skill('s4', 100)],
+    }, 1)
+    const talents = out.talents as Record<string, { insightCurrent: number }>
+    expect(talents.handeln!.insightCurrent).toBe(4)
+    expect(talents.wissen!.insightCurrent).toBe(0)
+    expect(talents.soziales!.insightCurrent).toBe(0)
+  })
+
+  it('fuellt fehlende Geistesblitz-Bloecke mit 0 auf', () => {
+    const out = clampHtbahData({
+      pointsPool: { total: 400, racePoints: 0 },
+      skills: [skill('s1', 100), skill('s2', 100), skill('s3', 100), skill('s4', 100)],
+    }, 1)
+    const talents = out.talents as Record<string, { insightCurrent: number }>
+    expect(talents.handeln!.insightCurrent).toBe(0)
+    expect(talents.wissen!.insightCurrent).toBe(0)
+    expect(talents.soziales!.insightCurrent).toBe(0)
+  })
+
   it('akzeptiert spentPoints als numerische Strings', () => {
     const out = clampHtbahData({
       pointsPool: { total: 400, racePoints: 0 },
