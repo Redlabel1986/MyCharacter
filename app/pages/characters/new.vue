@@ -58,6 +58,22 @@ const submit = async () => {
       <p class="text-ink-400 text-sm">Wähle ein Regelwerk und gib deinem Helden einen Namen.</p>
     </div>
 
+    <NuxtLink
+      to="/characters/assistant"
+      class="parchment-card p-4 flex items-center justify-between gap-3 hover:opacity-100 opacity-95 transition block"
+    >
+      <div>
+        <div class="text-xs uppercase tracking-widest text-[var(--color-accent)] font-semibold">
+          ✨ Neu
+        </div>
+        <div class="font-serif text-lg">Charakter-Schmiede: mit KI-Hilfe erstellen</div>
+        <p class="text-xs text-ink-400 mt-1">
+          Beschreibe dein Konzept — Rasse, Klasse und kompletter Bogen werden vorgeschlagen.
+        </p>
+      </div>
+      <span class="text-[var(--color-accent)] text-xl shrink-0">→</span>
+    </NuxtLink>
+
     <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
       <button
         v-for="id in GAME_SYSTEMS"

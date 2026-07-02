@@ -40,6 +40,9 @@ const remove = async (id: number, name: string) => {
         <UButton to="/characters/import" variant="outline" icon="i-lucide-upload">
           PDF importieren
         </UButton>
+        <UButton to="/characters/assistant" variant="outline" icon="i-lucide-sparkles">
+          Charakter-Schmiede
+        </UButton>
         <UButton to="/characters/new" color="primary" icon="i-lucide-plus">
           Neuer Charakter
         </UButton>
