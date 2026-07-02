@@ -208,13 +208,13 @@ const generate = async () => {
         </div>
         <UAlert v-if="error" color="error" :title="error" />
         <div class="flex gap-2 flex-wrap">
-          <UButton color="primary" icon="i-lucide-hammer" :loading="loadingGenerate" @click="generate">
+          <UButton color="primary" icon="i-lucide-hammer" :loading="loadingGenerate" :disabled="loadingSuggest" @click="generate">
             Bogen generieren
           </UButton>
           <UButton variant="outline" icon="i-lucide-refresh-cw" :loading="loadingSuggest" @click="fetchSuggestion">
             Neu vorschlagen
           </UButton>
-          <UButton variant="ghost" :disabled="loadingGenerate" @click="step = 1">
+          <UButton variant="ghost" :disabled="loadingGenerate || loadingSuggest" @click="step = 1">
             Zurück
           </UButton>
         </div>
