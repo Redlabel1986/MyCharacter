@@ -139,9 +139,15 @@ body {
   --theme-card-ornament: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'><g fill='%23047857' opacity='0.65'><rect x='6' y='18' width='22' height='3' rx='1.5'/><path d='M26,10 L34,14 L33,22 L27,24 L25,20 L23,22 Z'/></g></svg>");
 }
 
-/* HtbaH: PNG fuellt den Viewport (Cover) statt nur als Eck-Watermark zu sitzen. */
+/* HtbaH: PNG fuellt den Viewport (Cover) statt nur als Eck-Watermark zu sitzen.
+   Davor liegt ein Pergament-Scrim: Das Artwork ist stellenweise fast schwarz,
+   die HtbaH-Tinte aber dunkelbraun — ohne Scrim sind Buttons/Text auf dem
+   Seitenhintergrund unlesbar (siehe test/theme-contrast.test.ts, >= 4.5:1
+   selbst auf schwarzen Bildbereichen). */
 [data-theme="htbah"] body {
-  background-image: var(--theme-watermark);
+  background-image:
+    linear-gradient(rgba(230, 200, 150, 0.75), rgba(230, 200, 150, 0.75)),
+    var(--theme-watermark);
   background-repeat: no-repeat;
   background-position: center center;
   background-size: cover;
