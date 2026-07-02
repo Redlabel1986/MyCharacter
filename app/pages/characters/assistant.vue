@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { GAME_SYSTEMS, SYSTEM_META } from '~~/shared/systems'
+import { GAME_SYSTEMS, SYSTEM_META, type GameSystem } from '~~/shared/systems'
 
 definePageMeta({ middleware: ['auth'] })
 
@@ -27,6 +27,32 @@ const customSystems = computed(() => rsData.value?.ruleSystems ?? [])
 // Schritt 1: Eingaben
 const step = ref<1 | 2>(1)
 const selected = ref<string | null>(null) // Built-in-ID oder `custom:<id>`
+
+// Regelwerk-Auswahl merken: beim naechsten Besuch (und auf /characters/new)
+// ist das zuletzt gewaehlte Regelwerk wieder vormarkiert.
+const SELECTED_SYSTEM_KEY = 'characters:selectedSystem'
+onMounted(() => {
+  if (selected.value) return
+  const saved = localStorage.getItem(SELECTED_SYSTEM_KEY)
+  if (!saved) return
+  const isBuiltin = (GAME_SYSTEMS as readonly string[]).includes(saved)
+  const isCustom = saved.startsWith('custom:')
+    && customSystems.value.some((rs: RuleSystemListItem) => `custom:${rs.id}` === saved)
+  if (isBuiltin || isCustom) selected.value = saved
+})
+watch(selected, (v: string | null) => {
+  if (v) localStorage.setItem(SELECTED_SYSTEM_KEY, v)
+})
+
+/** Anzeigename des gewaehlten Regelwerks (fuer Schritt 2). */
+const selectedLabel = computed(() => {
+  if (!selected.value) return ''
+  if (selected.value.startsWith('custom:')) {
+    const id = Number(selected.value.slice('custom:'.length))
+    return customSystems.value.find((rs: RuleSystemListItem) => rs.id === id)?.name ?? 'Eigenes Regelwerk'
+  }
+  return SYSTEM_META[selected.value as GameSystem]?.label ?? selected.value
+})
 const concept = ref('')
 const backstory = ref('')
 const race = ref('')
@@ -192,7 +218,15 @@ const generate = async () => {
     <!-- Schritt 2: Vorschlag prüfen -->
     <template v-else-if="step === 2 && suggestion">
       <div class="parchment-card p-6 space-y-4">
-        <h2 class="font-serif text-xl">Vorschlag — passe an, was dir nicht gefällt</h2>
+        <div class="flex items-start justify-between gap-3 flex-wrap">
+          <h2 class="font-serif text-xl">Vorschlag — passe an, was dir nicht gefällt</h2>
+          <span
+            v-if="selectedLabel"
+            class="text-xs uppercase tracking-widest text-[var(--color-accent)] font-semibold border border-[var(--color-accent)] rounded px-2 py-1"
+          >
+            {{ selectedLabel }}
+          </span>
+        </div>
         <p v-if="suggestion.conceptSummary" class="text-sm italic text-ink-400">
           {{ suggestion.conceptSummary }}
         </p>

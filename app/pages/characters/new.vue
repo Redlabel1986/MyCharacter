@@ -20,6 +20,22 @@ const customSystems = computed(() => rsData.value?.ruleSystems ?? [])
 // `selected` ist entweder eine Built-in-System-ID oder `custom:<id>`.
 const selected = ref<string | null>(null)
 const name = ref('')
+
+// Regelwerk-Auswahl merken (gleicher Key wie die Charakter-Schmiede): beim
+// naechsten Besuch ist das zuletzt gewaehlte Regelwerk wieder vormarkiert.
+const SELECTED_SYSTEM_KEY = 'characters:selectedSystem'
+onMounted(() => {
+  if (selected.value) return
+  const saved = localStorage.getItem(SELECTED_SYSTEM_KEY)
+  if (!saved) return
+  const isBuiltin = (GAME_SYSTEMS as readonly string[]).includes(saved)
+  const isCustom = saved.startsWith('custom:')
+    && customSystems.value.some((rs: RuleSystemListItem) => `custom:${rs.id}` === saved)
+  if (isBuiltin || isCustom) selected.value = saved
+})
+watch(selected, (v: string | null) => {
+  if (v) localStorage.setItem(SELECTED_SYSTEM_KEY, v)
+})
 const loading = ref(false)
 const error = ref<string | null>(null)
 
