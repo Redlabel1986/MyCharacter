@@ -208,18 +208,39 @@ describe('clampHtbahData', () => {
       pointsPool: { total: 400, racePoints: 0 },
       skills: [skill('s1', 100), skill('s2', 100), skill('s3', 100), skill('s4', 100), skill('s5', 100), skill('s6', 100)],
     }, 1)
-    expect(sumSpent(out)).toBeLessThanOrEqual(400)
-    // Proportional: 600 -> 400 => jeder Skill floor(100 * 2/3) = 66
-    expect((out.skills as { spentPoints: number }[])[0]!.spentPoints).toBe(66)
+    // 600 verteilt, Pool 400 => exakt 400 nach Skalierung
+    expect(sumSpent(out)).toBe(400)
+    const points = (out.skills as { spentPoints: number }[]).map((s) => s.spentPoints)
+    for (const p of points) expect(p === 66 || p === 67).toBe(true)
   })
 
-  it('laesst Verteilungen innerhalb des Budgets unveraendert', () => {
+  it('skaliert spentPoints hoch, wenn Punkte uebrig sind — alle Punkte werden vergeben', () => {
     const out = clampHtbahData({
       pointsPool: { total: 400, racePoints: 0 },
-      skills: [skill('s1', 80), skill('s2', 70), skill('s3', 50)],
+      skills: [skill('s1', 40), skill('s2', 30), skill('s3', 20), skill('s4', 10)],
     }, 1)
+    // 100 verteilt, Pool 400 => hochskaliert bis Summe = 400 (Cap 100/Skill)
+    expect(sumSpent(out)).toBe(400)
+    const points = (out.skills as { spentPoints: number }[]).map((s) => s.spentPoints)
+    for (const p of points) expect(p).toBeLessThanOrEqual(100)
+  })
+
+  it('verteilt den Pool gleichmaessig, wenn alle Skills 0 Punkte haben', () => {
+    const out = clampHtbahData({
+      pointsPool: { total: 400, racePoints: 0 },
+      skills: [skill('s1', 0), skill('s2', 0), skill('s3', 0), skill('s4', 0)],
+    }, 1)
+    expect(sumSpent(out)).toBe(400)
+    expect((out.skills as { spentPoints: number }[])[0]!.spentPoints).toBe(100)
+  })
+
+  it('kann nicht ueber das Skill-Cap hinaus fuellen', () => {
+    const out = clampHtbahData({
+      pointsPool: { total: 400, racePoints: 0 },
+      skills: [skill('s1', 50), skill('s2', 50)],
+    }, 1)
+    // Nur 2 Skills à Cap 100 => maximal 200 verteilbar
     expect(sumSpent(out)).toBe(200)
-    expect((out.skills as { spentPoints: number }[])[0]!.spentPoints).toBe(80)
   })
 
   it('Nachteile und Vorgeschichte vergroessern den Pool, Vorteile verkleinern ihn', () => {
@@ -230,8 +251,37 @@ describe('clampHtbahData', () => {
       backstory: { text: 'harte Kindheit', points: 20 },
       skills: [skill('s1', 100), skill('s2', 100), skill('s3', 100), skill('s4', 100), skill('s5', 100)],
     }, 1)
-    // Pool = 400 + 10 + 50 - 30 + 20 = 450 < 500 verteilt => runterskaliert
-    expect(sumSpent(out)).toBeLessThanOrEqual(450)
+    // Pool = 400 + 10 + 50 - 30 + 20 = 450 => exakt ausgeschoepft
+    expect(sumSpent(out)).toBe(450)
+  })
+
+  it('kuerzt ueberzogene Vorteilskosten, statt den Skill-Pool leerzufressen', () => {
+    const out = clampHtbahData({
+      pointsPool: { total: 400, racePoints: 0 },
+      advantages: [{ id: 'a1', name: 'Superreich', cost: 500, note: '' }],
+      skills: [skill('s1', 100), skill('s2', 100), skill('s3', 100), skill('s4', 100)],
+    }, 1)
+    // Vorteile max. halber Brutto-Pool (200) => Pool 200, Skills exakt 200
+    expect((out.advantages as { cost: number }[])[0]!.cost).toBe(200)
+    expect(sumSpent(out)).toBe(200)
+  })
+
+  it('liest Nachteil-Kosten auch aus dem value-Feld (KI-Robustheit)', () => {
+    const out = clampHtbahData({
+      pointsPool: { total: 400, racePoints: 0 },
+      disadvantages: [{ id: 'd1', name: 'Arm', value: 50, note: '' }],
+      skills: [skill('s1', 0), skill('s2', 0), skill('s3', 0), skill('s4', 0), skill('s5', 0)],
+    }, 1)
+    expect((out.disadvantages as { cost: number }[])[0]!.cost).toBe(50)
+    expect(sumSpent(out)).toBe(450)
+  })
+
+  it('akzeptiert spentPoints als numerische Strings', () => {
+    const out = clampHtbahData({
+      pointsPool: { total: 400, racePoints: 0 },
+      skills: [skill('s1', '80'), skill('s2', '70'), skill('s3', '50'), skill('s4', '60')],
+    }, 1)
+    expect(sumSpent(out)).toBe(400)
   })
 
   it('klammert einzelne Skills auf max. 100 Punkte', () => {
@@ -252,8 +302,10 @@ describe('clampHtbahData', () => {
     expect((out.pointsPool as { racePoints: number }).racePoints).toBe(0)
     expect((out.advantages as { cost: number }[])[0]!.cost).toBe(0)
     expect((out.backstory as { points: number }).points).toBe(0)
-    expect((out.skills as { spentPoints: number }[])[0]!.spentPoints).toBe(0)
-    expect((out.skills as { spentPoints: number }[])[1]!.spentPoints).toBe(0)
+    // Kaputte spentPoints werden 0 — dann fuellt die Verteilung den Pool
+    // gleichmaessig bis zum Cap auf.
+    expect((out.skills as { spentPoints: number }[])[0]!.spentPoints).toBe(100)
+    expect((out.skills as { spentPoints: number }[])[1]!.spentPoints).toBe(100)
   })
 
   it('mutiert die Eingabe nicht und laesst andere Felder unangetastet', () => {
