@@ -4,9 +4,11 @@ import {
   buildGeneratePrompt,
   parseAiJson,
   normalizeSuggestion,
+  clampCustomData,
   type AssistantInput,
   type GenerateInput,
 } from '../server/utils/assistant'
+import type { RuleSystemDefinition } from '../shared/rule-system'
 
 const base: AssistantInput = {
   system: 'dnd5e',
@@ -102,5 +104,76 @@ describe('normalizeSuggestion', () => {
     )
     expect(s.name).toBe('Bargin')
     expect(s.race).toBe('Zwerg')
+  })
+})
+
+describe('clampCustomData', () => {
+  const def: RuleSystemDefinition = {
+    attributes: [
+      { key: 'KOR', label: 'Körper', default: 10, min: 1, max: 20 },
+      { key: 'GEI', label: 'Geist', default: 8, min: 1, max: 20 },
+    ],
+    skills: [
+      { key: 'kampf', label: 'Kampf', attribute: 'KOR', default: 5 },
+      { key: 'wissen', label: 'Wissen', attribute: 'GEI', default: 3 },
+    ],
+    hp: { maxFormula: '20 + KOR' },
+    dice: { mechanic: 'roll-over', dieSize: 20 },
+  }
+
+  it('klammert Attribute über max auf max und unter min auf min', () => {
+    const out = clampCustomData(
+      { attributes: { KOR: 999, GEI: -5 }, skills: {} },
+      def,
+    )
+    expect((out.attributes as Record<string, number>).KOR).toBe(20)
+    expect((out.attributes as Record<string, number>).GEI).toBe(1)
+  })
+
+  it('rundet nicht-ganzzahlige Attributwerte', () => {
+    const out = clampCustomData({ attributes: { KOR: 12.6, GEI: 7.2 }, skills: {} }, def)
+    expect((out.attributes as Record<string, number>).KOR).toBe(13)
+    expect((out.attributes as Record<string, number>).GEI).toBe(7)
+  })
+
+  it('verwirft Attribut-/Skill-Keys, die die Definition nicht kennt', () => {
+    const out = clampCustomData(
+      { attributes: { KOR: 10, UNBEKANNT: 42 }, skills: { kampf: 5, GEHEIM: 99 } },
+      def,
+    )
+    expect(out.attributes).not.toHaveProperty('UNBEKANNT')
+    expect(out.skills).not.toHaveProperty('GEHEIM')
+  })
+
+  it('setzt nicht-numerische Attribut-/Skill-Werte auf den Default zurück', () => {
+    const out = clampCustomData(
+      { attributes: { KOR: 'zwölf', GEI: null }, skills: { kampf: 'stark', wissen: undefined } },
+      def,
+    )
+    expect((out.attributes as Record<string, number>).KOR).toBe(10)
+    expect((out.attributes as Record<string, number>).GEI).toBe(8)
+    expect((out.skills as Record<string, number>).kampf).toBe(5)
+    expect((out.skills as Record<string, number>).wissen).toBe(3)
+  })
+
+  it('lässt Skill-Zahlen ohne min/max-Grenzen unverändert', () => {
+    const out = clampCustomData({ attributes: {}, skills: { kampf: 999 } }, def)
+    expect((out.skills as Record<string, number>).kampf).toBe(999)
+  })
+
+  it('lässt andere Datenfelder unangetastet', () => {
+    const out = clampCustomData(
+      { attributes: {}, skills: {}, resources: { hp: { current: 5, max: 20 } }, notes: 'hallo' },
+      def,
+    )
+    expect(out.resources).toEqual({ hp: { current: 5, max: 20 } })
+    expect(out.notes).toBe('hallo')
+  })
+
+  it('mutiert die Eingabe nicht', () => {
+    const input = { attributes: { KOR: 999 }, skills: {} }
+    const snapshot = JSON.parse(JSON.stringify(input))
+    clampCustomData(input, def)
+    expect(input).toEqual(snapshot)
   })
 })

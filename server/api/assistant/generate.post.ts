@@ -11,6 +11,7 @@ import {
   generateBodySchema,
   buildGeneratePrompt,
   parseAiJson,
+  clampCustomData,
   type GenerateInput,
 } from '~~/server/utils/assistant'
 
@@ -100,7 +101,9 @@ export default defineEventHandler(async (event) => {
       ? (createBlankCustomCharacter(ctx.definition!) as unknown as Record<string, unknown>)
       : createBlankCharacter(body.system, input.name)
   )
-  const mergedData = deepMerge(blank, data)
+  const mergedData = body.system === 'custom'
+    ? clampCustomData(deepMerge(blank, data), ctx.definition!)
+    : deepMerge(blank, data)
 
   const db = useDb()
   const inserted = await db

@@ -54,7 +54,7 @@ const baseBody = () => ({
   backstory: backstory.value.trim(),
   race: race.value.trim(),
   name: name.value.trim(),
-  level: level.value,
+  level: Math.min(30, Math.max(1, Math.round(Number(level.value)) || 1)),
 })
 
 const errMsg = (e: unknown) =>
@@ -138,6 +138,7 @@ const generate = async () => {
             {{ SYSTEM_META[id].shortLabel }}
           </div>
           <div class="font-serif text-lg">{{ SYSTEM_META[id].label }}</div>
+          <p class="text-xs text-ink-400 mt-1">{{ SYSTEM_META[id].tagline }}</p>
         </button>
         <button
           v-for="rs in customSystems"

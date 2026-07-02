@@ -10,6 +10,7 @@ import {
   createBlankCustomCharacter,
   type RuleSystemDefinition,
 } from '../../shared/rule-system'
+import { isPlainObject } from './deep-merge'
 
 /** Beide Endpoints teilen sich ein Limit: ein Charakter braucht 2-3 Aufrufe. */
 export const ASSISTANT_RATE = { max: 10, windowMs: 5 * 60 * 1000 }
@@ -213,4 +214,43 @@ export function normalizeSuggestion(
     classReason: str(raw.classReason),
     conceptSummary: str(raw.conceptSummary),
   }
+}
+
+/**
+ * Clamp-Postprocessing fuer Custom-Charaktere: Attribute/Skills auf die
+ * min/max-Grenzen (bzw. bei Skills: die bekannten Keys) der Definition
+ * begrenzen und Keys verwerfen, die die Definition nicht kennt
+ * (KI-Robustheit; AC 6 der Spec). Gibt ein neues Objekt zurueck, mutiert
+ * `data` nicht.
+ */
+export function clampCustomData(
+  data: Record<string, unknown>,
+  def: RuleSystemDefinition,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...data }
+
+  if (isPlainObject(data.attributes)) {
+    const attrsIn = data.attributes
+    const attrsOut: Record<string, number> = {}
+    for (const a of def.attributes) {
+      const v = attrsIn[a.key]
+      attrsOut[a.key] =
+        typeof v === 'number' && Number.isFinite(v)
+          ? Math.min(a.max, Math.max(a.min, Math.round(v)))
+          : a.default
+    }
+    out.attributes = attrsOut
+  }
+
+  if (isPlainObject(data.skills)) {
+    const skillsIn = data.skills
+    const skillsOut: Record<string, number> = {}
+    for (const s of def.skills) {
+      const v = skillsIn[s.key]
+      skillsOut[s.key] = typeof v === 'number' && Number.isFinite(v) ? v : s.default
+    }
+    out.skills = skillsOut
+  }
+
+  return out
 }
