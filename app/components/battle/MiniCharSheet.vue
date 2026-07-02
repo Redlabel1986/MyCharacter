@@ -3629,12 +3629,14 @@ const onImageError = (tokenId: number) => {
         <div class="text-[10px] uppercase tracking-widest text-ink-300">
           Verwendbare Gegenstände
         </div>
+        <!-- Name in eigener Zeile, Ziel + Verwenden darunter — sonst wird der
+             Name in der schmalen Sidebar abgeschnitten. -->
         <div
           v-for="item in characterUsableItems"
           :key="item.id"
-          class="grid grid-cols-12 gap-2 items-end"
+          class="space-y-1"
         >
-          <div class="col-span-4 flex items-center gap-2 min-w-0">
+          <div class="flex items-center gap-2 min-w-0">
             <span
               v-if="item.healAmount > 0"
               class="text-[10px] tabular-nums px-1.5 py-0.5 rounded font-semibold"
@@ -3674,33 +3676,34 @@ const onImageError = (tokenId: number) => {
               {{ item.name }}
             </span>
           </div>
-          <UFormField label="Ziel" class="col-span-5">
-            <USelect
-              :model-value="getItemTarget(item.id)"
-              :items="damageTargetTokens.map((t) => ({
-                label: t.id === activeToken?.id
-                  ? `Auf mich (${t.name})`
-                  : `${t.name}${t.hp !== null && t.hpMax ? ' · ' + t.hp + '/' + t.hpMax : ''}`,
-                value: t.id,
-              }))"
-              value-key="value"
+          <div class="flex items-end gap-2">
+            <UFormField label="Ziel" class="flex-1 min-w-0">
+              <USelect
+                :model-value="getItemTarget(item.id)"
+                :items="damageTargetTokens.map((t) => ({
+                  label: t.id === activeToken?.id
+                    ? `Auf mich (${t.name})`
+                    : `${t.name}${t.hp !== null && t.hpMax ? ' · ' + t.hp + '/' + t.hpMax : ''}`,
+                  value: t.id,
+                }))"
+                value-key="value"
+                size="sm"
+                class="w-full"
+                @update:model-value="setItemTarget(item.id, Number($event))"
+              />
+            </UFormField>
+            <UButton
+              class="shrink-0"
+              color="success"
+              icon="i-lucide-heart-pulse"
               size="sm"
-              class="w-full"
-              @update:model-value="setItemTarget(item.id, Number($event))"
-            />
-          </UFormField>
-          <UButton
-            class="col-span-3"
-            color="success"
-            icon="i-lucide-heart-pulse"
-            size="sm"
-            block
-            :loading="usingItemId === item.id"
-            :disabled="usingItemId !== null"
-            @click="useItem(item)"
-          >
-            Verwenden
-          </UButton>
+              :loading="usingItemId === item.id"
+              :disabled="usingItemId !== null"
+              @click="useItem(item)"
+            >
+              Verwenden
+            </UButton>
+          </div>
         </div>
         <p v-if="itemUseError" class="text-xs text-red-700">{{ itemUseError }}</p>
         <p v-if="itemUseResult" class="text-xs text-emerald-700">{{ itemUseResult }}</p>
