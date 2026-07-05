@@ -178,6 +178,13 @@ const isWhisper = (m: ChatMessage) => !!m.targetUserId
 // Nur frisch eingetroffene Würfe (innerhalb der letzten 5s) animieren ihre
 // Würfel — beim initialen Chat-Laden sollen alte Würfe ruhig bleiben.
 const isFreshRoll = (iso: string) => Date.now() - new Date(iso).getTime() < 5000
+
+// Neue Nachrichten (juenger als 10s) bekommen einen Glow, der ueber die
+// CSS-Animation von selbst ausklingt — kein Timer/State noetig. Gleiches
+// Zeitstempel-Muster wie isFreshRoll, damit der initiale Load ruhig bleibt.
+const GLOW_MS = 10_000
+const isFreshMessage = (m: ChatMessage) =>
+  Date.now() - new Date(m.createdAt).getTime() < GLOW_MS
 </script>
 
 <template>
@@ -214,12 +221,16 @@ const isFreshRoll = (iso: string) => Date.now() - new Date(iso).getTime() < 5000
           :payload="(m.payload as RollPayload)"
           :mine="m.user.id === user?.id"
           :animate="isFreshRoll(m.createdAt)"
+          :class="{ 'chat-glow': isFreshMessage(m) }"
         />
         <div
           v-else
           class="max-w-[85%] px-3 py-2 rounded-lg"
           :style="isWhisper(m) ? { background: m.user.id === user?.id ? '#a78bfa' : '#ede9fe', color: '#1e1b4b', borderColor: '#7c3aed', borderWidth: '1px', borderStyle: 'solid' } : {}"
-          :class="isWhisper(m) ? '' : (m.user.id === user?.id ? 'bg-[var(--color-accent-soft)] text-ink-700' : 'bg-white/60 text-ink-500 border border-parchment-700/20')"
+          :class="[
+            isWhisper(m) ? '' : (m.user.id === user?.id ? 'bg-[var(--color-accent-soft)] text-ink-700' : 'bg-white/60 text-ink-500 border border-parchment-700/20'),
+            { 'chat-glow': isFreshMessage(m) },
+          ]"
         >
           <div class="whitespace-pre-wrap text-sm">{{ m.content }}</div>
         </div>
@@ -268,11 +279,29 @@ const isFreshRoll = (iso: string) => Date.now() - new Date(iso).getTime() < 5000
 .chat-msg-move {
   transition: transform 280ms cubic-bezier(0.2, 0.7, 0.2, 1);
 }
+/* Neue Nachrichten leuchten 10s lang (GLOW_MS im Script) und klingen dann
+   von selbst aus — `forwards` haelt den Endzustand (kein Schatten), auch
+   wenn die Klasse durch das Zeitfenster-Check noch gesetzt ist. */
+.chat-glow {
+  animation: chat-glow-fade 10s ease-out forwards;
+}
+@keyframes chat-glow-fade {
+  0%,
+  70% {
+    box-shadow: 0 0 10px 2px var(--color-accent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .chat-msg-enter-active,
   .chat-msg-leave-active,
   .chat-msg-move {
     transition: none;
+  }
+  .chat-glow {
+    animation: none;
   }
 }
 </style>
