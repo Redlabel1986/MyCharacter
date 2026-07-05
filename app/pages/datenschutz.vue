@@ -90,10 +90,10 @@ useHead({
     <h2>5. Speicherdauer</h2>
     <p>
       Account- und Spieldaten werden gespeichert, solange dein Account besteht.
-      Auf Anfrage per E-Mail an
-      <a href="mailto:jasongehrts@gmail.com">jasongehrts@gmail.com</a>
-      kann der Account jederzeit gelöscht werden — sämtliche zugehörigen Daten
-      werden dann unwiderruflich entfernt.
+      Du kannst deinen Account jederzeit selbst löschen (Profilseite →
+      „Gefahrenzone") — sämtliche zugehörigen Daten werden dann unwiderruflich
+      entfernt. Alternativ genügt eine E-Mail an
+      <a href="mailto:jasongehrts@gmail.com">jasongehrts@gmail.com</a>.
     </p>
 
     <h2>6. Deine Rechte</h2>

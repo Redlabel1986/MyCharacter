@@ -14,6 +14,7 @@ export default defineEventHandler(async (event) => {
       id: users.id,
       email: users.email,
       username: users.username,
+      displayName: users.displayName,
       role: users.role,
       canBeDm: users.canBeDm,
       mustChangePassword: users.mustChangePassword,
@@ -39,6 +40,7 @@ export default defineEventHandler(async (event) => {
     id: dbUser.id,
     email: dbUser.email,
     username: dbUser.username,
+    displayName: dbUser.displayName,
     role: effectiveRole,
     actualRole: dbUser.role,
     canBeDm: dbUser.canBeDm,
@@ -52,7 +54,8 @@ export default defineEventHandler(async (event) => {
     session.user.canBeDm !== merged.canBeDm ||
     session.user.mustChangePassword !== merged.mustChangePassword ||
     session.user.email !== merged.email ||
-    session.user.username !== merged.username
+    session.user.username !== merged.username ||
+    session.user.displayName !== merged.displayName
   if (needsSync) {
     await setUserSession(event, { user: merged })
   }

@@ -1,5 +1,5 @@
 import { and, asc, eq, gt, inArray, isNull, or } from 'drizzle-orm'
-import { useDb } from '~~/server/utils/db'
+import { useDb, userDisplayName } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
 import { messages, users } from '~~/server/database/schema'
 
@@ -39,7 +39,7 @@ export default defineEventHandler(async (event) => {
       payload: messages.payload,
       targetUserId: messages.targetUserId,
       createdAt: messages.createdAt,
-      user: { id: users.id, username: users.username, role: users.role },
+      user: { id: users.id, username: userDisplayName, role: users.role },
     })
     .from(messages)
     .innerJoin(users, eq(users.id, messages.userId))

@@ -48,7 +48,7 @@ export default defineEventHandler(async (event) => {
     const playing = getHeader(event, 'x-presence-playing') === '1'
     presenceData = {
       user_id: String(user.id),
-      user_info: { username: user.username, role: user.role, playing },
+      user_info: { username: user.displayName ?? user.username, role: user.role, playing },
     }
   } else if (channelName.startsWith('private-group-')) {
     const groupId = Number(channelName.slice('private-group-'.length))

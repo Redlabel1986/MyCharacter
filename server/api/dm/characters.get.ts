@@ -1,5 +1,5 @@
 import { desc, eq } from 'drizzle-orm'
-import { useDb } from '~~/server/utils/db'
+import { useDb, userDisplayName } from '~~/server/utils/db'
 import { requireRole } from '~~/server/utils/auth'
 import { characters, characterAccess, users } from '~~/server/database/schema'
 
@@ -17,7 +17,7 @@ export default defineEventHandler(async (event) => {
       grantedAt: characterAccess.grantedAt,
       owner: {
         id: users.id,
-        username: users.username,
+        username: userDisplayName,
         email: users.email,
       },
     })

@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import { useDb } from '~~/server/utils/db'
+import { useDb, userDisplayName } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
 import { groupMembers, users } from '~~/server/database/schema'
 
@@ -16,7 +16,7 @@ export default defineEventHandler(async (event) => {
     .select({
       id: groupMembers.id,
       userId: users.id,
-      username: users.username,
+      username: userDisplayName,
       email: users.email,
       role: users.role,
       joinedAt: groupMembers.joinedAt,

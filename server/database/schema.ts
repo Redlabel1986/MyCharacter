@@ -26,6 +26,21 @@ export const users = pgTable('users', {
    */
   canBeDm: boolean('can_be_dm').notNull().default(false),
   mustChangePassword: boolean('must_change_password').notNull().default(false),
+  /**
+   * Oeffentlicher Anzeigename. NULL = der Benutzername gilt als Anzeigename.
+   * Anzeige-Endpoints liefern COALESCE(display_name, username) im Feld
+   * `username` (siehe userDisplayName in server/utils/db.ts) — der echte
+   * Benutzername bleibt Login-Kennung.
+   */
+  displayName: text('display_name'),
+  /** Profilbild (Vercel-Blob-URL). NULL = kein Avatar. */
+  avatarUrl: text('avatar_url'),
+  /** Ueber-mich-Text des oeffentlichen Profils (max. 2000 Zeichen, UI-validiert). */
+  bio: text('bio').notNull().default(''),
+  /** Lieblingssystem als Freitext, z.B. "How to be a Hero". */
+  favoriteSystem: text('favorite_system').notNull().default(''),
+  /** Wenn true, zeigt das oeffentliche Profil die eigenen Charaktere. */
+  showCharacters: boolean('show_characters').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

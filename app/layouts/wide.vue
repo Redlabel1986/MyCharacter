@@ -84,7 +84,7 @@ const returnToAdminView = async () => {
             </NuxtLink>
             <span class="text-ink-300">|</span>
             <span class="text-ink-400">
-              {{ user?.username }}
+              {{ user?.displayName ?? user?.username }}
               <span class="text-[10px] uppercase tracking-widest text-[var(--color-accent)] ml-1">
                 {{ roleBadge }}
               </span>

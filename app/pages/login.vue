@@ -7,6 +7,10 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const { fetch: refreshSession } = useUserSession()
 
+// Nach einer Account-Löschung landet der User hier mit ?deleted=1.
+const route = useRoute()
+const accountDeleted = computed(() => route.query.deleted === '1')
+
 const submit = async () => {
   loading.value = true
   error.value = null
@@ -30,6 +34,13 @@ const submit = async () => {
     <div class="parchment-card p-8">
       <h1 class="font-serif text-3xl text-center">Anmelden</h1>
       <div class="accent-rule my-4" />
+      <UAlert
+        v-if="accountDeleted"
+        color="success"
+        title="Dein Account wurde gelöscht."
+        description="Danke, dass du dabei warst. Mach's gut, Held!"
+        class="mb-4"
+      />
       <form class="space-y-4" @submit.prevent="submit">
         <UFormField label="E-Mail oder Benutzername" name="identifier">
           <UInput

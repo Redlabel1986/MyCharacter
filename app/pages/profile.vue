@@ -262,6 +262,8 @@ const submitPasswordChange = async () => {
       </div>
     </div>
 
+    <ProfilePublicEditor />
+
     <div class="parchment-card p-6">
       <h2 class="font-serif text-2xl">Theme</h2>
       <p class="text-sm text-ink-400 mt-1">
@@ -351,5 +353,7 @@ const submitPasswordChange = async () => {
         </li>
       </ul>
     </div>
+
+    <ProfileDangerZone />
   </div>
 </template>

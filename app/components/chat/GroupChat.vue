@@ -194,7 +194,12 @@ const isFreshRoll = (iso: string) => Date.now() - new Date(iso).getTime() < 5000
         :class="m.user.id === user?.id ? 'items-end' : 'items-start'"
       >
         <div class="text-[10px] uppercase tracking-widest text-[var(--color-accent)] font-semibold mb-0.5 px-1 flex items-center gap-1">
-          <span>{{ m.user.username }} <span class="text-ink-300">· {{ roleBadge(m.user.role) }}</span></span>
+          <span>
+            <NuxtLink :to="`/users/${m.user.id}`" class="hover:underline" title="Profil ansehen">
+              {{ m.user.username }}
+            </NuxtLink>
+            <span class="text-ink-300">· {{ roleBadge(m.user.role) }}</span>
+          </span>
           <span
             v-if="isWhisper(m)"
             class="text-[9px] normal-case px-1 py-0.5 rounded font-semibold"

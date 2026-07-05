@@ -5,6 +5,8 @@ declare module '#auth-utils' {
     id: number
     email: string
     username: string
+    /** Oeffentlicher Anzeigename; null = Benutzername gilt. */
+    displayName: string | null
     /**
      * Effektive Rolle für UI/Middleware/Permission-Checks. Stimmt bei
      * normalen Usern mit `actualRole` überein. Bei Admins kann der Admin

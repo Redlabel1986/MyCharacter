@@ -337,7 +337,12 @@ const deleteEntry = async (e: Entry) => {
                 </span>
               </div>
               <p class="text-[11px] text-ink-300 mt-0.5">
-                {{ e.author.username }} · {{ fmtDate(e.createdAt) }}
+                <NuxtLink
+                  :to="`/users/${e.author.id}`"
+                  class="hover:underline"
+                  title="Profil ansehen"
+                >{{ e.author.username }}</NuxtLink>
+                · {{ fmtDate(e.createdAt) }}
                 <span v-if="e.updatedAt !== e.createdAt"> · bearbeitet</span>
               </p>
             </div>

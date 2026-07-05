@@ -11,6 +11,14 @@ let _initPromise: Promise<void> | null = null
 // Setup). Wird beim Schema-Init zur Admin-Rolle hochgestuft.
 export const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'jasongehrts@gmail.com'
 
+/**
+ * SQL-Fragment fuer den effektiven Anzeigenamen eines Users:
+ * COALESCE(display_name, username). Anzeige-Endpoints liefern das Ergebnis im
+ * Feld `username`, damit bestehende Frontend-Komponenten automatisch den
+ * Anzeigenamen zeigen (der echte Benutzername bleibt Login-Kennung).
+ */
+export const userDisplayName = sql<string>`COALESCE(${schema.users.displayName}, ${schema.users.username})`
+
 export function useDb() {
   if (_db) return _db
 
@@ -691,6 +699,24 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_group_journal_group_created
       ON group_journal_entries(group_id, created_at)
+  `)
+
+  // Oeffentliches Selbstprofil: Anzeigename, Avatar, Bio, Spiel-Infos,
+  // Charakter-Sichtbarkeit (idempotent).
+  await db.execute(sql`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT
+  `)
+  await db.execute(sql`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT
+  `)
+  await db.execute(sql`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT NOT NULL DEFAULT ''
+  `)
+  await db.execute(sql`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS favorite_system TEXT NOT NULL DEFAULT ''
+  `)
+  await db.execute(sql`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS show_characters BOOLEAN NOT NULL DEFAULT TRUE
   `)
 
   await db.execute(sql`

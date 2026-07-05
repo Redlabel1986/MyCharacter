@@ -270,7 +270,13 @@ onBeforeUnmount(() => {
           />
           <div class="flex-1">
             <div class="flex items-center gap-2">
-              <span class="font-semibold">{{ m.username }}</span>
+              <NuxtLink
+                :to="`/users/${m.userId}`"
+                class="font-semibold hover:underline"
+                title="Profil ansehen"
+              >
+                {{ m.username }}
+              </NuxtLink>
               <span
                 v-if="isPlaying(m.userId)"
                 class="inline-flex items-center gap-1 rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-600"

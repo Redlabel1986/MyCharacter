@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import { useDb } from '~~/server/utils/db'
+import { useDb, userDisplayName } from '~~/server/utils/db'
 import { characters, characterAccess, users } from '~~/server/database/schema'
 
 export default defineEventHandler(async (event) => {
@@ -18,7 +18,7 @@ export default defineEventHandler(async (event) => {
       },
       dm: {
         id: users.id,
-        username: users.username,
+        username: userDisplayName,
         email: users.email,
         role: users.role,
       },

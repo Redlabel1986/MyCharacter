@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm'
-import { useDb } from '~~/server/utils/db'
+import { useDb, userDisplayName } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
 import { characters, groupSharedCharacters, users } from '~~/server/database/schema'
 import type { HtbahCharacterData, HtbahSkill, HtbahTalent } from '~~/shared/engines/htbah'
@@ -38,7 +38,7 @@ export default defineEventHandler(async (event) => {
       shareUserId: groupSharedCharacters.userId,
       visibleSkillIds: groupSharedCharacters.visibleSkillIds,
       showStory: groupSharedCharacters.showStory,
-      username: users.username,
+      username: userDisplayName,
       character: {
         id: characters.id,
         name: characters.name,

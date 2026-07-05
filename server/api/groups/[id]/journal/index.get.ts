@@ -10,7 +10,7 @@
  *   - isOwner: der DM darf moderierend jeden Eintrag bearbeiten/loeschen
  */
 import { asc, eq } from 'drizzle-orm'
-import { useDb } from '~~/server/utils/db'
+import { useDb, userDisplayName } from '~~/server/utils/db'
 import { requireGroupMember } from '~~/server/utils/group-access'
 import { groupJournalEntries, users } from '~~/server/database/schema'
 
@@ -33,7 +33,7 @@ export default defineEventHandler(async (event) => {
       content: groupJournalEntries.content,
       createdAt: groupJournalEntries.createdAt,
       updatedAt: groupJournalEntries.updatedAt,
-      author: { id: users.id, username: users.username },
+      author: { id: users.id, username: userDisplayName },
     })
     .from(groupJournalEntries)
     .innerJoin(users, eq(users.id, groupJournalEntries.userId))
