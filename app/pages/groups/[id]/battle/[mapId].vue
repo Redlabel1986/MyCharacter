@@ -11,6 +11,8 @@ import GroupChat from '~/components/chat/GroupChat.vue'
 import MiniCharSheet from '~/components/battle/MiniCharSheet.vue'
 import ShopModal from '~/components/battle/ShopModal.vue'
 import NpcAbilitiesEditor from '~/components/battle/NpcAbilitiesEditor.vue'
+// Traegt `three` als eigenen Chunk — deshalb lazy: wer in 2D bleibt, laedt ihn nie.
+const BattleStage3D = defineAsyncComponent(() => import('~/components/battle/BattleStage3D.vue'))
 import {
   TOKEN_CONDITIONS,
   CONDITION_BY_ID,
@@ -427,6 +429,37 @@ const onImgLoad = (e: Event) => {
   imgH.value = t.naturalHeight
 }
 
+// --- 3D-Buehne ---
+// Die Wahl gilt pro Nutzer (localStorage), nicht pro Karte: der DM zwingt
+// niemandem 3D auf, und jeder am Tisch entscheidet nach seiner Hardware. Ohne
+// WebGL2 faellt die Ansicht selbsttaetig auf 2D zurueck und sagt warum.
+const stage3d = ref(false)
+const stage3dReason = ref('')
+const STAGE3D_KEY = 'battlemap.stage3d'
+onMounted(() => {
+  try {
+    stage3d.value = localStorage.getItem(STAGE3D_KEY) === '1'
+  } catch {
+    stage3d.value = false
+  }
+})
+watch(stage3d, (v) => {
+  try {
+    localStorage.setItem(STAGE3D_KEY, v ? '1' : '0')
+  } catch {
+    // Privater Modus o.ae. — die Wahl gilt dann nur fuer diese Sitzung.
+  }
+  if (v) {
+    stage3dReason.value = ''
+    // Die Malwerkzeuge gibt es in 3D nicht. Wer mit aktivem Pinsel
+    // umschaltet, saesse sonst in einem Werkzeug fest, das nichts tut.
+    toolMode.value = 'select'
+  }
+})
+const onStage3dFallback = (reason: string) => {
+  stage3d.value = false
+  stage3dReason.value = reason
+}
 // --- Zoom ---
 const ZOOM_MIN = 0.25
 const ZOOM_MAX = 3
@@ -2513,6 +2546,50 @@ const endResizeSheet = () => {
 
       <!-- Werkzeug-Toolbar -->
       <div class="parchment-card p-2 flex items-center gap-2 flex-wrap">
+        <!-- 2D/3D-Umschalter. Die Wahl gilt pro Nutzer, nicht pro Karte:
+             jeder am Tisch entscheidet nach seiner Hardware. -->
+        <div class="flex items-center gap-1 pr-2 mr-1 border-r border-parchment-700/30">
+          <UButton
+            size="xs"
+            :variant="!stage3d ? 'solid' : 'outline'"
+            :color="!stage3d ? 'primary' : 'neutral'"
+            icon="i-lucide-map"
+            title="Flache Draufsicht — alle Werkzeuge verfügbar"
+            @click="stage3d = false"
+          >
+            2D
+          </UButton>
+          <UButton
+            size="xs"
+            :variant="stage3d ? 'solid' : 'outline'"
+            :color="stage3d ? 'primary' : 'neutral'"
+            icon="i-lucide-box"
+            title="Räumliche Ansicht — Karte als Spielbrett, Tokens als Figuren"
+            @click="stage3d = true"
+          >
+            3D
+          </UButton>
+        </div>
+        <div
+          v-if="stage3dReason"
+          class="w-full flex items-center gap-2 text-xs text-amber-800 bg-amber-100/70 border border-amber-400/50 rounded px-2 py-1"
+        >
+          <UIcon name="i-lucide-triangle-alert" class="size-3.5 shrink-0" />
+          <span>3D nicht möglich — zurück in 2D. {{ stage3dReason }}</span>
+          <UButton
+            size="xs"
+            variant="ghost"
+            icon="i-lucide-x"
+            title="Hinweis ausblenden"
+            @click="stage3dReason = ''"
+          />
+        </div>
+        <div
+          v-else-if="stage3d"
+          class="w-full text-xs text-parchment-800/70"
+        >
+          Zeichnen, Nebel-Pinsel, Mauern und der Objekt-Editor arbeiten in der 2D-Ansicht.
+        </div>
         <div class="flex items-center gap-1">
           <UButton
             size="xs"
@@ -2530,6 +2607,7 @@ const endResizeSheet = () => {
             :color="toolMode === 'draw' ? 'primary' : 'neutral'"
             icon="i-lucide-pencil"
             title="Zeichnen"
+            :disabled="stage3d"
             @click="toolMode = 'draw'"
           >
             Zeichnen
@@ -2540,6 +2618,7 @@ const endResizeSheet = () => {
             :color="toolMode === 'erase' ? 'primary' : 'neutral'"
             icon="i-lucide-eraser"
             title="Strich anklicken zum Löschen"
+            :disabled="stage3d"
             @click="toolMode = 'erase'"
           >
             Radieren
@@ -2551,6 +2630,7 @@ const endResizeSheet = () => {
             :color="toolMode === 'aoe' ? 'primary' : 'neutral'"
             icon="i-lucide-radius"
             title="Zauber-Wirkungsbereich (AoE): Feldgröße wählen, auf die Karte klicken — alle Token im Bereich bekommen Schaden/Heilung."
+            :disabled="stage3d"
             @click="toolMode = toolMode === 'aoe' ? 'select' : 'aoe'"
           >
             AoE
@@ -2563,6 +2643,7 @@ const endResizeSheet = () => {
               icon="i-lucide-map-pin"
               title="Spawn-Punkt setzen: klicke auf die Karte. Neue Charakter-Tokens erscheinen dort."
               :loading="spawnSaving"
+              :disabled="stage3d"
               @click="toolMode = toolMode === 'spawn-set' ? 'select' : 'spawn-set'"
             >
               Spawn
@@ -2586,6 +2667,7 @@ const endResizeSheet = () => {
               :color="toolMode === 'fog-reveal' ? 'primary' : 'neutral'"
               icon="i-lucide-eye"
               title="Mit Pinsel aufdecken"
+              :disabled="stage3d"
               @click="toolMode = 'fog-reveal'"
             >
               Aufdecken
@@ -2596,6 +2678,7 @@ const endResizeSheet = () => {
               :color="toolMode === 'fog-conceal' ? 'primary' : 'neutral'"
               icon="i-lucide-eye-off"
               title="Mit Pinsel zudecken"
+              :disabled="stage3d"
               @click="toolMode = 'fog-conceal'"
             >
               Zudecken
@@ -2624,6 +2707,7 @@ const endResizeSheet = () => {
               :color="toolMode === 'fog-blackout' ? 'primary' : 'neutral'"
               icon="i-lucide-square"
               title="100% pitch-black malen (Spieler sehen hier absolut nichts)"
+              :disabled="stage3d"
               @click="toolMode = 'fog-blackout'"
             >
               Schwarz
@@ -2634,6 +2718,7 @@ const endResizeSheet = () => {
               :color="toolMode === 'fog-unblackout' ? 'primary' : 'neutral'"
               icon="i-lucide-square-dashed"
               title="Pitch-Black wegradieren"
+              :disabled="stage3d"
               @click="toolMode = 'fog-unblackout'"
             >
               Schwarz weg
@@ -2655,6 +2740,7 @@ const endResizeSheet = () => {
               :color="toolMode === 'wall-draw' ? 'primary' : 'neutral'"
               icon="i-lucide-brick-wall"
               title="Sichtblocker-Mauer ziehen (Spieler koennen nicht durchsehen)"
+              :disabled="stage3d"
               @click="toolMode = 'wall-draw'"
             >
               Mauer
@@ -2665,6 +2751,7 @@ const endResizeSheet = () => {
               :color="toolMode === 'wall-erase' ? 'primary' : 'neutral'"
               icon="i-lucide-square-x"
               title="Mauer anklicken zum Loeschen"
+              :disabled="stage3d"
               @click="toolMode = 'wall-erase'"
             >
               Mauer weg
@@ -2688,6 +2775,7 @@ const endResizeSheet = () => {
               :color="toolMode === 'start-area' ? 'primary' : 'neutral'"
               icon="i-lucide-flag"
               title="Startbereich malen — neue Tokens spawnen hier statt in der Mitte"
+              :disabled="stage3d"
               @click="toolMode = 'start-area'"
             >
               Startbereich
@@ -2699,6 +2787,7 @@ const endResizeSheet = () => {
               :color="toolMode === 'start-area-erase' ? 'primary' : 'neutral'"
               icon="i-lucide-eraser"
               title="Startbereich-Zellen wegradieren"
+              :disabled="stage3d"
               @click="toolMode = 'start-area-erase'"
             >
               Start weg
@@ -2843,7 +2932,23 @@ const endResizeSheet = () => {
             />
           </button>
         </div>
+        <!-- Raeumliche Buehne. Ersetzt nur den Buehnen-Container; Modals,
+             Kontextmenue, Initiative und Realtime bleiben unberuehrt. -->
+        <ClientOnly>
+          <BattleStage3D
+            v-if="stage3d && imgW && imgH"
+            :map="map"
+            :img-w="imgW"
+            :img-h="imgH"
+            :group-id="groupId"
+            :map-id="mapId"
+            :grid-svg-url="gridShouldRender ? gridSvgUrl : ''"
+            :drag-threshold-px="DRAG_THRESHOLD_PX"
+            @fallback="onStage3dFallback"
+          />
+        </ClientOnly>
         <div
+          v-if="!stage3d"
           ref="stageWrapperEl"
           class="overflow-auto bg-black/5 rounded flex compact-stage"
           style="max-height: 78vh; place-content: safe center; place-items: safe center;"
