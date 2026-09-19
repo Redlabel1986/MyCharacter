@@ -11,7 +11,14 @@
  * ausschliesslich als Prop herein — so kann die 3D-Ansicht nie mehr verraten
  * als die 2D-Ansicht.
  */
-import { createScene, detectWebgl2, type Scene3DHandle } from '~/composables/useBattle3DScene'
+import {
+  createScene,
+  detectWebgl2,
+  type Scene3DHandle,
+  type Figure3DInput,
+  type DragVisualState,
+} from '~/composables/useBattle3DScene'
+import { figureDims } from '~~/shared/battle-3d'
 import type { BattleMap } from '~~/shared/battle-types'
 
 const props = defineProps<{
@@ -24,12 +31,28 @@ const props = defineProps<{
   gridSvgUrl: string
   /** Ab wie vielen Pixeln ein gedrueckter Zeiger als Zug gilt. */
   dragThresholdPx: number
+  /**
+   * Die darzustellenden Figuren — fertig gefiltert. Die Seite entscheidet,
+   * welche Tokens ein Spieler sehen darf; diese Komponente prueft das NICHT
+   * nach und kann es deshalb auch nicht falsch machen.
+   */
+  figures: Figure3DInput[]
+  /** Zustand des laufenden Zugs (Hebe-Effekt, Snap-Ring, Reichweitenfeld). */
+  dragState: DragVisualState
 }>()
 
 const emit = defineEmits<{
   ready: []
   fallback: [reason: string]
   'ground-click': [payload: { mapX: number; mapY: number }]
+  'token-grab': [payload: { id: number; mapX: number; mapY: number }]
+  'token-move': [payload: { mapX: number; mapY: number }]
+  'token-drop': [payload: { shiftKey: boolean }]
+  'token-click': [id: number]
+  'token-dblclick': [id: number]
+  'token-context': [
+    payload: { id: number; clientX: number; clientY: number; ctrlKey: boolean; metaKey: boolean },
+  ]
 }>()
 
 const wrapEl = ref<HTMLDivElement | null>(null)
@@ -78,7 +101,16 @@ const loadImage = (src: string): Promise<HTMLImageElement | null> =>
   })
 
 // --- Zeigersteuerung -----------------------------------------------------
-type PointerMode = 'none' | 'orbit' | 'pan'
+/**
+ * Vier Modi. Welcher gilt, entscheidet sich beim Druecken danach, ob eine
+ * Figur getroffen wurde und welche Taste gedrueckt ist:
+ *
+ *   links auf Figur  -> 'token'  (ziehen)
+ *   links auf Boden  -> 'orbit'  (drehen)
+ *   rechts auf Figur -> 'menu'   (Kontextmenue, sofern kaum bewegt)
+ *   rechts auf Boden -> 'pan'    (verschieben)
+ */
+type PointerMode = 'none' | 'orbit' | 'pan' | 'token' | 'menu'
 let mode: PointerMode = 'none'
 let lastX = 0
 let lastY = 0
@@ -86,6 +118,7 @@ let downX = 0
 let downY = 0
 let movedFar = false
 let activePointer: number | null = null
+let grabbedId: number | null = null
 
 const onPointerDown = (e: PointerEvent) => {
   if (!scene || activePointer !== null) return
@@ -93,7 +126,19 @@ const onPointerDown = (e: PointerEvent) => {
   lastX = downX = e.clientX
   lastY = downY = e.clientY
   movedFar = false
-  mode = e.button === 2 ? 'pan' : 'orbit'
+  grabbedId = scene.pickToken(e.clientX, e.clientY)
+
+  if (e.button === 2) {
+    mode = grabbedId !== null ? 'menu' : 'pan'
+  } else if (grabbedId !== null) {
+    mode = 'token'
+    const p = scene.pickGround(e.clientX, e.clientY)
+    // Die Seite prueft, ob dieser Nutzer die Figur bewegen darf. Wenn nicht,
+    // laeuft der Zug ins Leere und der Klick bleibt ein Klick.
+    if (p) emit('token-grab', { id: grabbedId, mapX: p.x, mapY: p.y })
+  } else {
+    mode = 'orbit'
+  }
   ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
 }
 
@@ -107,16 +152,45 @@ const onPointerMove = (e: PointerEvent) => {
     movedFar = true
   }
   if (!movedFar) return
-  if (mode === 'orbit') scene.camera.orbit(dx, dy)
-  else scene.camera.pan(dx, dy)
+
+  if (mode === 'token') {
+    const p = scene.pickGround(e.clientX, e.clientY)
+    if (p) emit('token-move', { mapX: p.x, mapY: p.y })
+  } else if (mode === 'orbit') {
+    scene.camera.orbit(dx, dy)
+  } else if (mode === 'pan' || mode === 'menu') {
+    // Ein Rechts-Zug, der auf einer Figur begann, verschiebt trotzdem die
+    // Karte — sonst klebte der Blick fest, sobald man ungluecklich ansetzt.
+    scene.camera.pan(dx, dy)
+  }
 }
 
 const onPointerUp = (e: PointerEvent) => {
   if (e.pointerId !== activePointer) return
   const wasMode = mode
+  const id = grabbedId
   activePointer = null
+  grabbedId = null
   mode = 'none'
   if (!scene) return
+
+  if (wasMode === 'token') {
+    emit('token-drop', { shiftKey: e.shiftKey })
+    if (!movedFar && id !== null) emit('token-click', id)
+    return
+  }
+  if (wasMode === 'menu' && !movedFar && id !== null) {
+    // Ctrl/Cmd mitgeben: die Seite unterscheidet damit zwischen
+    // Ziel-Markierung und Reaktions-Menue, genau wie in 2D.
+    emit('token-context', {
+      id,
+      clientX: e.clientX,
+      clientY: e.clientY,
+      ctrlKey: e.ctrlKey,
+      metaKey: e.metaKey,
+    })
+    return
+  }
   // Linksklick ohne nennenswerte Bewegung auf dem Boden: als Klick melden.
   // Ping und AoE haengen daran; die Seite entscheidet, was gemeint ist.
   if (wasMode === 'orbit' && !movedFar && e.button === 0) {
@@ -125,13 +199,53 @@ const onPointerUp = (e: PointerEvent) => {
   }
 }
 
-// Rechtsklick-Menue des Browsers unterdruecken: rechts ist unsere Pan-Geste.
+const onDblClick = (e: MouseEvent) => {
+  const id = scene?.pickToken(e.clientX, e.clientY)
+  if (id !== null && id !== undefined) emit('token-dblclick', id)
+}
+
+// Rechtsklick-Menue des Browsers unterdruecken: rechts ist unsere Pan- bzw.
+// Kontextmenue-Geste.
 const onContextMenu = (e: MouseEvent) => e.preventDefault()
 
 const onWheel = (e: WheelEvent) => {
   if (!scene) return
   e.preventDefault()
   scene.camera.zoom(e.deltaY)
+}
+
+// --- DOM-Overlay ueber den Koepfen ---------------------------------------
+/**
+ * Namen und HP-Zahlen liegen als DOM ueber dem Canvas, nicht als Sprites in
+ * der Szene: die Schrift bleibt so gestochen scharf und die bestehenden
+ * CSS-Klassen der 2D-Buehne lassen sich wiederverwenden.
+ *
+ * Die Positionen werden pro Frame DIREKT in `style.transform` geschrieben —
+ * nicht ueber Vue-Reaktivitaet. Ein reaktives Update pro Figur und Frame
+ * waere bei 20 Figuren 1200 Komponenten-Updates je Sekunde.
+ */
+const labelEls = new Map<number, HTMLElement>()
+const setLabelRef = (id: number) => (el: Element | ComponentPublicInstance | null) => {
+  if (el instanceof HTMLElement) labelEls.set(id, el)
+  else labelEls.delete(id)
+}
+
+const positionLabels = () => {
+  if (!scene) return
+  for (const f of props.figures) {
+    const el = labelEls.get(f.id)
+    if (!el) continue
+    const d = figureDims(f.sizeMultiplier)
+    // Ankerpunkt: knapp ueber der Tafeloberkante.
+    const h = f.dead ? d.baseHeight + 0.25 : d.baseHeight + d.tabHeight + d.panelHeight + 0.18
+    const p = scene.projectToScreen(f.x, f.y, h)
+    if (!p.visible) {
+      el.style.display = 'none'
+      continue
+    }
+    el.style.display = ''
+    el.style.transform = `translate3d(${p.x}px, ${p.y}px, 0) translate(-50%, -100%)`
+  }
 }
 
 // --- Kamera-Bedienelemente (damit die Ansicht ohne Zeigegeraet geht) ------
@@ -169,6 +283,7 @@ onMounted(async () => {
       imgH: props.imgH,
       gridSize: props.map.gridSize,
       textureUrl: `/api/groups/${props.groupId}/maps/${props.mapId}/image`,
+      onFrame: positionLabels,
     })
   } catch (e) {
     loading.value = false
@@ -178,6 +293,8 @@ onMounted(async () => {
   }
   applyResize()
   await redrawOverlay()
+  scene.setTokens(props.figures)
+  scene.setDragState(props.dragState)
   resizeObs = new ResizeObserver(applyResize)
   if (wrapEl.value) resizeObs.observe(wrapEl.value)
   loading.value = false
@@ -192,6 +309,8 @@ onBeforeUnmount(() => {
 })
 
 watch(() => props.gridSvgUrl, () => { void redrawOverlay() })
+watch(() => props.figures, (list) => scene?.setTokens(list), { deep: true })
+watch(() => props.dragState, (s) => scene?.setDragState(s), { deep: true })
 watch(
   () => [props.imgW, props.imgH],
   () => {
@@ -211,9 +330,35 @@ watch(
         @pointermove="onPointerMove"
         @pointerup="onPointerUp"
         @pointercancel="onPointerUp"
+        @dblclick="onDblClick"
         @contextmenu="onContextMenu"
         @wheel="onWheel"
       />
+
+      <!-- Namen und HP ueber den Koepfen. Deckungsgleich ueber dem Canvas;
+           die Positionen setzt positionLabels() pro Frame direkt. -->
+      <div class="absolute inset-0 pointer-events-none overflow-hidden">
+        <div
+          v-for="f in figures"
+          :key="f.id"
+          :ref="setLabelRef(f.id)"
+          class="absolute top-0 left-0 flex flex-col items-center gap-0.5 will-change-transform"
+          style="display: none"
+        >
+          <div
+            v-if="f.showName"
+            class="px-1.5 py-0.5 rounded text-[10px] leading-tight font-semibold text-white bg-black/65 whitespace-nowrap max-w-[10rem] truncate"
+          >
+            {{ f.name }}
+          </div>
+          <div
+            v-if="f.showHp && f.hpMax"
+            class="px-1 rounded text-[10px] leading-tight text-white bg-black/70 whitespace-nowrap tabular-nums"
+          >
+            {{ f.hp ?? 0 }}/{{ f.hpMax }}
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Kamera-Bedienelemente: die Ansicht muss auch ohne Maus-Gesten

@@ -13,6 +13,7 @@ import ShopModal from '~/components/battle/ShopModal.vue'
 import NpcAbilitiesEditor from '~/components/battle/NpcAbilitiesEditor.vue'
 // Traegt `three` als eigenen Chunk — deshalb lazy: wer in 2D bleibt, laedt ihn nie.
 const BattleStage3D = defineAsyncComponent(() => import('~/components/battle/BattleStage3D.vue'))
+import type { Figure3DInput, DragVisualState } from '~/composables/useBattle3DScene'
 import {
   TOKEN_CONDITIONS,
   CONDITION_BY_ID,
@@ -1922,6 +1923,101 @@ const cycleTimeOfDay = async () => {
   }
 }
 
+// ================================================================
+// Daten fuer die 3D-Buehne
+// ================================================================
+// Die Szene bekommt ein flaches, fertig gefiltertes Paket. Die
+// Sichtbarkeitsregel bleibt HIER — die 3D-Komponente prueft nicht nach und
+// kann es deshalb auch nicht falsch machen: was ein Spieler in 2D nicht sieht,
+// existiert in der 3D-Szene gar nicht erst.
+
+/** Akzentfarbe des aktiven Themes, fuer Sockel und Ringe. */
+const stageAccent = ref('#9b1c1c')
+onMounted(() => {
+  const v = getComputedStyle(document.documentElement).getPropertyValue('--color-accent').trim()
+  if (v) stageAccent.value = v
+})
+
+const NPC_BASE_COLOR = '#4b5563'
+const HIDDEN_BASE_COLOR = '#d97706'
+
+const figures3d = computed<Figure3DInput[]>(() => {
+  const m = map.value
+  if (!m) return []
+  const turnId = currentTurnTokenId.value
+  const targetId = combatTargetId.value
+  const out: Figure3DInput[] = []
+  for (const t of tokens.value) {
+    if (!isTokenVisibleToViewer(t)) continue
+    const hasHp = t.hp !== null && !!t.hpMax && t.hpMax > 0
+    const ratio = hasHp ? Math.max(0, Math.min(1, (t.hp ?? 0) / (t.hpMax as number))) : null
+    out.push({
+      id: t.id,
+      x: t.x,
+      y: t.y,
+      sizeMultiplier: t.sizeMultiplier,
+      imageUrl: tokenImageSrc(t),
+      name: t.name,
+      baseColor: t.hidden
+        ? HIDDEN_BASE_COLOR
+        : t.characterId !== null
+          ? stageAccent.value
+          : NPC_BASE_COLOR,
+      hpRatio: ratio,
+      dead: hasHp && (t.hp ?? 0) <= 0,
+      hidden: t.hidden,
+      // Rotstich ab einem Viertel Schaden, wie der Wund-Schleier in 2D.
+      wounded: ratio === null ? 0 : Math.max(0, (1 - ratio - 0.25) / 0.75),
+      isTurn: t.id === turnId,
+      isTarget: t.id === targetId,
+      hp: t.hp,
+      hpMax: t.hpMax,
+      showName: m.showTokenNames !== false && !!t.name,
+      showHp: hasHp,
+    })
+  }
+  return out
+})
+
+const dragState3d = computed<DragVisualState>(() => ({
+  tokenId: draggingTokenId.value,
+  snap: drag.snapPreview.value,
+  rangeBox: moveRangeOverlay.value,
+  accent: stageAccent.value,
+}))
+
+const on3dGrab = (e: { id: number; mapX: number; mapY: number }) => {
+  const t = tokens.value.find((x) => x.id === e.id)
+  if (t && canMoveToken(t)) drag.begin(t, e.mapX, e.mapY)
+}
+const on3dMove = (e: { mapX: number; mapY: number }) => drag.moveTo(e.mapX, e.mapY)
+const on3dDrop = async (e: { shiftKey: boolean }) => {
+  await drag.end({ shiftKey: e.shiftKey })
+}
+const on3dTokenClick = (id: number) => {
+  infoTokenId.value = id
+}
+const on3dTokenDblClick = (id: number) => {
+  const t = tokens.value.find((x) => x.id === id)
+  if (t) startEdit(t)
+}
+const on3dTokenContext = (e: {
+  id: number
+  clientX: number
+  clientY: number
+  ctrlKey: boolean
+  metaKey: boolean
+}) => {
+  const t = tokens.value.find((x) => x.id === e.id)
+  if (!t) return
+  // onTokenContext liest nur clientX/Y und die Modifier — ein schlankes
+  // Ereignis-aehnliches Objekt genuegt.
+  onTokenContext(
+    { clientX: e.clientX, clientY: e.clientY, ctrlKey: e.ctrlKey, metaKey: e.metaKey } as MouseEvent,
+    t,
+  )
+}
+
 // --- Zeichnen ---
 const DRAW_COLORS = [
   '#ef4444', // rot
@@ -2944,7 +3040,15 @@ const endResizeSheet = () => {
             :map-id="mapId"
             :grid-svg-url="gridShouldRender ? gridSvgUrl : ''"
             :drag-threshold-px="DRAG_THRESHOLD_PX"
+            :figures="figures3d"
+            :drag-state="dragState3d"
             @fallback="onStage3dFallback"
+            @token-grab="on3dGrab"
+            @token-move="on3dMove"
+            @token-drop="on3dDrop"
+            @token-click="on3dTokenClick"
+            @token-dblclick="on3dTokenDblClick"
+            @token-context="on3dTokenContext"
           />
         </ClientOnly>
         <div
