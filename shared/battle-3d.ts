@@ -261,16 +261,145 @@ export function smoothFogGrid(g: FogGrid, radius: number): FogGrid {
 /**
  * Nebelgitter als RGBA-Puffer fuer eine DataTexture.
  * 0 (offen) wird schwarz, 1 (vernebelt) weiss; Alpha immer voll.
+ *
+ * `flipY` kehrt die Zeilenreihenfolge um. Das ist kein Schnoerkel: eine
+ * DataTexture ignoriert die `flipY`-Eigenschaft, waehrend die Kartentextur
+ * (ein Bild) sie anwendet. Ohne die Umkehr laege die Nebelmaske spiegelbildlich
+ * zur Karte — der Nebel saesse dort, wo die Spieler gerade stehen.
  */
-export function fogGridToRGBA(g: FogGrid): Uint8ClampedArray {
+export function fogGridToRGBA(g: FogGrid, flipY = false): Uint8ClampedArray {
   const out = new Uint8ClampedArray(g.cols * g.rows * 4)
-  for (let i = 0; i < g.data.length; i++) {
-    const v = Math.round(clamp01(g.data[i]!) * 255)
-    const o = i * 4
-    out[o] = v
-    out[o + 1] = v
-    out[o + 2] = v
-    out[o + 3] = 255
+  for (let row = 0; row < g.rows; row++) {
+    const srcRow = flipY ? g.rows - 1 - row : row
+    for (let col = 0; col < g.cols; col++) {
+      const v = Math.round(clamp01(g.data[srcRow * g.cols + col]!) * 255)
+      const o = (row * g.cols + col) * 4
+      out[o] = v
+      out[o + 1] = v
+      out[o + 2] = v
+      out[o + 3] = 255
+    }
   }
   return out
+}
+
+/**
+ * Nebelmaske mit ZWEI Bedeutungen in einer Textur.
+ *
+ * Das ist kein Trick zum Speichersparen, sondern eine Sicherheitsmassnahme.
+ * Die geboeschte Fassung macht Zellen AUSSERHALB des Sichtradius teilweise
+ * durchsichtig — als Hoehenprofil ist das genau richtig, als Deckkraft waere
+ * es ein Informationsleck: der Spieler saehe Gelaende, das ihm in der
+ * 2D-Ansicht verborgen bleibt.
+ *
+ * Deshalb:
+ *   R = geboescht  -> steuert nur die HOEHE der Nebelbank (Geometrie)
+ *   G = hart       -> steuert Deckkraft und Bodenabdunklung
+ *
+ * Beide Gitter muessen dieselben Masse haben.
+ */
+export function fogMaskRGBA(
+  sloped: FogGrid,
+  hard: FogGrid,
+  flipY = false,
+): Uint8ClampedArray {
+  if (sloped.cols !== hard.cols || sloped.rows !== hard.rows) {
+    throw new Error('fogMaskRGBA: Gitter haben unterschiedliche Masse')
+  }
+  const { cols, rows } = sloped
+  const out = new Uint8ClampedArray(cols * rows * 4)
+  for (let row = 0; row < rows; row++) {
+    const srcRow = flipY ? rows - 1 - row : row
+    for (let col = 0; col < cols; col++) {
+      const src = srcRow * cols + col
+      const o = (row * cols + col) * 4
+      out[o] = Math.round(clamp01(sloped.data[src]!) * 255)
+      out[o + 1] = Math.round(clamp01(hard.data[src]!) * 255)
+      out[o + 2] = 0
+      out[o + 3] = 255
+    }
+  }
+  return out
+}
+
+// --- Beleuchtung nach Tageszeit --------------------------------------------
+
+/**
+ * Lichtstimmung je Tageszeit fuer die 3D-Buehne.
+ *
+ * Eigene Tabelle statt der CSS-Gradienten aus `time-of-day.ts`: ein
+ * Linear-Gradient laesst sich nicht in eine Lichtquelle uebersetzen. Die vier
+ * Phasen sind dieselben, nur als Winkel, Farbe und Staerke ausgedrueckt.
+ *
+ * `azimuth`/`elevation` in Radiant; `groundDark` ist der Faktor, auf den
+ * unbeleuchteter Boden multipliziert wird (0 = schwarz, 1 = unveraendert).
+ */
+export interface Light3D {
+  sunColor: number
+  sunIntensity: number
+  azimuth: number
+  elevation: number
+  skyColor: number
+  groundColor: number
+  hemiIntensity: number
+  groundDark: number
+  /** Farbe der Nebelbank an ihrer Basis bzw. an ihrer Spitze. */
+  fogNear: number
+  fogFar: number
+}
+
+export const LIGHT_3D: Record<string, Light3D> = {
+  morning: {
+    sunColor: 0xffc38a,
+    sunIntensity: 1.15,
+    azimuth: -1.1,
+    elevation: 0.42,
+    skyColor: 0xffe3c4,
+    groundColor: 0x6b5842,
+    hemiIntensity: 0.62,
+    groundDark: 0.3,
+    fogNear: 0xe8dcc8,
+    fogFar: 0xfff0dc,
+  },
+  noon: {
+    sunColor: 0xfff6e2,
+    sunIntensity: 1.45,
+    azimuth: 0.35,
+    elevation: 1.15,
+    skyColor: 0xdfe7ff,
+    groundColor: 0x6a6252,
+    hemiIntensity: 0.8,
+    groundDark: 0.34,
+    fogNear: 0xdcdfe2,
+    fogFar: 0xf4f6f8,
+  },
+  evening: {
+    sunColor: 0xff9d6b,
+    sunIntensity: 1.0,
+    azimuth: 1.9,
+    elevation: 0.3,
+    skyColor: 0x8f7fb0,
+    groundColor: 0x4a3a3a,
+    hemiIntensity: 0.5,
+    groundDark: 0.24,
+    fogNear: 0xa88b84,
+    fogFar: 0xd9b49a,
+  },
+  night: {
+    sunColor: 0x8fa6d8,
+    sunIntensity: 0.32,
+    azimuth: 2.6,
+    elevation: 0.85,
+    skyColor: 0x2a3550,
+    groundColor: 0x10131f,
+    hemiIntensity: 0.28,
+    groundDark: 0.08,
+    fogNear: 0x1c2233,
+    fogFar: 0x39435e,
+  },
+}
+
+/** Lichtstimmung zur Tageszeit; faellt auf Mittag zurueck. */
+export function light3dFor(timeOfDay: string): Light3D {
+  return LIGHT_3D[timeOfDay] ?? LIGHT_3D.noon!
 }

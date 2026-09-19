@@ -21,8 +21,22 @@ import {
   type MapDims,
   type CameraState,
 } from '~~/shared/battle-3d'
+import { light3dFor } from '~~/shared/battle-3d'
+import { createFogLayer, type FogLayer, type FogInput } from '~/composables/useBattle3DFog'
 import type { Point } from '~~/shared/battle-geometry'
 import type { Wall } from '~~/shared/fog'
+
+export type { FogInput }
+
+/** Eine Sichtquelle: Token-Sicht oder leuchtendes Objekt. */
+export interface VisionLight {
+  id: string
+  /** Mittelpunkt in Kartenpixeln. */
+  x: number
+  y: number
+  /** Radius in Rasterzellen. */
+  radiusCells: number
+}
 
 /**
  * Alles, was die Szene ueber eine Spielfigur wissen muss.
@@ -132,6 +146,10 @@ export interface Scene3DHandle {
   setObjects(list: Object3DInput[]): void
   /** `visible` steuert nur die Sichtbarkeit — die Geometrie bleibt immer da. */
   setWalls(walls: Wall[], visible: boolean): void
+  setVision(input: FogInput): void
+  setVisionLights(lights: VisionLight[]): void
+  setTimeOfDay(timeOfDay: string): void
+  setReducedMotion(on: boolean): void
   setDragState(s: DragVisualState): void
   resize(w: number, h: number, dpr: number): void
   camera: Scene3DCamera
@@ -186,13 +204,19 @@ export async function createScene(
     const p = cameraPosition(camState)
     camera.position.set(p.x, p.y, p.z)
     camera.lookAt(camState.targetX, 0, camState.targetZ)
+    // Nur wenn mehr Sichtquellen da sind als Lichter erlaubt, muss die
+    // Auswahl der naechstgelegenen bei jedem Kameraschwenk neu getroffen
+    // werden — sonst waere es sinnlose Arbeit.
+    if (pendingVisionLights.length > MAX_VISION_LIGHTS) applyVisionLights()
     dirty = true
   }
 
-  // --- Licht (vorlaeufig; die Tageszeit uebernimmt es in Etappe 5) ---
+  // --- Licht ---
   const hemi = new THREE.HemisphereLight(0xdfe7ff, 0x40352a, 0.75)
   scene.add(hemi)
 
+  // Das EINZIGE schattenwerfende Licht. Punktlicht-Schatten sind teuer, und
+  // die Mauerschatten entstehen ohnehin aus der Sichtmaske.
   const sun = new THREE.DirectionalLight(0xfff2d8, 1.1)
   sun.position.set(cols * 0.35, Math.max(cols, rows) * 0.8, rows * 0.45)
   sun.castShadow = true
@@ -823,7 +847,89 @@ export async function createScene(
     dirty = true
   }
 
+  // --- Nebel, Dunkelheit und Tageszeit -----------------------------------
+  const fog: FogLayer = createFogLayer(THREE, scene, {
+    cols,
+    rows,
+    onNeedsRender: () => {
+      dirty = true
+    },
+  })
+
+  /** Laeuft eine Nebelschicht? Dann muss der Loop wegen der Drift weiter. */
+  let fogActive = false
+  const setVision = (input: FogInput) => {
+    fogActive = input.enabled || input.nightMask
+    fog.setInput(input)
+  }
+  const setReducedMotion = (on: boolean) => {
+    reducedMotion = on
+    fog.setReducedMotion(on)
+    dirty = true
+  }
+
+  const setTimeOfDay = (timeOfDay: string) => {
+    const l = light3dFor(timeOfDay)
+    sun.color.setHex(l.sunColor)
+    sun.intensity = l.sunIntensity
+    const dist = Math.max(cols, rows) * 0.8
+    const horiz = Math.cos(l.elevation) * dist
+    sun.position.set(Math.sin(l.azimuth) * horiz, Math.sin(l.elevation) * dist, Math.cos(l.azimuth) * horiz)
+    hemi.color.setHex(l.skyColor)
+    hemi.groundColor.setHex(l.groundColor)
+    hemi.intensity = l.hemiIntensity
+    dirty = true
+  }
+
+  /**
+   * Punktlichter der Sichtquellen. Obergrenze acht, sortiert nach Abstand zur
+   * Kamera: jedes zusaetzliche Licht kostet in jedem Fragment-Aufruf, und
+   * weiter entfernte Quellen tragen ohnehin schon ueber die Sichtmaske bei.
+   */
+  const MAX_VISION_LIGHTS = 8
+  const visionLightPool: import('three').PointLight[] = []
+  let pendingVisionLights: VisionLight[] = []
+
+  const applyVisionLights = () => {
+    const list = pendingVisionLights
+    const cam = camera.position
+    const sorted = list
+      .map((l) => {
+        const w = mapToWorld(l.x, l.y, dims)
+        return { l, w, d: (w.x - cam.x) ** 2 + (w.z - cam.z) ** 2 }
+      })
+      .sort((a, b) => a.d - b.d)
+      .slice(0, MAX_VISION_LIGHTS)
+
+    while (visionLightPool.length < sorted.length) {
+      const pl = new THREE.PointLight(0xffe9c4, 0, 1, 1.5)
+      pl.position.y = 0.7
+      scene.add(pl)
+      visionLightPool.push(pl)
+    }
+    for (let i = 0; i < visionLightPool.length; i++) {
+      const pl = visionLightPool[i]!
+      const s = sorted[i]
+      if (!s) {
+        pl.intensity = 0
+        pl.visible = false
+        continue
+      }
+      pl.visible = true
+      pl.position.set(s.w.x, 0.7, s.w.z)
+      pl.distance = Math.max(1, s.l.radiusCells + 0.5)
+      pl.intensity = 1.1
+    }
+  }
+
+  const setVisionLights = (lights: VisionLight[]) => {
+    pendingVisionLights = lights
+    applyVisionLights()
+    dirty = true
+  }
+
   // --- Renderloop: bei Bedarf, nicht in Dauerschleife ---
+  let reducedMotion = false
   let dirty = true
   let running = true
   let lastTime = 0
@@ -843,6 +949,9 @@ export async function createScene(
 
   /** Laeuft gerade etwas, das jeden Frame neu gezeichnet werden muss? */
   const hasAnimation = () => {
+    if (reducedMotion) return false
+    // Der Nebel driftet — solange er liegt, laeuft der Loop.
+    if (fogActive) return true
     if (draggingId !== null) return true
     for (const rec of figures.values()) {
       if (rec.input.isTurn || rec.input.isTarget) return true
@@ -860,6 +969,7 @@ export async function createScene(
     const dt = lastTime ? t - lastTime : 16
     lastTime = t
 
+    fog.update(t / 1000)
     updateBillboards()
     if (animated) {
       // „Am Zug"-Ring pulsiert; die Ziel-Markierung etwas langsamer.
@@ -982,6 +1092,7 @@ export async function createScene(
   const dispose = () => {
     running = false
     cancelAnimationFrame(rafId)
+    fog.dispose()
     // Ohne explizites Freigeben leckt jeder Moduswechsel eine komplette Szene.
     scene.traverse((obj) => {
       const mesh = obj as import('three').Mesh
@@ -1012,6 +1123,10 @@ export async function createScene(
     setTokens,
     setObjects,
     setWalls,
+    setVision,
+    setVisionLights,
+    setTimeOfDay,
+    setReducedMotion,
     setDragState,
     resize,
     camera: cameraApi,

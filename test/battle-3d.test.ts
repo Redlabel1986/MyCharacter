@@ -10,6 +10,8 @@ import {
   smoothFogGrid,
   fogGridToRGBA,
   buildFogGridFromCells,
+  fogMaskRGBA,
+  light3dFor,
   MIN_PITCH,
   MAX_PITCH,
   MIN_DIST,
@@ -153,6 +155,91 @@ describe('FogGrid', () => {
     expect(rgba[0]).toBe(0)
     expect(rgba[3]).toBe(255)
     expect(rgba[4]).toBe(255)
+  })
+
+  it('kehrt mit flipY die Zeilenreihenfolge um', () => {
+    // Zwei Zeilen: oben offen, unten vernebelt.
+    const g = createFogGrid(1, 2, 1)
+    setFogCell(g, 0, 0, 0)
+    const straight = fogGridToRGBA(g)
+    expect(straight[0]).toBe(0) // erste Zeile offen
+    expect(straight[4]).toBe(255) // zweite Zeile vernebelt
+
+    const flipped = fogGridToRGBA(g, true)
+    expect(flipped[0]).toBe(255) // jetzt zuerst die vernebelte Zeile
+    expect(flipped[4]).toBe(0)
+  })
+
+  it('laesst flipY die Spalten unangetastet', () => {
+    const g = createFogGrid(2, 2, 1)
+    setFogCell(g, 0, 0, 0) // links oben
+    const flipped = fogGridToRGBA(g, true)
+    // Nach der Umkehr muss die offene Zelle in der ZWEITEN Zeile links stehen.
+    expect(flipped[4 * 2]).toBe(0)
+    expect(flipped[4 * 3]).toBe(255)
+  })
+})
+
+describe('fogMaskRGBA — Trennung von Hoehe und Deckkraft', () => {
+  it('legt die geboeschte Fassung nach R und die harte nach G', () => {
+    const hard = createFogGrid(3, 1, 1)
+    setFogCell(hard, 1, 0, 0)
+    const sloped = smoothFogGrid(hard, 3)
+
+    const rgba = fogMaskRGBA(sloped, hard)
+    // Zelle 0 ist HART vernebelt (G = 255), die Boeschung hat sie aber
+    // geoeffnet (R < 255). Genau diese Trennung verhindert das Leck.
+    expect(rgba[1]).toBe(255)
+    expect(rgba[0]).toBeLessThan(255)
+    // Zelle 1 ist in beiden Fassungen offen.
+    expect(rgba[4]).toBe(0)
+    expect(rgba[5]).toBe(0)
+  })
+
+  it('oeffnet in G niemals eine Zelle, die hart vernebelt ist', () => {
+    const hard = createFogGrid(9, 9, 1)
+    setFogCell(hard, 4, 4, 0)
+    const sloped = smoothFogGrid(hard, 4)
+    const rgba = fogMaskRGBA(sloped, hard)
+    for (let row = 0; row < 9; row++) {
+      for (let col = 0; col < 9; col++) {
+        const g = rgba[(row * 9 + col) * 4 + 1]
+        const expected = col === 4 && row === 4 ? 0 : 255
+        expect(g).toBe(expected)
+      }
+    }
+  })
+
+  it('weist ungleich grosse Gitter zurueck', () => {
+    expect(() => fogMaskRGBA(createFogGrid(2, 2, 1), createFogGrid(3, 3, 1))).toThrow()
+  })
+
+  it('kehrt mit flipY beide Kanaele gemeinsam um', () => {
+    const hard = createFogGrid(1, 2, 1)
+    setFogCell(hard, 0, 0, 0)
+    const rgba = fogMaskRGBA(hard, hard, true)
+    expect(rgba[1]).toBe(255)
+    expect(rgba[5]).toBe(0)
+  })
+})
+
+describe('light3dFor', () => {
+  it('liefert fuer jede Tageszeit eine Stimmung', () => {
+    for (const t of ['morning', 'noon', 'evening', 'night']) {
+      const l = light3dFor(t)
+      expect(l.sunIntensity).toBeGreaterThan(0)
+      expect(l.groundDark).toBeGreaterThanOrEqual(0)
+      expect(l.groundDark).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it('macht die Nacht dunkler als den Mittag', () => {
+    expect(light3dFor('night').groundDark).toBeLessThan(light3dFor('noon').groundDark)
+    expect(light3dFor('night').sunIntensity).toBeLessThan(light3dFor('noon').sunIntensity)
+  })
+
+  it('faellt bei unbekannter Tageszeit auf Mittag zurueck', () => {
+    expect(light3dFor('quatsch')).toEqual(light3dFor('noon'))
   })
 })
 

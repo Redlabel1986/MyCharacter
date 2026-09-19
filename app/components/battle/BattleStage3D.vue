@@ -18,6 +18,8 @@ import {
   type Figure3DInput,
   type Object3DInput,
   type DragVisualState,
+  type VisionLight,
+  type FogInput,
 } from '~/composables/useBattle3DScene'
 import { figureDims } from '~~/shared/battle-3d'
 import type { BattleMap, Wall } from '~~/shared/battle-types'
@@ -44,6 +46,13 @@ const props = defineProps<{
   aoeRect: { x: number; y: number; size: number } | null
   /** Kurzlebige Ping-Marker in Kartenpixeln. */
   pings: Array<{ id: string | number; x: number; y: number; color: string }>
+  /**
+   * Nebel und Dunkelheit. Stammt aus denselben Sichtpolygonen wie die
+   * 2D-Masken — die 3D-Buehne rechnet nichts davon selbst aus.
+   */
+  vision: FogInput
+  /** Sichtquellen als echte Punktlichter (hoechstens acht werden gesetzt). */
+  visionLights: VisionLight[]
   /** Ab wie vielen Pixeln ein gedrueckter Zeiger als Zug gilt. */
   dragThresholdPx: number
   /**
@@ -368,6 +377,15 @@ const resetCamera = () => {
   }
 }
 
+// --- Reduzierte Bewegung -------------------------------------------------
+/**
+ * Wer Bewegung reduziert haben will, bekommt einen stehenden Nebel und keine
+ * pulsierenden Ringe. Auf Aenderungen hoeren, nicht nur einmal abfragen — die
+ * Einstellung kann waehrend der Sitzung umgestellt werden.
+ */
+let reducedMotion: MediaQueryList
+const onReducedMotionChange = () => scene?.setReducedMotion(reducedMotion.matches)
+
 // --- Auf- und Abbau ------------------------------------------------------
 const applyResize = () => {
   if (!scene || !wrapEl.value) return
@@ -376,6 +394,8 @@ const applyResize = () => {
 }
 
 onMounted(async () => {
+  reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+  reducedMotion.addEventListener('change', onReducedMotionChange)
   const probe = detectWebgl2()
   if (!probe.ok) {
     loading.value = false
@@ -402,6 +422,10 @@ onMounted(async () => {
   scene.setTokens(props.figures)
   scene.setObjects(props.objects)
   scene.setWalls(props.walls, props.wallsVisible)
+  scene.setTimeOfDay(props.vision.timeOfDay)
+  scene.setVision(props.vision)
+  scene.setVisionLights(props.visionLights)
+  scene.setReducedMotion(reducedMotion.matches)
   scene.setDragState(props.dragState)
   resizeObs = new ResizeObserver(applyResize)
   if (wrapEl.value) resizeObs.observe(wrapEl.value)
@@ -410,6 +434,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  reducedMotion?.removeEventListener('change', onReducedMotionChange)
   resizeObs?.disconnect()
   resizeObs = null
   scene?.dispose()
@@ -429,6 +454,9 @@ watch(
   scheduleOverlayRedraw,
   { deep: true },
 )
+watch(() => props.vision, (v: FogInput) => scene?.setVision(v), { deep: true })
+watch(() => props.vision.timeOfDay, (t: string) => scene?.setTimeOfDay(t))
+watch(() => props.visionLights, (l: VisionLight[]) => scene?.setVisionLights(l), { deep: true })
 watch(
   () => [props.imgW, props.imgH],
   () => {

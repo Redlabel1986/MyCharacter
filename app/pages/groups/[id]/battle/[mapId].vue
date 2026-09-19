@@ -17,6 +17,8 @@ import type {
   Figure3DInput,
   Object3DInput,
   DragVisualState,
+  VisionLight,
+  FogInput,
 } from '~/composables/useBattle3DScene'
 import {
   TOKEN_CONDITIONS,
@@ -1997,6 +1999,33 @@ const objects3d = computed<Object3DInput[]>(() =>
   })),
 )
 
+/**
+ * Nebel und Dunkelheit fuer die 3D-Buehne — aus DENSELBEN Zellmengen, die
+ * auch die 2D-Masken speisen. Es gibt keine zweite Sichtberechnung, damit die
+ * beiden Ansichten nicht auseinanderlaufen koennen.
+ */
+const vision3d = computed<FogInput>(() => ({
+  enabled: map.value?.fogEnabled ?? false,
+  cols: fogGridCols.value,
+  rows: fogGridRows.value,
+  visibleCells: fogVisibleCellsList.value,
+  memoryCells: fogMemoryCellsList.value,
+  blackoutCells: fogBlackoutCellsList.value,
+  timeOfDay: currentTimeOfDay.value,
+  nightMask: currentTodOverlay.value.requiresVisionMask === true,
+  isDm: isDm.value,
+}))
+
+/** Sichtquellen als echte Punktlichter (Tokens mit Sicht + leuchtende Objekte). */
+const visionLights3d = computed<VisionLight[]>(() =>
+  visionSources.value.map((s) => ({
+    id: s.id,
+    x: s.cx,
+    y: s.cy,
+    radiusCells: s.radiusCells,
+  })),
+)
+
 /** aoeRectPx nennt die Kantenlaenge `side`; die 3D-Buehne erwartet `size`. */
 const aoeRect3d = computed(() => {
   const r = aoeRectPx.value
@@ -3083,6 +3112,8 @@ const endResizeSheet = () => {
             :start-cells="isDm ? startAreaCellsList : []"
             :aoe-rect="aoeRect3d"
             :pings="visiblePings"
+            :vision="vision3d"
+            :vision-lights="visionLights3d"
             :drag-state="dragState3d"
             :ground-click-mode="toolMode === 'aoe'"
             @fallback="onStage3dFallback"
