@@ -13,7 +13,11 @@ import ShopModal from '~/components/battle/ShopModal.vue'
 import NpcAbilitiesEditor from '~/components/battle/NpcAbilitiesEditor.vue'
 // Traegt `three` als eigenen Chunk — deshalb lazy: wer in 2D bleibt, laedt ihn nie.
 const BattleStage3D = defineAsyncComponent(() => import('~/components/battle/BattleStage3D.vue'))
-import type { Figure3DInput, DragVisualState } from '~/composables/useBattle3DScene'
+import type {
+  Figure3DInput,
+  Object3DInput,
+  DragVisualState,
+} from '~/composables/useBattle3DScene'
 import {
   TOKEN_CONDITIONS,
   CONDITION_BY_ID,
@@ -1980,6 +1984,26 @@ const figures3d = computed<Figure3DInput[]>(() => {
   return out
 })
 
+const objects3d = computed<Object3DInput[]>(() =>
+  objects.value.map((o) => ({
+    id: o.id,
+    x: o.x,
+    y: o.y,
+    w: displayW(o),
+    h: displayH(o),
+    imageUrl: objectDisplayImage(o),
+    lightRadius: o.lightRadius,
+    hidden: o.hidden,
+  })),
+)
+
+/** aoeRectPx nennt die Kantenlaenge `side`; die 3D-Buehne erwartet `size`. */
+const aoeRect3d = computed(() => {
+  const r = aoeRectPx.value
+  if (!r || toolMode.value !== 'aoe') return null
+  return { x: r.x, y: r.y, size: r.side }
+})
+
 const dragState3d = computed<DragVisualState>(() => ({
   tokenId: draggingTokenId.value,
   snap: drag.snapPreview.value,
@@ -3052,6 +3076,13 @@ const endResizeSheet = () => {
             :grid-svg-url="gridShouldRender ? gridSvgUrl : ''"
             :drag-threshold-px="DRAG_THRESHOLD_PX"
             :figures="figures3d"
+            :objects="objects3d"
+            :walls="walls"
+            :walls-visible="isDm"
+            :drawings="drawings"
+            :start-cells="isDm ? startAreaCellsList : []"
+            :aoe-rect="aoeRect3d"
+            :pings="visiblePings"
             :drag-state="dragState3d"
             :ground-click-mode="toolMode === 'aoe'"
             @fallback="onStage3dFallback"

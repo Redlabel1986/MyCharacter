@@ -16,10 +16,11 @@ import {
   detectWebgl2,
   type Scene3DHandle,
   type Figure3DInput,
+  type Object3DInput,
   type DragVisualState,
 } from '~/composables/useBattle3DScene'
 import { figureDims } from '~~/shared/battle-3d'
-import type { BattleMap } from '~~/shared/battle-types'
+import type { BattleMap, Wall } from '~~/shared/battle-types'
 
 const props = defineProps<{
   map: BattleMap
@@ -29,6 +30,20 @@ const props = defineProps<{
   mapId: number
   /** Raster als SVG-Data-URL, wie es die 2D-Buehne benutzt. '' = kein Raster. */
   gridSvgUrl: string
+  /** Objekte (Szenerie), fertig gefiltert. */
+  objects: Object3DInput[]
+  /** Sichtblocker-Mauern. */
+  walls: Wall[]
+  /** Mauern sichtbar machen (nur fuer den DM). */
+  wallsVisible: boolean
+  /** Freihand-Striche in Kartenpixeln. */
+  drawings: Array<{ id: number; points: Array<{ x: number; y: number }>; color: string; strokeWidth: number }>
+  /** Startbereich-Zellen (nur DM). */
+  startCells: Array<[number, number]>
+  /** AoE-Feld in Kartenpixeln, oder null. */
+  aoeRect: { x: number; y: number; size: number } | null
+  /** Kurzlebige Ping-Marker in Kartenpixeln. */
+  pings: Array<{ id: string | number; x: number; y: number; color: string }>
   /** Ab wie vielen Pixeln ein gedrueckter Zeiger als Zug gilt. */
   dragThresholdPx: number
   /**
@@ -79,6 +94,11 @@ let overlayCanvas: HTMLCanvasElement | null = null
  * groessere Texturen kosten Speicher, ohne bei realistischen Kameraabstaenden
  * sichtbar mehr zu zeigen.
  */
+/**
+ * Alles, was flach auf der Karte liegt, wird in EINE Textur gemalt: Raster,
+ * Freihandstriche, Startbereich, AoE-Feld und Pings. Eine Ebene statt fuenf,
+ * und neu gezeichnet nur, wenn sich eine der Quellen aendert.
+ */
 const redrawOverlay = async () => {
   if (!scene || !props.imgW || !props.imgH) return
   if (!overlayCanvas) overlayCanvas = document.createElement('canvas')
@@ -90,12 +110,79 @@ const redrawOverlay = async () => {
   const ctx = cv.getContext('2d')
   if (!ctx) return
   ctx.clearRect(0, 0, cv.width, cv.height)
+  ctx.save()
+  ctx.scale(scale, scale)
 
   if (props.gridSvgUrl) {
     const img = await loadImage(props.gridSvgUrl)
-    if (img) ctx.drawImage(img, 0, 0, cv.width, cv.height)
+    if (img) ctx.drawImage(img, 0, 0, props.imgW, props.imgH)
   }
+
+  // Startbereich (nur der DM bekommt ihn ueberhaupt hereingereicht)
+  const g = props.map.gridSize
+  if (props.startCells.length && g > 0) {
+    ctx.fillStyle = 'rgba(34,197,94,0.28)'
+    ctx.strokeStyle = 'rgba(34,197,94,0.85)'
+    ctx.lineWidth = 2
+    for (const [c, r] of props.startCells) {
+      ctx.fillRect(c * g, r * g, g, g)
+      ctx.strokeRect(c * g, r * g, g, g)
+    }
+  }
+
+  // Freihandstriche
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  for (const d of props.drawings) {
+    if (d.points.length < 2) continue
+    ctx.strokeStyle = d.color
+    ctx.lineWidth = d.strokeWidth
+    ctx.beginPath()
+    ctx.moveTo(d.points[0]!.x, d.points[0]!.y)
+    for (let i = 1; i < d.points.length; i++) ctx.lineTo(d.points[i]!.x, d.points[i]!.y)
+    ctx.stroke()
+  }
+
+  // AoE-Feld
+  if (props.aoeRect) {
+    ctx.fillStyle = 'rgba(168,85,247,0.22)'
+    ctx.strokeStyle = 'rgba(147,51,234,0.9)'
+    ctx.lineWidth = 3
+    ctx.setLineDash([10, 6])
+    ctx.fillRect(props.aoeRect.x, props.aoeRect.y, props.aoeRect.size, props.aoeRect.size)
+    ctx.strokeRect(props.aoeRect.x, props.aoeRect.y, props.aoeRect.size, props.aoeRect.size)
+    ctx.setLineDash([])
+  }
+
+  // Pings
+  for (const p of props.pings) {
+    ctx.strokeStyle = p.color
+    ctx.lineWidth = 4
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, 26, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.fillStyle = p.color
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, 6, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  ctx.restore()
   scene.setGroundOverlay(cv)
+}
+
+/**
+ * Neuzeichnen drosseln: ein Ping-Schwall oder ein laufender Strich wuerde
+ * sonst in jedem Frame eine 2048er Textur neu hochladen.
+ */
+let overlayPending = false
+const scheduleOverlayRedraw = () => {
+  if (overlayPending) return
+  overlayPending = true
+  requestAnimationFrame(() => {
+    overlayPending = false
+    void redrawOverlay()
+  })
 }
 
 const loadImage = (src: string): Promise<HTMLImageElement | null> =>
@@ -313,6 +400,8 @@ onMounted(async () => {
   applyResize()
   await redrawOverlay()
   scene.setTokens(props.figures)
+  scene.setObjects(props.objects)
+  scene.setWalls(props.walls, props.wallsVisible)
   scene.setDragState(props.dragState)
   resizeObs = new ResizeObserver(applyResize)
   if (wrapEl.value) resizeObs.observe(wrapEl.value)
@@ -327,9 +416,19 @@ onBeforeUnmount(() => {
   scene = null
 })
 
-watch(() => props.gridSvgUrl, () => { void redrawOverlay() })
-watch(() => props.figures, (list) => scene?.setTokens(list), { deep: true })
-watch(() => props.dragState, (s) => scene?.setDragState(s), { deep: true })
+watch(() => props.figures, (list: Figure3DInput[]) => scene?.setTokens(list), { deep: true })
+watch(() => props.dragState, (s: DragVisualState) => scene?.setDragState(s), { deep: true })
+watch(() => props.objects, (list: Object3DInput[]) => scene?.setObjects(list), { deep: true })
+watch(
+  () => [props.walls, props.wallsVisible] as const,
+  () => scene?.setWalls(props.walls, props.wallsVisible),
+  { deep: true },
+)
+watch(
+  () => [props.gridSvgUrl, props.drawings, props.startCells, props.aoeRect, props.pings] as const,
+  scheduleOverlayRedraw,
+  { deep: true },
+)
 watch(
   () => [props.imgW, props.imgH],
   () => {

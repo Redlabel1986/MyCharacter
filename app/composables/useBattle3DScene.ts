@@ -22,6 +22,7 @@ import {
   type CameraState,
 } from '~~/shared/battle-3d'
 import type { Point } from '~~/shared/battle-geometry'
+import type { Wall } from '~~/shared/fog'
 
 /**
  * Alles, was die Szene ueber eine Spielfigur wissen muss.
@@ -55,6 +56,20 @@ export interface Figure3DInput {
   showName: boolean
   /** HP-Zahl anzeigen (haengt an hpVisibleToPlayers). */
   showHp: boolean
+}
+
+export interface Object3DInput {
+  id: number
+  /** Mittelpunkt in Kartenpixeln. */
+  x: number
+  y: number
+  /** Sichtbare Ausdehnung in Rasterzellen (Rotation bereits eingerechnet). */
+  w: number
+  h: number
+  imageUrl: string | null
+  /** Lichtradius in Zellen; 0 = kein Licht. */
+  lightRadius: number
+  hidden: boolean
 }
 
 export interface ScreenPos {
@@ -114,6 +129,9 @@ export interface Scene3DHandle {
   setMapTexture(url: string): Promise<void>
   setGroundOverlay(source: HTMLCanvasElement | null): void
   setTokens(list: Figure3DInput[]): void
+  setObjects(list: Object3DInput[]): void
+  /** `visible` steuert nur die Sichtbarkeit — die Geometrie bleibt immer da. */
+  setWalls(walls: Wall[], visible: boolean): void
   setDragState(s: DragVisualState): void
   resize(w: number, h: number, dpr: number): void
   camera: Scene3DCamera
@@ -580,6 +598,170 @@ export async function createScene(
     dirty = true
   }
 
+  // --- Mauern ------------------------------------------------------------
+  /**
+   * Alle Mauern stecken in EINER InstancedMesh: bei 200 Segmenten ist das ein
+   * Draw Call statt 200. Fuer Spieler ist sie unsichtbar — die Mauern formen
+   * trotzdem Licht und Nebel, weil die Sichtmaske ihr Clipping schon enthaelt.
+   */
+  const WALL_HEIGHT = 1.1
+  const WALL_THICKNESS = 0.12
+  let wallMesh: import('three').InstancedMesh | null = null
+  const wallMatrix = new THREE.Matrix4()
+  const wallQuat = new THREE.Quaternion()
+  const wallUp = new THREE.Vector3(0, 1, 0)
+  const wallScale = new THREE.Vector3()
+  const wallPos = new THREE.Vector3()
+
+  const setWalls = (walls: Wall[], visible: boolean) => {
+    if (wallMesh && wallMesh.count !== walls.length) {
+      scene.remove(wallMesh)
+      wallMesh.geometry.dispose()
+      ;(wallMesh.material as import('three').Material).dispose()
+      wallMesh = null
+    }
+    if (!walls.length) {
+      dirty = true
+      return
+    }
+    if (!wallMesh) {
+      wallMesh = new THREE.InstancedMesh(
+        new THREE.BoxGeometry(1, WALL_HEIGHT, WALL_THICKNESS),
+        new THREE.MeshStandardMaterial({ color: 0x4a4038, roughness: 0.9, metalness: 0 }),
+        walls.length,
+      )
+      wallMesh.castShadow = true
+      wallMesh.receiveShadow = true
+      // Mauern duerfen niemals ein Token-Picking abfangen.
+      wallMesh.raycast = () => {}
+      scene.add(wallMesh)
+    }
+    for (let i = 0; i < walls.length; i++) {
+      const w = walls[i]!
+      const a = mapToWorld(w.x1, w.y1, dims)
+      const b = mapToWorld(w.x2, w.y2, dims)
+      const dx = b.x - a.x
+      const dz = b.z - a.z
+      const len = Math.max(0.01, Math.hypot(dx, dz))
+      wallPos.set((a.x + b.x) / 2, WALL_HEIGHT / 2, (a.z + b.z) / 2)
+      wallQuat.setFromAxisAngle(wallUp, Math.atan2(-dz, dx))
+      wallScale.set(len, 1, 1)
+      wallMatrix.compose(wallPos, wallQuat, wallScale)
+      wallMesh.setMatrixAt(i, wallMatrix)
+    }
+    wallMesh.instanceMatrix.needsUpdate = true
+    wallMesh.visible = visible
+    dirty = true
+  }
+
+  // --- Objekte -----------------------------------------------------------
+  interface ObjectRec {
+    group: import('three').Group
+    plane: import('three').Mesh
+    shadow: import('three').Mesh
+    light: import('three').PointLight | null
+    input: Object3DInput
+  }
+  const objectRecs = new Map<number, ObjectRec>()
+
+  const buildObject = (o: Object3DInput): ObjectRec => {
+    const group = new THREE.Group()
+
+    const shadow = new THREE.Mesh(
+      new THREE.CircleGeometry(Math.max(o.w, o.h) * 0.55, 24),
+      new THREE.MeshBasicMaterial({
+        map: contactShadowTex,
+        transparent: true,
+        depthWrite: false,
+        opacity: 0.3,
+      }),
+    )
+    shadow.rotation.x = -Math.PI / 2
+    shadow.position.y = 0.0015
+    shadow.raycast = () => {}
+    group.add(shadow)
+
+    const plane = new THREE.Mesh(
+      new THREE.PlaneGeometry(o.w, o.h),
+      new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        transparent: true,
+        alphaTest: 0.05,
+        roughness: 0.9,
+        side: THREE.DoubleSide,
+      }),
+    )
+    plane.rotation.x = -Math.PI / 2
+    plane.position.y = 0.005
+    plane.receiveShadow = true
+    plane.raycast = () => {}
+    group.add(plane)
+
+    let light: import('three').PointLight | null = null
+    if (o.lightRadius > 0) {
+      // Ohne eigene Schattenkarte — Punktlicht-Schatten sind teuer, und das
+      // Mauer-Clipping steckt ohnehin schon in der Sichtmaske.
+      light = new THREE.PointLight(0xffd9a0, 1.2, o.lightRadius + 0.5, 1.6)
+      light.position.y = 0.6
+      group.add(light)
+    }
+
+    scene.add(group)
+    return { group, plane, shadow, light, input: { ...o, imageUrl: null } }
+  }
+
+  const disposeObject = (rec: ObjectRec) => {
+    scene.remove(rec.group)
+    rec.plane.geometry.dispose()
+    ;(rec.plane.material as import('three').Material).dispose()
+    rec.shadow.geometry.dispose()
+    ;(rec.shadow.material as import('three').Material).dispose()
+    rec.light?.dispose()
+  }
+
+  const setObjects = (list: Object3DInput[]) => {
+    const seen = new Set<number>()
+    for (const o of list) {
+      seen.add(o.id)
+      let rec = objectRecs.get(o.id)
+      // Groesse und Lichtquelle stecken in der Geometrie — bei Aenderung neu.
+      if (
+        rec &&
+        (rec.input.w !== o.w ||
+          rec.input.h !== o.h ||
+          (rec.input.lightRadius > 0) !== (o.lightRadius > 0))
+      ) {
+        disposeObject(rec)
+        objectRecs.delete(o.id)
+        rec = undefined
+      }
+      if (!rec) {
+        rec = buildObject(o)
+        objectRecs.set(o.id, rec)
+      }
+      const w = mapToWorld(o.x, o.y, dims)
+      rec.group.position.set(w.x, 0, w.z)
+      const mat = rec.plane.material as import('three').MeshStandardMaterial
+      if (o.imageUrl && rec.input.imageUrl !== o.imageUrl) {
+        mat.map = getTexture(o.imageUrl)
+        mat.needsUpdate = true
+      } else if (!o.imageUrl && mat.map) {
+        mat.map = null
+        mat.needsUpdate = true
+      }
+      mat.opacity = o.hidden ? 0.5 : 1
+      if (rec.light) rec.light.distance = o.lightRadius + 0.5
+      rec.input = o
+    }
+    for (const [id, rec] of objectRecs) {
+      if (!seen.has(id)) {
+        disposeObject(rec)
+        objectRecs.delete(id)
+      }
+    }
+    dirty = true
+  }
+
   // --- Zieh-Rueckmeldung -------------------------------------------------
   const snapRing = flatRing(0.34, 0.46, 0xf5c451)
   snapRing.position.y = 0.006
@@ -814,6 +996,8 @@ export async function createScene(
     for (const t of textureCache.values()) t.dispose()
     textureCache.clear()
     figures.clear()
+    objectRecs.clear()
+    wallMesh = null
     pickTargets.length = 0
     renderer.dispose()
     renderer.forceContextLoss()
@@ -826,6 +1010,8 @@ export async function createScene(
     setMapTexture,
     setGroundOverlay,
     setTokens,
+    setObjects,
+    setWalls,
     setDragState,
     resize,
     camera: cameraApi,
