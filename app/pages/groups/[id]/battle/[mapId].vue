@@ -454,7 +454,8 @@ watch(stage3d, (v) => {
     stage3dReason.value = ''
     // Die Malwerkzeuge gibt es in 3D nicht. Wer mit aktivem Pinsel
     // umschaltet, saesse sonst in einem Werkzeug fest, das nichts tut.
-    toolMode.value = 'select'
+    // Auswaehlen und AoE funktionieren in 3D und bleiben deshalb stehen.
+    if (toolMode.value !== 'select' && toolMode.value !== 'aoe') toolMode.value = 'select'
   }
 })
 const onStage3dFallback = (reason: string) => {
@@ -1997,6 +1998,17 @@ const on3dDrop = async (e: { shiftKey: boolean }) => {
 const on3dTokenClick = (id: number) => {
   infoTokenId.value = id
 }
+/**
+ * Klick auf den Boden. Ruft dieselben Funktionen wie die 2D-Buehne — es gibt
+ * keinen zweiten Pfad fuer Ping und AoE.
+ */
+const on3dGroundClick = (e: { mapX: number; mapY: number; altKey: boolean }) => {
+  if (e.altKey) {
+    sendPing(e.mapX, e.mapY)
+    return
+  }
+  if (toolMode.value === 'aoe') setAoeCenter(e.mapX, e.mapY)
+}
 const on3dTokenDblClick = (id: number) => {
   const t = tokens.value.find((x) => x.id === id)
   if (t) startEdit(t)
@@ -2726,7 +2738,6 @@ const endResizeSheet = () => {
             :color="toolMode === 'aoe' ? 'primary' : 'neutral'"
             icon="i-lucide-radius"
             title="Zauber-Wirkungsbereich (AoE): Feldgröße wählen, auf die Karte klicken — alle Token im Bereich bekommen Schaden/Heilung."
-            :disabled="stage3d"
             @click="toolMode = toolMode === 'aoe' ? 'select' : 'aoe'"
           >
             AoE
@@ -3042,7 +3053,9 @@ const endResizeSheet = () => {
             :drag-threshold-px="DRAG_THRESHOLD_PX"
             :figures="figures3d"
             :drag-state="dragState3d"
+            :ground-click-mode="toolMode === 'aoe'"
             @fallback="onStage3dFallback"
+            @ground-click="on3dGroundClick"
             @token-grab="on3dGrab"
             @token-move="on3dMove"
             @token-drop="on3dDrop"

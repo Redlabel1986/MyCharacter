@@ -39,12 +39,18 @@ const props = defineProps<{
   figures: Figure3DInput[]
   /** Zustand des laufenden Zugs (Hebe-Effekt, Snap-Ring, Reichweitenfeld). */
   dragState: DragVisualState
+  /**
+   * Wenn true, zielt ein Linksklick immer auf den Boden statt eine Figur zu
+   * greifen. Der AoE-Modus braucht das: dort darf man den Bereich auch auf
+   * einer Figur zentrieren — genau wie in der 2D-Ansicht.
+   */
+  groundClickMode: boolean
 }>()
 
 const emit = defineEmits<{
   ready: []
   fallback: [reason: string]
-  'ground-click': [payload: { mapX: number; mapY: number }]
+  'ground-click': [payload: { mapX: number; mapY: number; altKey: boolean }]
   'token-grab': [payload: { id: number; mapX: number; mapY: number }]
   'token-move': [payload: { mapX: number; mapY: number }]
   'token-drop': [payload: { shiftKey: boolean }]
@@ -128,15 +134,28 @@ const onPointerDown = (e: PointerEvent) => {
   movedFar = false
   grabbedId = scene.pickToken(e.clientX, e.clientY)
 
+  // Alt+Klick ist in jedem Modus ein Ping — auch auf einer Figur, wie in 2D.
+  // Deshalb VOR der Figuren-Abfrage.
+  if (e.button === 0 && e.altKey) {
+    mode = 'orbit'
+    grabbedId = null
+    const p = scene.pickGround(e.clientX, e.clientY)
+    if (p) emit('ground-click', { mapX: p.x, mapY: p.y, altKey: true })
+    movedFar = true // kein zweiter Klick beim Loslassen
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    return
+  }
+
   if (e.button === 2) {
     mode = grabbedId !== null ? 'menu' : 'pan'
-  } else if (grabbedId !== null) {
+  } else if (grabbedId !== null && !props.groundClickMode) {
     mode = 'token'
     const p = scene.pickGround(e.clientX, e.clientY)
     // Die Seite prueft, ob dieser Nutzer die Figur bewegen darf. Wenn nicht,
     // laeuft der Zug ins Leere und der Klick bleibt ein Klick.
     if (p) emit('token-grab', { id: grabbedId, mapX: p.x, mapY: p.y })
   } else {
+    if (props.groundClickMode) grabbedId = null
     mode = 'orbit'
   }
   ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
@@ -195,7 +214,7 @@ const onPointerUp = (e: PointerEvent) => {
   // Ping und AoE haengen daran; die Seite entscheidet, was gemeint ist.
   if (wasMode === 'orbit' && !movedFar && e.button === 0) {
     const p = scene.pickGround(e.clientX, e.clientY)
-    if (p) emit('ground-click', { mapX: p.x, mapY: p.y })
+    if (p) emit('ground-click', { mapX: p.x, mapY: p.y, altKey: e.altKey })
   }
 }
 
