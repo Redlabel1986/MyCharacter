@@ -16,6 +16,8 @@ import {
   cameraPosition,
   seatPositions,
   sheetSlots,
+  terrainHeightAt,
+  pickHeightMarker,
   SHEET_WIDTH_CELLS,
   TAVERN_ROOM,
   TAVERN_CEILING_Y,
@@ -264,6 +266,53 @@ describe('sheetSlots — Charakterboegen vor dem Sitzplatz', () => {
       expect(s.heightCells).toBeGreaterThan(s.widthCells)
       expect(s.widthCells).toBe(SHEET_WIDTH_CELLS)
     }
+  })
+})
+
+describe('Gelaendehoehen', () => {
+  const hill = { x: 500, y: 400, height: 2, radius: 200 }
+
+  it('ist ohne Hoehenpunkte ueberall flach', () => {
+    expect(terrainHeightAt([], 123, 456)).toBe(0)
+  })
+
+  it('erreicht in der Mitte die volle Hoehe und am Rand null', () => {
+    expect(terrainHeightAt([hill], 500, 400)).toBeCloseTo(2)
+    expect(terrainHeightAt([hill], 700, 400)).toBeCloseTo(0)
+    expect(terrainHeightAt([hill], 900, 400)).toBe(0)
+  })
+
+  it('faellt von der Mitte zum Rand monoton ab — keine Wellen', () => {
+    let prev = Infinity
+    for (let d = 0; d <= 200; d += 10) {
+      const h = terrainHeightAt([hill], 500 + d, 400)
+      expect(h).toBeLessThanOrEqual(prev + 1e-9)
+      prev = h
+    }
+  })
+
+  it('laeuft am Fuss ohne Knick aus: dicht am Rand fast null, nicht ploetzlich', () => {
+    // Bei 95 % des Radius bleibt weniger als 1 % der Hoehe — der Uebergang
+    // in die Ebene ist weich, kein Kegelrand.
+    expect(terrainHeightAt([hill], 500 + 190, 400)).toBeLessThan(0.02)
+  })
+
+  it('addiert ueberlappende Punkte, auch Senken', () => {
+    const dip = { x: 500, y: 400, height: -1, radius: 200 }
+    expect(terrainHeightAt([hill, dip], 500, 400)).toBeCloseTo(1)
+    const twoHills = [hill, { ...hill, x: 560 }]
+    expect(terrainHeightAt(twoHills, 530, 400)).toBeGreaterThan(terrainHeightAt([hill], 530, 400))
+  })
+
+  it('ignoriert Punkte ohne Radius statt zu teilen durch null', () => {
+    expect(terrainHeightAt([{ x: 0, y: 0, height: 5, radius: 0 }], 0, 0)).toBe(0)
+  })
+
+  it('trifft beim Anklicken den naechsten Punkt innerhalb der Fanggrenze', () => {
+    const markers = [hill, { x: 100, y: 100, height: 1, radius: 50 }]
+    expect(pickHeightMarker(markers, 505, 398, 30)).toBe(0)
+    expect(pickHeightMarker(markers, 110, 95, 30)).toBe(1)
+    expect(pickHeightMarker(markers, 300, 300, 30)).toBe(-1)
   })
 })
 

@@ -321,6 +321,76 @@ export function sheetSlots(seat: Point, count: number, d: MapDims): SheetSlot[] 
   return out
 }
 
+// --- Gelaendehoehen ---------------------------------------------------------
+
+/**
+ * Ein vom DM gesetzter Hoehenpunkt. Er hebt (oder senkt) die Karte um `height`
+ * und laeuft ueber `radius` weich auf null aus — eine Kuppe oder eine Senke.
+ * Mehrere Punkte addieren sich; so entstehen Grate und Taeler.
+ *
+ * `x`/`y`/`radius` in Kartenpixeln, `height` in Rasterzellen (negativ = Senke).
+ */
+export interface HeightMarker {
+  x: number
+  y: number
+  height: number
+  radius: number
+}
+
+/** Grenzen fuer den Editor — verhindern Tuerme und Kraterloecher. */
+export const HEIGHT_MIN = -4
+export const HEIGHT_MAX = 8
+export const HEIGHT_RADIUS_MIN_CELLS = 1
+export const HEIGHT_RADIUS_MAX_CELLS = 30
+
+/**
+ * Glockenfoermiger Abfall: 1 in der Mitte, 0 am Rand, an beiden Enden ohne
+ * Knick. (1 − t²)² statt einer Linearen, damit die Kuppe rund ist und der
+ * Fuss weich in die Ebene laeuft — eine Kegelform saehe nach Zelt aus.
+ */
+export function terrainBump(t: number): number {
+  if (!(t < 1) || t < 0) return t < 0 ? 1 : 0
+  const s = 1 - t * t
+  return s * s
+}
+
+/** Gelaendehoehe in Zellen an einem Kartenpunkt. Ohne Punkte: 0. */
+export function terrainHeightAt(markers: readonly HeightMarker[], mapX: number, mapY: number): number {
+  let h = 0
+  for (const m of markers) {
+    if (!(m.radius > 0)) continue
+    const dx = mapX - m.x
+    const dy = mapY - m.y
+    const d2 = dx * dx + dy * dy
+    if (d2 >= m.radius * m.radius) continue
+    h += m.height * terrainBump(Math.sqrt(d2) / m.radius)
+  }
+  return h
+}
+
+/**
+ * Hoehenpunkt unter einem Klick — der naechste, dessen Mitte hoechstens
+ * `pickPx` entfernt liegt. Bewusst nicht der ganze Radius: sonst liesse sich
+ * neben einer grossen Kuppe kein neuer Punkt mehr setzen.
+ */
+export function pickHeightMarker(
+  markers: readonly HeightMarker[],
+  mapX: number,
+  mapY: number,
+  pickPx: number,
+): number {
+  let best = -1
+  let bestD = pickPx * pickPx
+  markers.forEach((m, i) => {
+    const d = (m.x - mapX) ** 2 + (m.y - mapY) ** 2
+    if (d <= bestD) {
+      bestD = d
+      best = i
+    }
+  })
+  return best
+}
+
 // --- Nebelgitter ------------------------------------------------------------
 
 /**

@@ -353,6 +353,10 @@ async function ensureSchema(db: ReturnType<typeof drizzle>) {
   await db.execute(sql`
     ALTER TABLE battle_maps ADD COLUMN IF NOT EXISTS walls JSONB NOT NULL DEFAULT '[]'::jsonb
   `)
+  // Gelaendehoehen fuer die 3D-Ansicht: Kuppen und Senken mit Auslaufradius.
+  await db.execute(sql`
+    ALTER TABLE battle_maps ADD COLUMN IF NOT EXISTS heights JSONB NOT NULL DEFAULT '[]'::jsonb
+  `)
   // DM-Blackout-Pinsel: Zellen, die fuer Spieler 100% pitch-black sind.
   await db.execute(sql`
     ALTER TABLE battle_maps ADD COLUMN IF NOT EXISTS fog_blackout JSONB NOT NULL DEFAULT '[]'::jsonb

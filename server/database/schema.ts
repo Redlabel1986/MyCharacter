@@ -459,6 +459,16 @@ export const battleMaps = pgTable(
       .$type<Array<{ x1: number; y1: number; x2: number; y2: number }>>()
       .default([]),
     /**
+     * Vom DM gesetzte Hoehenpunkte fuer die 3D-Ansicht. Jeder hebt oder senkt
+     * die Karte um `height` Zellen und laeuft ueber `radius` Pixel weich aus.
+     * Position und Radius in Pixeln am Originalbild. In der 2D-Ansicht nur
+     * als Markierung sichtbar.
+     */
+    heights: jsonb('heights')
+      .notNull()
+      .$type<Array<{ x: number; y: number; height: number; radius: number }>>()
+      .default([]),
+    /**
      * Tageszeit auf der Karte. Steuert das Beleuchtungs-Overlay
      * (Sonnenaufgang/Tageslicht/Daemmerung/Nacht) und kann ueber
      * NPC-Faehigkeiten Boni oder Malus ergeben.

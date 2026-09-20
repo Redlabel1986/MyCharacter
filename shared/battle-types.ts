@@ -6,11 +6,12 @@
  * ohne sie zu duplizieren.
  */
 import type { Wall } from './fog'
+import type { HeightMarker } from './battle-3d'
 import type { TimeOfDay } from './time-of-day'
 import type { NpcAbility } from './npc'
 import type { HtbahMerchant } from './engines/htbah'
 
-export type { Wall, TimeOfDay }
+export type { Wall, TimeOfDay, HeightMarker }
 
 export interface BattleMap {
   id: number
@@ -30,6 +31,8 @@ export interface BattleMap {
   fogBlackout: Array<[number, number]>
   startCells: Array<[number, number]>
   walls: Wall[]
+  /** Gelaendehoehen der 3D-Ansicht; fehlt bei Karten von vor dem Feature. */
+  heights?: HeightMarker[]
   timeOfDay: TimeOfDay
   /** DM-Spawn-Punkt fuer neue Charakter-Tokens (Pixel am Originalbild). */
   spawnX: number | null

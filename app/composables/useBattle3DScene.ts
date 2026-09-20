@@ -17,11 +17,15 @@ import {
   clampCamera,
   cameraPosition,
   figureDims,
+  terrainHeightAt,
   MIN_DIST,
   MAX_PITCH,
   type MapDims,
   type CameraState,
+  type HeightMarker,
 } from '~~/shared/battle-3d'
+
+export type { HeightMarker }
 import { light3dFor } from '~~/shared/battle-3d'
 import { createFogLayer, type FogLayer, type FogInput } from '~/composables/useBattle3DFog'
 import { createTavern, type Tavern } from '~/composables/useBattle3DTavern'
@@ -206,6 +210,10 @@ export interface Scene3DHandle {
   setWalls(walls: Wall[], visible: boolean): void
   /** Wuerfel ueber das Feld rollen lassen; sie bleiben auf dem Ergebnis liegen. */
   rollDice(req: DiceRollRequest): void
+  /** Gelaende: Hoehenpunkte setzen; `selected` hebt einen im Editor hervor. */
+  setHeights(markers: HeightMarker[], selected: number): void
+  /** Markierungen des Hoehen-Editors ein-/ausblenden. */
+  setHeightToolActive(on: boolean): void
   setSheets(list: Sheet3DInput[]): void
   /** Token-Id des Bogens unter dem Zeiger, oder null. */
   pickSheet(clientX: number, clientY: number): number | null
@@ -305,14 +313,52 @@ export async function createScene(
   const loader = new THREE.TextureLoader()
   const maxAniso = renderer.capabilities.getMaxAnisotropy()
 
+  // --- Gelaende ----------------------------------------------------------
+  /**
+   * Die Karte ist kein flaches Blatt, sondern ein Gitter, dessen Knoten der
+   * DM mit Hoehenpunkten anheben oder absenken kann. Alles, was auf der Karte
+   * steht oder liegt, fragt hier seine Hoehe ab — Figuren, Objekte, Mauern,
+   * Boegen, Wuerfel, Nebel, Beschriftungen. Eine einzige Quelle, sonst
+   * schwebt frueher oder spaeter etwas ueber dem Hang.
+   */
+  let heightMarkers: HeightMarker[] = []
+  const heightAtMap = (mapX: number, mapY: number) => terrainHeightAt(heightMarkers, mapX, mapY)
+  const heightAtWorld = (x: number, z: number) => {
+    const p = worldToMap(x, z, dims)
+    return heightAtMap(p.x, p.y)
+  }
+
+  // Gleiche Feinheit wie die Nebelbank, damit beide dieselben Haenge zeigen.
+  const TERRAIN_SEG_X = Math.min(160, Math.max(8, cols * 2))
+  const TERRAIN_SEG_Y = Math.min(160, Math.max(8, rows * 2))
+
+  /** Flach liegendes, unterteiltes Gitter — lokales XZ ist Welt-XZ. */
+  const makeTerrainGeometry = () => {
+    const g = new THREE.PlaneGeometry(cols, rows, TERRAIN_SEG_X, TERRAIN_SEG_Y)
+    g.rotateX(-Math.PI / 2)
+    return g
+  }
+
+  /** Hebt jeden Knoten auf die Gelaendehoehe plus `lift`. */
+  const displaceTerrain = (g: import('three').BufferGeometry, lift: number) => {
+    const pos = g.attributes.position!
+    for (let i = 0; i < pos.count; i++) {
+      pos.setY(i, heightAtWorld(pos.getX(i), pos.getZ(i)) + lift)
+    }
+    pos.needsUpdate = true
+    g.computeVertexNormals()
+    g.computeBoundingSphere()
+  }
+
   const mapMaterial = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     roughness: 0.95,
     metalness: 0,
   })
-  const mapMesh = new THREE.Mesh(new THREE.PlaneGeometry(cols, rows), mapMaterial)
-  mapMesh.rotation.x = -Math.PI / 2
+  const mapMesh = new THREE.Mesh(makeTerrainGeometry(), mapMaterial)
   mapMesh.receiveShadow = true
+  // Kuppen werfen Schatten in ihre Taeler — erst das macht sie plastisch.
+  mapMesh.castShadow = true
   scene.add(mapMesh)
 
   /**
@@ -334,9 +380,8 @@ export async function createScene(
     opacity: 1,
     visible: false,
   })
-  const overlayMesh = new THREE.Mesh(new THREE.PlaneGeometry(cols, rows), overlayMaterial)
-  overlayMesh.rotation.x = -Math.PI / 2
-  overlayMesh.position.y = 0.004
+  const overlayMesh = new THREE.Mesh(makeTerrainGeometry(), overlayMaterial)
+  displaceTerrain(overlayMesh.geometry, 0.004)
   overlayMesh.renderOrder = 1
   scene.add(overlayMesh)
   let overlayTexture: import('three').CanvasTexture | null = null
@@ -477,6 +522,8 @@ export async function createScene(
     /** Ruheposition. Das Treffer-Wackeln rechnet als Versatz darauf. */
     baseX: number
     baseZ: number
+    /** Gelaendehoehe unter der Figur; das Anheben beim Ziehen kommt obendrauf. */
+    terrainY: number
     /** Laufendes Treffer-Wackeln: Nonce des ausloesenden Effekts, sonst -1. */
     shakeNonce: number
     shakeStart: number
@@ -594,6 +641,7 @@ export async function createScene(
       input: initial,
       baseX: 0,
       baseZ: 0,
+      terrainY: 0,
       shakeNonce: -1,
       shakeStart: 0,
     }
@@ -625,10 +673,12 @@ export async function createScene(
     const w = mapToWorld(f.x, f.y, dims)
     rec.baseX = w.x
     rec.baseZ = w.z
-    // Die Hoehe NICHT zuruecksetzen: eine gerade gezogene Figur schwebt, und
-    // ein Realtime-Update mitten im Zug wuerde sie sonst zu Boden fallen
-    // lassen, bis der naechste Zieh-Zustand eintrifft.
-    rec.group.position.set(w.x, rec.group.position.y, w.z)
+    // Auf die Gelaendehoehe stellen. Das Anheben beim Ziehen (0.35) bleibt
+    // erhalten: ein Realtime-Update mitten im Zug liesse die Figur sonst zu
+    // Boden fallen, bis der naechste Zieh-Zustand eintrifft.
+    const lifted = rec.group.position.y - rec.terrainY > 0.2
+    rec.terrainY = heightAtMap(f.x, f.y)
+    rec.group.position.set(w.x, rec.terrainY + (lifted ? 0.35 : 0), w.z)
 
     // Treffer-Wackeln anstossen, sobald ein NEUER Schaden-Effekt kommt. Der
     // Nonce unterscheidet Folgetreffer voneinander; ohne ihn liefe bei zwei
@@ -738,6 +788,9 @@ export async function createScene(
   const WALL_HEIGHT = 1.1
   const WALL_THICKNESS = 0.12
   let wallMesh: import('three').InstancedMesh | null = null
+  /** Zuletzt gesetzte Mauern — fuer die Neuplatzierung nach einer Gelaendeaenderung. */
+  let lastWalls: Wall[] = []
+  let lastWallsVisible = false
   const wallMatrix = new THREE.Matrix4()
   const wallQuat = new THREE.Quaternion()
   const wallUp = new THREE.Vector3(0, 1, 0)
@@ -745,6 +798,8 @@ export async function createScene(
   const wallPos = new THREE.Vector3()
 
   const setWalls = (walls: Wall[], visible: boolean) => {
+    lastWalls = walls
+    lastWallsVisible = visible
     if (wallMesh && wallMesh.count !== walls.length) {
       scene.remove(wallMesh)
       wallMesh.geometry.dispose()
@@ -774,7 +829,11 @@ export async function createScene(
       const dx = b.x - a.x
       const dz = b.z - a.z
       const len = Math.max(0.01, Math.hypot(dx, dz))
-      wallPos.set((a.x + b.x) / 2, WALL_HEIGHT / 2, (a.z + b.z) / 2)
+      // Fuss auf der Gelaendehoehe der Segmentmitte. Ein langes Segment ueber
+      // einen Hang steht damit an einem Ende etwas hoch, am anderen im Boden
+      // — dafuer bleibt es EIN Quader pro Mauer statt einer Treppe.
+      const midMap = { x: (w.x1 + w.x2) / 2, y: (w.y1 + w.y2) / 2 }
+      wallPos.set((a.x + b.x) / 2, heightAtMap(midMap.x, midMap.y) + WALL_HEIGHT / 2, (a.z + b.z) / 2)
       wallQuat.setFromAxisAngle(wallUp, Math.atan2(-dz, dx))
       wallScale.set(len, 1, 1)
       wallMatrix.compose(wallPos, wallQuat, wallScale)
@@ -851,6 +910,7 @@ export async function createScene(
   }
 
   const setObjects = (list: Object3DInput[]) => {
+    lastObjects = list
     const seen = new Set<number>()
     for (const o of list) {
       seen.add(o.id)
@@ -871,7 +931,7 @@ export async function createScene(
         objectRecs.set(o.id, rec)
       }
       const w = mapToWorld(o.x, o.y, dims)
-      rec.group.position.set(w.x, 0, w.z)
+      rec.group.position.set(w.x, heightAtMap(o.x, o.y), w.z)
       const mat = rec.plane.material as import('three').MeshStandardMaterial
       if (o.imageUrl && rec.input.imageUrl !== o.imageUrl) {
         mat.map = getTexture(o.imageUrl)
@@ -903,6 +963,7 @@ export async function createScene(
   const sheetPickTargets: import('three').Object3D[] = []
 
   const setSheets = (list: Sheet3DInput[]) => {
+    lastSheets = list
     const seen = new Set<number>()
     for (const s of list) {
       seen.add(s.tokenId)
@@ -936,7 +997,7 @@ export async function createScene(
       }
       const w = mapToWorld(s.x, s.y, dims)
       // Knapp ueber der Karte, damit es nicht mit dem Boden-Overlay flimmert.
-      rec.mesh.position.set(w.x, 0.02, w.z)
+      rec.mesh.position.set(w.x, heightAtMap(s.x, s.y) + 0.02, w.z)
       // Die Geometrie liegt bereits flach; die Blattdrehung kommt on top.
       rec.mesh.rotation.set(-Math.PI / 2, 0, -s.rotation)
       if (rec.revision !== s.revision) {
@@ -954,6 +1015,89 @@ export async function createScene(
       if (idx >= 0) sheetPickTargets.splice(idx, 1)
       sheetRecs.delete(id)
     }
+    dirty = true
+  }
+
+  // --- Gelaende setzen ---------------------------------------------------
+  let lastObjects: Object3DInput[] = []
+  let lastSheets: Sheet3DInput[] = []
+
+  /**
+   * Markierungen fuer den Hoehen-Editor: je Punkt ein Ring am Auslaufradius,
+   * der dem Gelaende folgt, und ein Stift in der Mitte. Nur sichtbar, solange
+   * das Werkzeug aktiv ist — Spieler sehen die Kuppen, nicht die Konstruktion.
+   */
+  const heightGizmos = new THREE.Group()
+  heightGizmos.visible = false
+  scene.add(heightGizmos)
+  let selectedHeight = -1
+
+  const rebuildHeightGizmos = () => {
+    for (const child of [...heightGizmos.children]) {
+      heightGizmos.remove(child)
+      const m = child as import('three').Mesh
+      m.geometry?.dispose()
+      ;(m.material as import('three').Material | undefined)?.dispose()
+    }
+    heightMarkers.forEach((hm, i) => {
+      const color = i === selectedHeight ? 0xfbbf24 : hm.height >= 0 ? 0x86efac : 0x93c5fd
+      // Ring, der dem Gelaende folgt.
+      const pts: number[] = []
+      const steps = 64
+      for (let k = 0; k < steps; k++) {
+        const a = (k / steps) * Math.PI * 2
+        const mx = hm.x + Math.cos(a) * hm.radius
+        const my = hm.y + Math.sin(a) * hm.radius
+        const w = mapToWorld(mx, my, dims)
+        pts.push(w.x, heightAtMap(mx, my) + 0.06, w.z)
+      }
+      const ringGeo = new THREE.BufferGeometry()
+      ringGeo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3))
+      const ring = new THREE.LineLoop(
+        ringGeo,
+        new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 }),
+      )
+      ring.raycast = () => {}
+      heightGizmos.add(ring)
+
+      // Stift in der Mitte, Hoehe zeigt die Richtung (nach oben oder unten).
+      const c = mapToWorld(hm.x, hm.y, dims)
+      const top = heightAtMap(hm.x, hm.y)
+      const pin = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.08, 0.08, 0.9, 12),
+        new THREE.MeshBasicMaterial({ color }),
+      )
+      pin.position.set(c.x, top + 0.45, c.z)
+      pin.raycast = () => {}
+      heightGizmos.add(pin)
+      const knob = new THREE.Mesh(
+        new THREE.SphereGeometry(i === selectedHeight ? 0.22 : 0.16, 16, 12),
+        new THREE.MeshBasicMaterial({ color }),
+      )
+      knob.position.set(c.x, top + 0.95, c.z)
+      knob.raycast = () => {}
+      heightGizmos.add(knob)
+    })
+  }
+
+  const setHeights = (markers: HeightMarker[], selected: number) => {
+    heightMarkers = markers
+    selectedHeight = selected
+    // Boden und Overlay verformen …
+    displaceTerrain(mapMesh.geometry, 0)
+    displaceTerrain(overlayMesh.geometry, 0.004)
+    // … und alles, was darauf steht, neu setzen.
+    for (const rec of figures.values()) applyFigureState(rec, rec.input)
+    setObjects(lastObjects)
+    setWalls(lastWalls, lastWallsVisible)
+    setSheets(lastSheets)
+    fog.setTerrain()
+    rebuildHeightGizmos()
+    dirty = true
+  }
+
+  const setHeightToolActive = (on: boolean) => {
+    heightGizmos.visible = on
     dirty = true
   }
 
@@ -1037,7 +1181,7 @@ export async function createScene(
 
     if (s.snap) {
       const w = mapToWorld(s.snap.x, s.snap.y, dims)
-      snapRing.position.set(w.x, 0.006, w.z)
+      snapRing.position.set(w.x, heightAtMap(s.snap.x, s.snap.y) + 0.006, w.z)
       ;(snapRing.material as import('three').MeshBasicMaterial).color.set(s.accent)
       snapRing.visible = true
     } else {
@@ -1050,7 +1194,9 @@ export async function createScene(
       const centerY = s.rangeBox.y + s.rangeBox.size / 2
       const w = mapToWorld(centerX, centerY, dims)
       rangeField.scale.set(sizeCells, sizeCells, 1)
-      rangeField.position.set(w.x, 0.0045, w.z)
+      // Flach auf Hoehe des Startfelds; ueber einen Hang folgt es nicht — das
+      // waere ein eigenes Gitter fuer ein Overlay, das nur Sekunden lebt.
+      rangeField.position.set(w.x, heightAtMap(centerX, centerY) + 0.0045, w.z)
       ;(rangeField.material as import('three').MeshBasicMaterial).color.set(s.accent)
       rangeField.visible = true
     } else {
@@ -1060,7 +1206,7 @@ export async function createScene(
     // Die gezogene Figur hebt ab, ihr Schatten wird groesser und weicher.
     for (const [id, rec] of figures) {
       const lifted = id === draggingId
-      rec.group.position.y = lifted ? 0.35 : 0
+      rec.group.position.y = rec.terrainY + (lifted ? 0.35 : 0)
       rec.shadow.position.y = lifted ? -0.347 : 0.003
       rec.shadow.scale.setScalar(lifted ? 1.35 : 1)
       ;(rec.shadow.material as import('three').MeshBasicMaterial).opacity = lifted ? 0.3 : 0.45
@@ -1082,6 +1228,7 @@ export async function createScene(
   // --- Wuerfel -----------------------------------------------------------
   const dice: DiceLayer = createDiceLayer(THREE, scene, {
     dims,
+    heightAtWorld,
     onNeedsRender: () => {
       dirty = true
     },
@@ -1092,6 +1239,7 @@ export async function createScene(
   const fog: FogLayer = createFogLayer(THREE, scene, {
     cols,
     rows,
+    heightAtWorld,
     onNeedsRender: () => {
       dirty = true
     },
@@ -1436,6 +1584,12 @@ export async function createScene(
   const pickGround = (clientX: number, clientY: number): Point | null => {
     toNdc(clientX, clientY)
     raycaster.setFromCamera(ndc, camera)
+    // Erst gegen das Gelaende: auf einer Kuppe traefe die flache Ebene
+    // darunter einen Punkt, der perspektivisch weiter hinten liegt — die
+    // Figur spraenge beim Ziehen den Hang hinab.
+    const terrainHit = raycaster.intersectObject(mapMesh, false)[0]
+    if (terrainHit) return worldToMap(terrainHit.point.x, terrainHit.point.z, dims)
+    // Ausserhalb der Karte (Sitzplaetze, Boegen): die Ebene genuegt.
     const hit = raycaster.ray.intersectPlane(groundPlane, hitPoint)
     if (!hit) return null
     return worldToMap(hit.x, hit.z, dims)
@@ -1472,7 +1626,8 @@ export async function createScene(
    */
   const projectToScreen = (mapX: number, mapY: number, heightCells: number): ScreenPos => {
     const w = mapToWorld(mapX, mapY, dims)
-    projectVec.set(w.x, heightCells, w.z).project(camera)
+    // `heightCells` ist relativ zum Boden — der Boden selbst hat hier Hoehe.
+    projectVec.set(w.x, heightAtMap(mapX, mapY) + heightCells, w.z).project(camera)
     const r = canvas.getBoundingClientRect()
     return {
       x: (projectVec.x * 0.5 + 0.5) * r.width,
@@ -1534,6 +1689,8 @@ export async function createScene(
     setObjects,
     setWalls,
     rollDice,
+    setHeights,
+    setHeightToolActive,
     setSheets,
     pickSheet,
     focusSheet,

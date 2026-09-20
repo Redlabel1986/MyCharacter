@@ -16,6 +16,16 @@ const wallSchema = z.object({
   y2: z.number().finite(),
 })
 
+// Hoehenpunkt der 3D-Ansicht. Die Grenzen entsprechen denen des Editors —
+// ein Turm von 50 Zellen oder ein Radius ueber die ganze Karte kaeme sonst
+// ueber die API herein.
+const heightSchema = z.object({
+  x: z.number().finite(),
+  y: z.number().finite(),
+  height: z.number().finite().min(-4).max(8),
+  radius: z.number().finite().min(1).max(20000),
+})
+
 const bodySchema = z.object({
   name: z.string().min(1).max(80).optional(),
   gridType: z.enum(GRID_TYPES).optional(),
@@ -33,6 +43,9 @@ const bodySchema = z.object({
   startCells: z.array(cellTupleSchema).max(50000).optional(),
   // Cap auf 5000 Mauer-Segmente — mehr braucht keine sinnvolle Karte.
   walls: z.array(wallSchema).max(5000).optional(),
+  // Mehr als 500 Hoehenpunkte braucht keine Karte; das Gelaende wird pro
+  // Punkt und Gitterknoten ausgewertet.
+  heights: z.array(heightSchema).max(500).optional(),
   timeOfDay: z.enum(TIMES_OF_DAY).optional(),
   // Spawn-Punkt fuer neue Charakter-Tokens. null setzt ihn zurueck.
   spawnX: z.number().int().min(-50000).max(50000).nullable().optional(),

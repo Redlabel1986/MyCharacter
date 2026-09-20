@@ -28,6 +28,9 @@ import {
   sheetSlots,
   SHEET_WIDTH_CELLS,
   SHEET_HEIGHT_CELLS,
+  HEIGHT_MIN,
+  HEIGHT_MAX,
+  type HeightMarker,
 } from '~~/shared/battle-3d'
 import { paintSheet } from '~/composables/useBattle3DSheet'
 import {
@@ -507,6 +510,9 @@ watch(stage3d, (v) => {
     // umschaltet, saesse sonst in einem Werkzeug fest, das nichts tut.
     // Auswaehlen und AoE funktionieren in 3D und bleiben deshalb stehen.
     if (toolMode.value !== 'select' && toolMode.value !== 'aoe') toolMode.value = 'select'
+  } else if (toolMode.value === 'height') {
+    // Umgekehrt: das Hoehen-Werkzeug gibt es nur in 3D.
+    toolMode.value = 'select'
   }
 })
 const onStage3dFallback = (reason: string) => {
@@ -1748,7 +1754,90 @@ type ToolMode =
   | 'wall-erase'
   | 'spawn-set'
   | 'aoe'
+  | 'height'
 const toolMode = ref<ToolMode>('select')
+
+// --- Gelaendehoehen (3D) -----------------------------------------------------
+/**
+ * Das einzige DM-Werkzeug, das in der 3D-Ansicht lebt: sein Ergebnis ist nur
+ * dort zu sehen, und man setzt eine Kuppe dort, wo man sie sieht. In 2D
+ * erscheinen die Punkte nur als Markierung.
+ */
+const heightMarkers = computed<HeightMarker[]>(() => map.value?.heights ?? [])
+const selectedHeight = ref(-1)
+const heightSaving = ref(false)
+
+/** Optimistisch setzen, Server folgt. Wie bei den Mauern. */
+const persistHeights = async (next: HeightMarker[]) => {
+  if (!map.value) return
+  map.value = { ...map.value, heights: next }
+  heightSaving.value = true
+  try {
+    await $fetch(`/api/groups/${groupId}/maps/${mapId}`, {
+      method: 'PUT',
+      body: { heights: next },
+    })
+  } catch (e) {
+    console.error('Hoehen speichern fehlgeschlagen', e)
+    await fetchMap()
+  } finally {
+    heightSaving.value = false
+  }
+}
+
+/** Nur lokal aendern (waehrend Ziehen/Schieben); gespeichert wird bei commit. */
+const setHeightsLocal = (next: HeightMarker[]) => {
+  if (!map.value) return
+  map.value = { ...map.value, heights: next }
+}
+
+const onHeightAdd = (e: { mapX: number; mapY: number }) => {
+  if (!isDm.value || !map.value) return
+  const g = map.value.gridSize > 0 ? map.value.gridSize : 50
+  const next = [
+    ...heightMarkers.value,
+    { x: Math.round(e.mapX), y: Math.round(e.mapY), height: 1, radius: g * 4 },
+  ]
+  selectedHeight.value = next.length - 1
+  void persistHeights(next)
+}
+const onHeightSelect = (i: number) => {
+  selectedHeight.value = i
+}
+const onHeightMove = (e: { index: number; mapX: number; mapY: number }) => {
+  if (!isDm.value) return
+  const next = heightMarkers.value.map((m, i) =>
+    i === e.index ? { ...m, x: Math.round(e.mapX), y: Math.round(e.mapY) } : m,
+  )
+  setHeightsLocal(next)
+}
+const onHeightChange = (e: { index: number; height: number; radius: number }) => {
+  if (!isDm.value) return
+  const next = heightMarkers.value.map((m, i) =>
+    i === e.index
+      ? {
+          ...m,
+          height: Math.max(HEIGHT_MIN, Math.min(HEIGHT_MAX, e.height)),
+          radius: Math.max(1, e.radius),
+        }
+      : m,
+  )
+  setHeightsLocal(next)
+}
+const onHeightCommit = () => {
+  if (!isDm.value) return
+  void persistHeights(heightMarkers.value)
+}
+const onHeightDelete = (i: number) => {
+  if (!isDm.value) return
+  const next = heightMarkers.value.filter((_, k) => k !== i)
+  selectedHeight.value = -1
+  void persistHeights(next)
+}
+// Werkzeug verlassen → Auswahl aufheben.
+watch(toolMode, (m) => {
+  if (m !== 'height') selectedHeight.value = -1
+})
 
 // --- Zauber-Wirkungsbereich (Area of Effect) ---------------------------------
 // Der Zauberwirker legt ein NxN-Feld auf die Karte; alle Token, deren Mitte im
@@ -3003,6 +3092,7 @@ const endResizeSheet = () => {
           <span><kbd class="font-semibold">Alt</kbd> + Klick — Ping</span>
           <span>Rechtsklick auf eine Figur — Kampfziel</span>
           <span>Zeichnen, Nebel-Pinsel, Mauern und Objekte: in der 2D-Ansicht.</span>
+          <span v-if="isDm">Gelände (Kuppen, Senken): hier über „Gelände".</span>
         </div>
         <div class="flex items-center gap-1">
           <UButton
@@ -3047,6 +3137,22 @@ const endResizeSheet = () => {
             @click="toolMode = toolMode === 'aoe' ? 'select' : 'aoe'"
           >
             AoE
+          </UButton>
+          <!-- Gelaendehoehen: das einzige DM-Werkzeug, das nur in 3D lebt —
+               sein Ergebnis ist nur dort zu sehen. -->
+          <UButton
+            v-if="isDm"
+            size="xs"
+            :variant="toolMode === 'height' ? 'solid' : 'outline'"
+            :color="toolMode === 'height' ? 'primary' : 'neutral'"
+            icon="i-lucide-mountain"
+            :disabled="!stage3d"
+            :title="stage3d
+              ? 'Gelände: Kuppen und Senken setzen, Höhe und Auslaufradius einstellen'
+              : 'Gelände wird in der 3D-Ansicht bearbeitet'"
+            @click="toolMode = toolMode === 'height' ? 'select' : 'height'"
+          >
+            Gelände
           </UButton>
           <template v-if="isDm">
             <UButton
@@ -3370,7 +3476,16 @@ const endResizeSheet = () => {
             :seats="tableSeats3d"
             :sheets="sheets3d"
             :dice-rolls="diceRolls3d"
+            :heights="heightMarkers"
+            :height-tool="isDm && toolMode === 'height'"
+            :selected-height="selectedHeight"
             @sheet-open="openOwnSheet"
+            @height-add="onHeightAdd"
+            @height-select="onHeightSelect"
+            @height-move="onHeightMove"
+            @height-change="onHeightChange"
+            @height-commit="onHeightCommit"
+            @height-delete="onHeightDelete"
             :drag-state="dragState3d"
             :ground-click-mode="toolMode === 'aoe'"
             @fallback="onStage3dFallback"
@@ -3959,6 +4074,42 @@ const endResizeSheet = () => {
                 :fill="nightDarkColor"
                 :mask="`url(#${nightMaskId})`"
               />
+            </svg>
+
+            <!-- Gelaendehoehen (nur DM): in 2D nur als Markierung — Ring am
+                 Auslaufradius, Hoehe als Zahl. Bearbeitet wird in 3D. -->
+            <svg
+              v-if="isDm && imgW && imgH && heightMarkers.length"
+              class="absolute inset-0 pointer-events-none"
+              :width="imgW"
+              :height="imgH"
+              :viewBox="`0 0 ${imgW} ${imgH}`"
+            >
+              <g v-for="(hm, i) in heightMarkers" :key="`h-${i}`">
+                <circle
+                  :cx="hm.x"
+                  :cy="hm.y"
+                  :r="hm.radius"
+                  fill="none"
+                  :stroke="hm.height >= 0 ? 'rgba(22,163,74,0.8)' : 'rgba(37,99,235,0.8)'"
+                  stroke-width="2"
+                  stroke-dasharray="8 6"
+                />
+                <circle :cx="hm.x" :cy="hm.y" r="6" :fill="hm.height >= 0 ? '#16a34a' : '#2563eb'" />
+                <text
+                  :x="hm.x"
+                  :y="hm.y - 12"
+                  text-anchor="middle"
+                  font-size="14"
+                  font-weight="700"
+                  fill="#fff"
+                  stroke="rgba(0,0,0,0.7)"
+                  stroke-width="3"
+                  paint-order="stroke"
+                >
+                  {{ hm.height > 0 ? '+' : '' }}{{ hm.height }}
+                </text>
+              </g>
             </svg>
 
             <!-- Startbereich: vom DM markierte Spawn-Zellen. Nur fuer den DM

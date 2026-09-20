@@ -24,8 +24,16 @@ import {
   type TableSeat,
   type Sheet3DInput,
   type DiceRollRequest,
+  type HeightMarker,
 } from '~/composables/useBattle3DScene'
-import { figureDims } from '~~/shared/battle-3d'
+import {
+  figureDims,
+  pickHeightMarker,
+  HEIGHT_MIN,
+  HEIGHT_MAX,
+  HEIGHT_RADIUS_MIN_CELLS,
+  HEIGHT_RADIUS_MAX_CELLS,
+} from '~~/shared/battle-3d'
 import type { BattleMap, Wall } from '~~/shared/battle-types'
 
 const props = defineProps<{
@@ -66,6 +74,12 @@ const props = defineProps<{
    * geworfen; die Seite darf die Liste beliebig oft neu setzen.
    */
   diceRolls: DiceRollRequest[]
+  /** Gelaende: Hoehenpunkte des DM. */
+  heights: HeightMarker[]
+  /** Hoehen-Werkzeug aktiv (nur DM): Linksklick setzt/waehlt Punkte. */
+  heightTool: boolean
+  /** Im Editor gewaehlter Punkt, −1 = keiner. */
+  selectedHeight: number
   /** Ab wie vielen Pixeln ein gedrueckter Zeiger als Zug gilt. */
   dragThresholdPx: number
   /**
@@ -98,6 +112,15 @@ const emit = defineEmits<{
   ]
   /** Der vollstaendige, bedienbare Charakterbogen soll sich oeffnen. */
   'sheet-open': [tokenId: number]
+  /** Hoehen-Editor: neuer Punkt an dieser Stelle. */
+  'height-add': [payload: { mapX: number; mapY: number }]
+  'height-select': [index: number]
+  /** Waehrend des Ziehens, fortlaufend. */
+  'height-move': [payload: { index: number; mapX: number; mapY: number }]
+  /** Ziehen beendet — jetzt speichern. */
+  'height-commit': []
+  'height-change': [payload: { index: number; height: number; radius: number }]
+  'height-delete': [index: number]
 }>()
 
 /**
@@ -241,9 +264,11 @@ const loadImage = (src: string): Promise<HTMLImageElement | null> =>
  *   rechts auf Figur -> 'menu'   (Kontextmenue, sofern kaum bewegt)
  *   rechts auf Boden -> 'pan'    (verschieben)
  */
-type PointerMode = 'none' | 'orbit' | 'pan' | 'token' | 'menu' | 'sheet'
+type PointerMode = 'none' | 'orbit' | 'pan' | 'token' | 'menu' | 'sheet' | 'height'
 let mode: PointerMode = 'none'
 let pressedSheetId: number | null = null
+/** Im Hoehen-Werkzeug: Index des Punkts, der gerade gezogen wird. */
+let draggedHeight = -1
 let lastX = 0
 let lastY = 0
 let downX = 0
@@ -329,6 +354,26 @@ const onPointerDown = (e: PointerEvent) => {
     return
   }
 
+  // Hoehen-Werkzeug: Linksklick gehoert dem Gelaende. Punkt getroffen →
+  // waehlen und ziehen; sonst neuen Punkt setzen.
+  if (e.button === 0 && props.heightTool) {
+    const p = scene.pickGround(e.clientX, e.clientY)
+    if (p) {
+      const g = props.map.gridSize > 0 ? props.map.gridSize : 50
+      const idx = pickHeightMarker(props.heights, p.x, p.y, g * 0.9)
+      if (idx >= 0) {
+        emit('height-select', idx)
+        draggedHeight = idx
+        mode = 'height'
+      } else {
+        emit('height-add', { mapX: p.x, mapY: p.y })
+        mode = 'none'
+      }
+    }
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    return
+  }
+
   // Ein eigener Charakterbogen auf dem Tisch geht allem voran: er liegt
   // ausserhalb der Karte, dort steht ohnehin keine Figur.
   if (e.button === 0) {
@@ -375,7 +420,10 @@ const onPointerMove = (e: PointerEvent) => {
   }
   if (!movedFar) return
 
-  if (mode === 'token') {
+  if (mode === 'height') {
+    const p = scene.pickGround(e.clientX, e.clientY)
+    if (p && draggedHeight >= 0) emit('height-move', { index: draggedHeight, mapX: p.x, mapY: p.y })
+  } else if (mode === 'token') {
     const p = scene.pickGround(e.clientX, e.clientY)
     if (p) emit('token-move', { mapX: p.x, mapY: p.y })
   } else if (mode === 'orbit') {
@@ -411,6 +459,12 @@ const onPointerUp = (e: PointerEvent) => {
   grabbedId = null
   mode = 'none'
   if (!scene) return
+
+  if (wasMode === 'height') {
+    draggedHeight = -1
+    if (movedFar) emit('height-commit')
+    return
+  }
 
   if (wasMode === 'sheet') {
     const sheetId = pressedSheetId
@@ -672,6 +726,8 @@ onMounted(async () => {
   scene.setObjects(props.objects)
   scene.setWalls(props.walls, props.wallsVisible)
   scene.setSheets(props.sheets)
+  scene.setHeights(props.heights, props.selectedHeight)
+  scene.setHeightToolActive(props.heightTool)
   armDice()
   scene.setTimeOfDay(props.vision.timeOfDay)
   scene.setVision(props.vision)
@@ -712,6 +768,46 @@ watch(
 // unsichtbar. Deshalb hier ausdruecklich ein Bild anfordern.
 watch(() => props.seats, () => scene?.requestRender(), { deep: true })
 watch(() => props.sheets, (list: Sheet3DInput[]) => scene?.setSheets(list), { deep: true })
+/**
+ * Gelaende-Updates auf ein Bild je Frame drosseln. Beim Ziehen eines Punkts
+ * kaeme sonst mit jedem Mausereignis eine komplette Neuberechnung von fuenf
+ * Gittern samt allem, was darauf steht.
+ */
+let heightsPending = false
+watch(
+  () => [props.heights, props.selectedHeight] as const,
+  () => {
+    if (heightsPending) return
+    heightsPending = true
+    requestAnimationFrame(() => {
+      heightsPending = false
+      scene?.setHeights(props.heights, props.selectedHeight)
+    })
+  },
+  { deep: true },
+)
+watch(() => props.heightTool, (on: boolean) => scene?.setHeightToolActive(on))
+
+/** Das gewaehlte Hoehenpunkt-Objekt, fuer das Panel. */
+const selectedMarker = computed<HeightMarker | null>(
+  () => props.heights[props.selectedHeight] ?? null,
+)
+const gridPx = computed(() => (props.map.gridSize > 0 ? props.map.gridSize : 50))
+const sliderValue = (e: Event) => Number((e.target as HTMLInputElement | null)?.value ?? 0)
+const onHeightSlider = (e: Event) => {
+  const m = selectedMarker.value
+  if (!m) return
+  emit('height-change', { index: props.selectedHeight, height: sliderValue(e), radius: m.radius })
+}
+const onRadiusSlider = (e: Event) => {
+  const m = selectedMarker.value
+  if (!m) return
+  emit('height-change', {
+    index: props.selectedHeight,
+    height: m.height,
+    radius: sliderValue(e) * gridPx.value,
+  })
+}
 
 /**
  * Geworfene Ids merken, damit ein Wurf nicht erneut rollt, wenn die Seite die
@@ -892,6 +988,63 @@ watch(
       >
         Kamera zurücksetzen
       </UButton>
+    </div>
+
+    <!-- Hoehen-Editor (nur DM, nur mit aktivem Werkzeug). Ohne gewaehlten
+         Punkt ein Hinweis, mit gewaehltem die Regler. -->
+    <div
+      v-if="heightTool"
+      class="absolute top-2 left-2 flex max-w-[22rem] flex-col gap-2 rounded bg-black/75 px-3 py-2 text-xs text-amber-50 backdrop-blur"
+    >
+      <div class="flex items-center gap-2">
+        <UIcon name="i-lucide-mountain" class="size-4 shrink-0 text-amber-300" />
+        <span v-if="!selectedMarker" class="flex-1">
+          Klick auf die Karte setzt eine Kuppe. Klick auf einen Punkt wählt ihn, Ziehen verschiebt ihn.
+        </span>
+        <span v-else class="flex-1 font-semibold">Höhenpunkt {{ selectedHeight + 1 }}</span>
+        <UButton
+          v-if="selectedMarker"
+          size="xs"
+          color="error"
+          variant="soft"
+          icon="i-lucide-trash-2"
+          title="Punkt löschen"
+          @click="emit('height-delete', selectedHeight)"
+        />
+      </div>
+      <template v-if="selectedMarker">
+        <label class="flex items-center gap-2">
+          <span class="w-14">Höhe</span>
+          <input
+            type="range"
+            :min="HEIGHT_MIN"
+            :max="HEIGHT_MAX"
+            step="0.25"
+            :value="selectedMarker.height"
+            class="flex-1 accent-amber-300"
+            @input="onHeightSlider"
+            @change="emit('height-commit')"
+          >
+          <span class="w-14 text-right tabular-nums">{{ selectedMarker.height > 0 ? '+' : '' }}{{ selectedMarker.height.toFixed(2) }}</span>
+        </label>
+        <label class="flex items-center gap-2">
+          <span class="w-14">Radius</span>
+          <input
+            type="range"
+            :min="HEIGHT_RADIUS_MIN_CELLS"
+            :max="HEIGHT_RADIUS_MAX_CELLS"
+            step="0.5"
+            :value="selectedMarker.radius / gridPx"
+            class="flex-1 accent-amber-300"
+            @input="onRadiusSlider"
+            @change="emit('height-commit')"
+          >
+          <span class="w-14 text-right tabular-nums">{{ (selectedMarker.radius / gridPx).toFixed(1) }} F.</span>
+        </label>
+        <div class="text-[10px] text-amber-50/60">
+          Negative Höhe senkt ab. Der Radius ist der Weg, über den die Steigung ausläuft.
+        </div>
+      </template>
     </div>
 
     <!-- Nahblick auf einen Charakterbogen. Der Hinweis sagt beides: wie man

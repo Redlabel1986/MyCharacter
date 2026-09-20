@@ -382,9 +382,14 @@ const ARC_CELLS = 2.6
 export function createDiceLayer(
   THREE: ThreeNs,
   scene: import('three').Scene,
-  opts: { dims: MapDims; onNeedsRender: () => void },
+  opts: {
+    dims: MapDims
+    /** Gelaendehoehe am Weltpunkt — die Wuerfel landen auf Kuppen, nicht darin. */
+    heightAtWorld: (x: number, z: number) => number
+    onNeedsRender: () => void
+  },
 ): DiceLayer {
-  const { dims, onNeedsRender } = opts
+  const { dims, heightAtWorld, onNeedsRender } = opts
   const { cols, rows } = mapCells(dims)
   const span = Math.max(cols, rows)
   const models = new Map<string, DieModel>()
@@ -480,14 +485,16 @@ export function createDiceLayer(
 
       // Nebeneinander, leicht versetzt — kein Haufen, keine Perlenschnur.
       const sideways = (i - (pieces.length - 1) / 2) * 1.25
-      const land = new THREE.Vector3(
-        cx + -fromZ * sideways + (Math.random() - 0.5) * 0.4,
-        model.inradius,
-        cz + fromX * sideways + (Math.random() - 0.5) * 0.4,
-      )
+      const landX = cx + -fromZ * sideways + (Math.random() - 0.5) * 0.4
+      const landZ = cz + fromX * sideways + (Math.random() - 0.5) * 0.4
+      // Ruhehoehe = Gelaende plus Inkreisradius; das Weiterrutschen nach dem
+      // Aufprall bleibt auf der Landehoehe — ueber einen Hang rutscht kein
+      // Wuerfel, der liegt.
+      const restH = heightAtWorld(landX, landZ) + model.inradius
+      const land = new THREE.Vector3(landX, restH, landZ)
       const start = new THREE.Vector3(
         land.x + fromX * span * 0.55,
-        model.inradius + 1.4,
+        restH + 1.4,
         land.z + fromZ * span * 0.55,
       )
       const dir = new THREE.Vector3(-fromX, 0, -fromZ)
@@ -510,7 +517,7 @@ export function createDiceLayer(
         spin,
         target,
         t0: now + i * STAGGER_MS,
-        restH: model.inradius,
+        restH,
         done: false,
       })
     })

@@ -47,6 +47,8 @@ export interface FogLayer {
   setInput(input: FogInput): void
   setMistEnabled(on: boolean): void
   setReducedMotion(on: boolean): void
+  /** Nach einer Gelaendeaenderung: alle drei Ebenen neu auf den Boden legen. */
+  setTerrain(): void
   /** Wird pro Frame mit der Laufzeit in Sekunden gerufen. */
   update(tSec: number): void
   dispose(): void
@@ -105,9 +107,43 @@ float fbm(vec2 p, float t) {
 export function createFogLayer(
   THREE: ThreeNs,
   scene: import('three').Scene,
-  opts: { cols: number; rows: number; onNeedsRender: () => void },
+  opts: {
+    cols: number
+    rows: number
+    /** Gelaendehoehe an einem Weltpunkt (X/Z) in Zellen. */
+    heightAtWorld: (x: number, z: number) => number
+    onNeedsRender: () => void
+  },
 ): FogLayer {
-  const { cols, rows, onNeedsRender } = opts
+  const { cols, rows, heightAtWorld, onNeedsRender } = opts
+
+  // Dieselbe Feinheit fuer alle drei Ebenen wie fuer den Boden, damit sie
+  // dieselben Haenge zeigen und nirgends durch den Boden stossen.
+  const segX = Math.min(MAX_SEGMENTS, Math.max(8, cols * 2))
+  const segY = Math.min(MAX_SEGMENTS, Math.max(8, rows * 2))
+
+  /**
+   * Boden-Ebenen (Schleier, Schwaden): jeden Knoten auf Gelaendehoehe + lift.
+   * Die Bank bekommt die Gelaendehoehe stattdessen als Attribut `terrain`,
+   * weil ihr Vertex-Shader die Nebelhoehe obendrauf rechnet und der
+   * Farbverlauf NUR die Nebelhoehe kennen darf — sonst waere eine Bank auf
+   * einer Kuppe oben heller als dieselbe Bank im Tal.
+   */
+  const displace = (g: import('three').BufferGeometry, lift: number) => {
+    const pos = g.attributes.position!
+    for (let i = 0; i < pos.count; i++) {
+      pos.setY(i, heightAtWorld(pos.getX(i), pos.getZ(i)) + lift)
+    }
+    pos.needsUpdate = true
+    g.computeBoundingSphere()
+  }
+  const writeTerrainAttribute = (g: import('three').BufferGeometry) => {
+    const pos = g.attributes.position!
+    const arr = new Float32Array(pos.count)
+    for (let i = 0; i < pos.count; i++) arr[i] = heightAtWorld(pos.getX(i), pos.getZ(i))
+    g.setAttribute('terrain', new THREE.Float32BufferAttribute(arr, 1))
+    g.computeBoundingSphere()
+  }
 
   // --- Maskentextur ------------------------------------------------------
   let maskTex: import('three').DataTexture | null = null
@@ -159,7 +195,7 @@ export function createFogLayer(
    * Brett — auch ueber den aufgedeckten Feldern. Deshalb entscheidet jetzt das
    * Alpha und nicht die Farbe.
    */
-  const darkGeo = new THREE.PlaneGeometry(cols, rows)
+  const darkGeo = new THREE.PlaneGeometry(cols, rows, segX, segY)
   darkGeo.rotateX(-Math.PI / 2)
   const darkMat = new THREE.ShaderMaterial({
     uniforms: { uMask, uDark, uDarkAmount, uTime, uNoiseScale },
@@ -199,20 +235,21 @@ export function createFogLayer(
     `,
   })
   const darkMesh = new THREE.Mesh(darkGeo, darkMat)
-  // Ueber Karte (0) und Objekten (0.005), unter den Figuren.
-  darkMesh.position.y = 0.012
+  // Ueber Karte (0) und Objekten (0.005), unter den Figuren. Der Abstand
+  // steckt in den Knoten selbst (displace), nicht in position.y — so folgt
+  // die Ebene dem Gelaende.
+  displace(darkGeo, 0.012)
   darkMesh.renderOrder = 2
   darkMesh.visible = false
   darkMesh.raycast = () => {}
   scene.add(darkMesh)
 
   // --- 2. Nebelbank ------------------------------------------------------
-  const segX = Math.min(MAX_SEGMENTS, Math.max(8, cols * 2))
-  const segY = Math.min(MAX_SEGMENTS, Math.max(8, rows * 2))
   // Geometrie schon flach drehen statt das Mesh: danach ist lokales +Y auch
   // Welt-Oben, und der Vertex-Shader kann direkt auf position.y schieben.
   const bankGeo = new THREE.PlaneGeometry(cols, rows, segX, segY)
   bankGeo.rotateX(-Math.PI / 2)
+  writeTerrainAttribute(bankGeo)
 
   const bankMat = new THREE.ShaderMaterial({
     uniforms: { uMask, uTime, uFogNear, uFogFar, uBankHeight, uNoiseScale, uMaxAlpha },
@@ -225,6 +262,7 @@ export function createFogLayer(
       uniform sampler2D uMask;
       uniform float uBankHeight;
       uniform float uTime;
+      attribute float terrain;
       varying vec2 vUv;
       varying float vFog;
       varying float vHeight;
@@ -247,9 +285,13 @@ export function createFogLayer(
           0.16 * sin(p.x * 0.31 + uTime * 0.55) * cos(p.z * 0.27 - uTime * 0.41) +
           0.09 * sin(p.z * 0.63 + uTime * 0.83) +
           0.06 * cos(p.x * 0.91 - uTime * 1.07);
-        p.y += m * uBankHeight * (1.0 + wobble);
+        float bank = m * uBankHeight * (1.0 + wobble);
+        // Gelaende darunter, Nebel obendrauf. vHeight kennt NUR den Nebel —
+        // der Farbverlauf darf nicht davon abhaengen, ob die Bank im Tal
+        // oder auf der Kuppe steht.
+        p.y += terrain + bank;
 
-        vHeight = p.y;
+        vHeight = bank;
         vLocal = p;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
       }
@@ -295,7 +337,7 @@ export function createFogLayer(
   scene.add(bankMesh)
 
   // --- 3. Bodenschwaden --------------------------------------------------
-  const mistGeo = new THREE.PlaneGeometry(cols, rows, 1, 1)
+  const mistGeo = new THREE.PlaneGeometry(cols, rows, segX, segY)
   mistGeo.rotateX(-Math.PI / 2)
   const mistMat = new THREE.ShaderMaterial({
     uniforms: { uMask, uTime, uFogNear, uNoiseScale },
@@ -335,7 +377,7 @@ export function createFogLayer(
     `,
   })
   const mistMesh = new THREE.Mesh(mistGeo, mistMat)
-  mistMesh.position.y = 0.08
+  displace(mistGeo, 0.08)
   mistMesh.renderOrder = 4
   mistMesh.visible = false
   mistMesh.raycast = () => {}
@@ -410,6 +452,13 @@ export function createFogLayer(
     onNeedsRender()
   }
 
+  const setTerrain = () => {
+    displace(darkGeo, 0.012)
+    displace(mistGeo, 0.08)
+    writeTerrainAttribute(bankGeo)
+    onNeedsRender()
+  }
+
   const update = (tSec: number) => {
     if (reducedMotion) return
     uTime.value = tSec
@@ -425,5 +474,5 @@ export function createFogLayer(
     maskTex = null
   }
 
-  return { setInput, setMistEnabled, setReducedMotion, update, dispose }
+  return { setInput, setMistEnabled, setReducedMotion, setTerrain, update, dispose }
 }
