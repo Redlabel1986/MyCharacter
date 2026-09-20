@@ -284,6 +284,33 @@ export function fogGridToRGBA(g: FogGrid, flipY = false): Uint8ClampedArray {
 }
 
 /**
+ * Weicht die Nebelkante NACH INNEN auf, statt nach aussen.
+ *
+ * `smoothFogGrid` laesst die offene Flaeche nach aussen ausbluten — fuer die
+ * Hoehe der Nebelbank richtig, fuer die Sichtbarkeit des Gelaendes ein Leck.
+ * Hier wird die Boeschung umgedreht: der Nebel kriecht in den sichtbaren
+ * Bereich hinein. Dieselbe weiche Kante, nur auf der sicheren Seite — und
+ * genau so macht es die 2D-Ansicht, deren Radialverlauf innerhalb des
+ * Sichtradius ausfaedet und am Radius voll vernebelt ist.
+ *
+ * Garantie: das Ergebnis ist an JEDER Zelle groesser oder gleich der Eingabe.
+ * `smoothFogGrid` bildet ein Minimum, also gilt smooth(1-g) <= 1-g und damit
+ * 1 - smooth(1-g) >= g. Eine vernebelte Zelle kann dadurch nie aufgehen.
+ */
+export function erodeOpenArea(g: FogGrid, radius: number): FogGrid {
+  const inverted: FogGrid = {
+    cols: g.cols,
+    rows: g.rows,
+    data: new Float32Array(g.data.length),
+  }
+  for (let i = 0; i < g.data.length; i++) inverted.data[i] = 1 - clamp01(g.data[i]!)
+  const spread = smoothFogGrid(inverted, radius)
+  const out = new Float32Array(g.data.length)
+  for (let i = 0; i < out.length; i++) out[i] = clamp01(1 - spread.data[i]!)
+  return { cols: g.cols, rows: g.rows, data: out }
+}
+
+/**
  * Nebelmaske mit ZWEI Bedeutungen in einer Textur.
  *
  * Das ist kein Trick zum Speichersparen, sondern eine Sicherheitsmassnahme.
@@ -292,18 +319,27 @@ export function fogGridToRGBA(g: FogGrid, flipY = false): Uint8ClampedArray {
  * es ein Informationsleck: der Spieler saehe Gelaende, das ihm in der
  * 2D-Ansicht verborgen bleibt.
  *
- * Deshalb:
- *   R = geboescht  -> steuert nur die HOEHE der Nebelbank (Geometrie)
- *   G = hart       -> steuert Deckkraft und Bodenabdunklung
+ * Deshalb drei Kanaele:
+ *   R = nach aussen geboescht -> Hoehe UND Deckkraft der Nebelbank. Die Bank
+ *       ist blickdichter Dunst; wie weich sie ausfranst, verraet nichts.
+ *   G = hart                  -> die unverfaelschte Sichtgrenze
+ *   B = nach innen erodiert   -> Bodenabdunklung. Immer >= G, also niemals
+ *       durchlaessiger als die echte Sicht.
  *
- * Beide Gitter muessen dieselben Masse haben.
+ * Alle drei Gitter muessen dieselben Masse haben.
  */
 export function fogMaskRGBA(
   sloped: FogGrid,
   hard: FogGrid,
+  darkening: FogGrid,
   flipY = false,
 ): Uint8ClampedArray {
-  if (sloped.cols !== hard.cols || sloped.rows !== hard.rows) {
+  if (
+    sloped.cols !== hard.cols ||
+    sloped.rows !== hard.rows ||
+    darkening.cols !== hard.cols ||
+    darkening.rows !== hard.rows
+  ) {
     throw new Error('fogMaskRGBA: Gitter haben unterschiedliche Masse')
   }
   const { cols, rows } = sloped
@@ -315,7 +351,7 @@ export function fogMaskRGBA(
       const o = (row * cols + col) * 4
       out[o] = Math.round(clamp01(sloped.data[src]!) * 255)
       out[o + 1] = Math.round(clamp01(hard.data[src]!) * 255)
-      out[o + 2] = 0
+      out[o + 2] = Math.round(clamp01(darkening.data[src]!) * 255)
       out[o + 3] = 255
     }
   }
@@ -332,7 +368,13 @@ export function fogMaskRGBA(
  * Phasen sind dieselben, nur als Winkel, Farbe und Staerke ausgedrueckt.
  *
  * `azimuth`/`elevation` in Radiant; `groundDark` ist der Faktor, auf den
- * unbeleuchteter Boden multipliziert wird (0 = schwarz, 1 = unveraendert).
+ * vernebelter Boden multipliziert wird (0 = schwarz, 1 = unveraendert).
+ *
+ * Zu den Nebelfarben: Fog of War ist in diesem Projekt eine VERDUNKLUNG, kein
+ * heller Dunst — die 2D-Ansicht legt `rgba(8,10,22,0.78)` ueber die Karte, und
+ * durch diese 22 % sieht man das Gelaende noch. Helle Nebelfarben uebermalen
+ * die Karte stattdessen; `fogNear`/`fogFar` sind deshalb durchweg dunkel und
+ * hellen nur nach oben hin leicht auf, damit die Bank Volumen bekommt.
  */
 export interface Light3D {
   sunColor: number
@@ -355,11 +397,11 @@ export const LIGHT_3D: Record<string, Light3D> = {
     azimuth: -1.1,
     elevation: 0.42,
     skyColor: 0xffe3c4,
-    groundColor: 0x6b5842,
+    groundColor: 0x2a2018,
     hemiIntensity: 0.62,
-    groundDark: 0.3,
-    fogNear: 0xe8dcc8,
-    fogFar: 0xfff0dc,
+    groundDark: 0.26,
+    fogNear: 0x2b2219,
+    fogFar: 0x5a4a38,
   },
   noon: {
     sunColor: 0xfff6e2,
@@ -367,11 +409,11 @@ export const LIGHT_3D: Record<string, Light3D> = {
     azimuth: 0.35,
     elevation: 1.15,
     skyColor: 0xdfe7ff,
-    groundColor: 0x6a6252,
+    groundColor: 0x1e232b,
     hemiIntensity: 0.8,
-    groundDark: 0.34,
-    fogNear: 0xdcdfe2,
-    fogFar: 0xf4f6f8,
+    groundDark: 0.28,
+    fogNear: 0x252c36,
+    fogFar: 0x4e5a6a,
   },
   evening: {
     sunColor: 0xff9d6b,
@@ -379,11 +421,11 @@ export const LIGHT_3D: Record<string, Light3D> = {
     azimuth: 1.9,
     elevation: 0.3,
     skyColor: 0x8f7fb0,
-    groundColor: 0x4a3a3a,
+    groundColor: 0x241a26,
     hemiIntensity: 0.5,
-    groundDark: 0.24,
-    fogNear: 0xa88b84,
-    fogFar: 0xd9b49a,
+    groundDark: 0.2,
+    fogNear: 0x241a26,
+    fogFar: 0x4a3446,
   },
   night: {
     sunColor: 0x8fa6d8,
@@ -391,11 +433,11 @@ export const LIGHT_3D: Record<string, Light3D> = {
     azimuth: 2.6,
     elevation: 0.85,
     skyColor: 0x2a3550,
-    groundColor: 0x10131f,
+    groundColor: 0x080b14,
     hemiIntensity: 0.28,
-    groundDark: 0.08,
-    fogNear: 0x1c2233,
-    fogFar: 0x39435e,
+    groundDark: 0.1,
+    fogNear: 0x080b14,
+    fogFar: 0x1a2236,
   },
 }
 

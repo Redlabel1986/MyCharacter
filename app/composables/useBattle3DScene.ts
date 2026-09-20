@@ -23,6 +23,7 @@ import {
 } from '~~/shared/battle-3d'
 import { light3dFor } from '~~/shared/battle-3d'
 import { createFogLayer, type FogLayer, type FogInput } from '~/composables/useBattle3DFog'
+import { createTavern, type Tavern } from '~/composables/useBattle3DTavern'
 import type { Point } from '~~/shared/battle-geometry'
 import type { Wall } from '~~/shared/fog'
 
@@ -162,6 +163,8 @@ export interface Scene3DHandle {
   setWalls(walls: Wall[], visible: boolean): void
   setVision(input: FogInput): void
   setVisionLights(lights: VisionLight[]): void
+  /** Schankstube um den Tisch ein- oder ausblenden. */
+  setTavern(on: boolean): void
   setTimeOfDay(timeOfDay: string): void
   setReducedMotion(on: boolean): void
   setDragState(s: DragVisualState): void
@@ -866,6 +869,16 @@ export async function createScene(
     dirty = true
   }
 
+  // --- Die Taverne um den Tisch ------------------------------------------
+  const tavern: Tavern = createTavern(THREE, scene, {
+    cols,
+    rows,
+    onNeedsRender: () => {
+      dirty = true
+    },
+  })
+  const setTavern = (on: boolean) => tavern.setEnabled(on)
+
   // --- Nebel, Dunkelheit und Tageszeit -----------------------------------
   const fog: FogLayer = createFogLayer(THREE, scene, {
     cols,
@@ -884,6 +897,7 @@ export async function createScene(
   const setReducedMotion = (on: boolean) => {
     reducedMotion = on
     fog.setReducedMotion(on)
+    tavern.setReducedMotion(on)
     dirty = true
   }
 
@@ -1091,8 +1105,12 @@ export async function createScene(
     if (!running) return
     rafId = requestAnimationFrame(loop)
     if (document.hidden) return
+    // Das Kaminfeuer VOR der Dirty-Pruefung: es meldet selbst, ob sich seine
+    // Helligkeit merklich geaendert hat. Dadurch loest es nur einige Bilder je
+    // Sekunde aus, statt die Buehne dauerhaft rendern zu lassen.
+    const flickered = tavern.update(t / 1000)
     const animated = hasAnimation()
-    if (!dirty && !animated) return
+    if (!dirty && !animated && !flickered) return
     dirty = false
     const dt = lastTime ? t - lastTime : 16
     lastTime = t
@@ -1225,6 +1243,7 @@ export async function createScene(
     running = false
     cancelAnimationFrame(rafId)
     fog.dispose()
+    tavern.dispose()
     // Ohne explizites Freigeben leckt jeder Moduswechsel eine komplette Szene.
     scene.traverse((obj) => {
       const mesh = obj as import('three').Mesh
@@ -1257,6 +1276,7 @@ export async function createScene(
     setWalls,
     setVision,
     setVisionLights,
+    setTavern,
     setTimeOfDay,
     setReducedMotion,
     setDragState,

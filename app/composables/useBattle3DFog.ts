@@ -21,6 +21,7 @@
 import {
   buildFogGridFromCells,
   smoothFogGrid,
+  erodeOpenArea,
   fogMaskRGBA,
   light3dFor,
 } from '~~/shared/battle-3d'
@@ -57,6 +58,12 @@ export interface FogLayer {
  * harten Kanal G — sonst waere die Boeschung ein Informationsleck.
  */
 const SLOPE_CELLS = 2.5
+/**
+ * Breite der Abdunklungs-Boeschung in Zellen. Kleiner als die der Bank: sie
+ * frisst in den SICHTBAREN Bereich hinein, und zu viel davon naehme dem
+ * Spieler Sicht, die ihm zusteht.
+ */
+const DARK_SLOPE_CELLS = 1.2
 /** Hoehe der Nebelbank in Zellen. */
 const BANK_HEIGHT = 2.2
 /** Hoechste Gitterfeinheit je Achse — daraus ergibt sich die Dreieckszahl. */
@@ -128,6 +135,7 @@ export function createFogLayer(
   const uDarkAmount = { value: 0 }
   const uBankHeight = { value: BANK_HEIGHT }
   const uNoiseScale = { value: 0.35 }
+  const uMaxAlpha = { value: 0.88 }
 
   // --- 1. Bodenabdunklung ------------------------------------------------
   // Eine eigene Ebene mit Multiply-Blending statt eines Eingriffs in das
@@ -154,9 +162,10 @@ export function createFogLayer(
       uniform float uDarkAmount;
       varying vec2 vUv;
       void main() {
-        // Kanal G: die HARTE Maske. Niemals R — die Boeschung wuerde Zellen
-        // aufhellen, die der Spieler nicht sehen darf.
-        float m = texture2D(uMask, vUv).g;
+        // Kanal B: die nach INNEN erodierte Maske. Sie hat eine weiche Kante
+        // (keine Rasterzellen-Treppe) und ist dabei nachweislich nie
+        // durchlaessiger als die harte Sichtgrenze in G.
+        float m = texture2D(uMask, vUv).b;
         vec3 c = mix(vec3(1.0), uDark, m * uDarkAmount);
         gl_FragColor = vec4(c, 1.0);
       }
@@ -179,7 +188,7 @@ export function createFogLayer(
   bankGeo.rotateX(-Math.PI / 2)
 
   const bankMat = new THREE.ShaderMaterial({
-    uniforms: { uMask, uTime, uFogNear, uFogFar, uBankHeight, uNoiseScale },
+    uniforms: { uMask, uTime, uFogNear, uFogFar, uBankHeight, uNoiseScale, uMaxAlpha },
     transparent: true,
     depthWrite: false,
     side: THREE.DoubleSide,
@@ -192,12 +201,14 @@ export function createFogLayer(
       varying vec3 vLocal;
       void main() {
         vUv = uv;
-        // R = geboescht: gibt der Bank ihre weiche Flanke statt einer Treppe.
-        // G = hart: entscheidet ueber die Deckkraft im Fragment-Programm.
-        vec2 m = texture2D(uMask, uv).rg;
-        vFog = m.g;
+        // R = geboescht. Die Bank nimmt sie fuer HOEHE UND DECKKRAFT: sie ist
+        // blickdichter Dunst, der nichts vom Boden preisgibt — wie weich ihre
+        // Kante ausfranst, verraet also nichts. Was man vom Gelaende sieht,
+        // regelt allein die Bodenabdunklung, und die liest den harten Kanal G.
+        float m = texture2D(uMask, uv).r;
+        vFog = m;
         vec3 p = position;
-        p.y += m.r * uBankHeight;
+        p.y += m * uBankHeight;
         vHeight = p.y;
         vLocal = p;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
@@ -209,21 +220,25 @@ export function createFogLayer(
       uniform vec3 uFogFar;
       uniform float uBankHeight;
       uniform float uNoiseScale;
+      uniform float uMaxAlpha;
       varying vec2 vUv;
       varying float vFog;
       varying float vHeight;
       varying vec3 vLocal;
       ${NOISE_GLSL}
       void main() {
-        if (vFog < 0.06) discard;
+        if (vFog < 0.04) discard;
         float n = fbm(vLocal.xz * uNoiseScale, uTime);
-        // Hoehennebel: unten dichter und dunkler, oben ausfransend.
+        // Hoehennebel: unten dichter, oben ausfransend.
         float hk = clamp(vHeight / max(uBankHeight, 0.001), 0.0, 1.0);
         vec3 col = mix(uFogNear, uFogFar, hk);
-        float a = smoothstep(0.12, 0.72, vFog);
-        a *= mix(0.72, 1.0, n);
-        a *= mix(1.0, 0.82, hk);
-        gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));
+        // Weiche Flanke ueber die ganze Boeschungsbreite — genau das, was die
+        // Treppenkante verhindert.
+        float a = smoothstep(0.02, 0.85, vFog);
+        a *= mix(0.55, 1.0, n);
+        // Oben duenner werden lassen, sonst steht dort eine harte Deckflaeche.
+        a *= mix(1.0, 0.35, hk * hk);
+        gl_FragColor = vec4(col, clamp(a * uMaxAlpha, 0.0, 1.0));
       }
     `,
   })
@@ -260,10 +275,14 @@ export function createFogLayer(
       varying vec3 vLocal;
       ${NOISE_GLSL}
       void main() {
-        float m = texture2D(uMask, vUv).g;
+        float m = texture2D(uMask, vUv).r;
+        // Streng an den Nebel gekoppelt — kein Grundschleier. Sonst legte
+        // sich Dunst auch ueber die sichtbaren Bereiche und truebte genau
+        // die Karte, die man sehen will.
+        if (m < 0.04) discard;
         // Andere Driftrichtung als die Bank, sonst wirkt es wie eine Tapete.
         float n = fbm(vLocal.xz * uNoiseScale * 0.7 - vec2(uTime * 0.05, uTime * 0.02), uTime * 0.6);
-        float a = (0.05 + m * 0.2) * smoothstep(0.25, 0.85, n);
+        float a = m * 0.16 * smoothstep(0.25, 0.85, n);
         if (a < 0.005) discard;
         gl_FragColor = vec4(uFogNear, a);
       }
@@ -307,19 +326,29 @@ export function createFogLayer(
       input.blackoutCells,
     )
     const sloped = smoothFogGrid(grid, SLOPE_CELLS)
+    // Die Abdunklung boescht NACH INNEN: so bekommt auch sie eine weiche
+    // Kante, ohne je eine vernebelte Zelle aufzuhellen. Ohne das steht dort
+    // eine Treppe aus Rasterzellen.
+    const darkening = erodeOpenArea(grid, DARK_SLOPE_CELLS)
     const tex = ensureMask(c, r)
     // flipY: eine DataTexture wendet die Eigenschaft nicht an, die Karten-
     // textur (ein Bild) schon. Ohne die Umkehr laege der Nebel spiegelbildlich.
-    const rgba = fogMaskRGBA(sloped, grid, true)
+    const rgba = fogMaskRGBA(sloped, grid, darkening, true)
     ;(tex.image.data as Uint8Array).set(rgba)
     tex.needsUpdate = true
     uMask.value = tex
 
-    // Der DM soll sehen, was er verwaltet — fuer ihn ist alles nur angedeutet.
-    uDark.value.setHex(light.groundColor)
-    uDarkAmount.value = input.isDm ? 0.35 : 1 - light.groundDark
-    const bankOpacity = input.isDm ? 0.45 : 1
-    bankMat.uniforms.uBankHeight!.value = BANK_HEIGHT * bankOpacity
+    // Der DM soll sehen, was er verwaltet. In der 2D-Ansicht liegt sein
+    // Nebel bei 22 % Deckkraft, der des Spielers bei 78 % — dieselbe
+    // Groessenordnung gilt hier, sonst sieht der DM in 3D weniger als in 2D.
+    uDark.value.setHex(light.fogNear)
+    uDarkAmount.value = input.isDm ? 0.22 : 1 - light.groundDark
+    // Die Bank gibt dem Nebel Volumen, sie ersetzt die Verdunklung nicht.
+    // Bei voller Deckkraft waere die Karte darunter uebermalt statt verhuellt
+    // — und der Sinn der Ansicht ist, die Karte zu zeigen.
+    uMaxAlpha.value = input.isDm ? 0.18 : 0.5
+    // Fuer den DM eine flachere Bank: sie soll andeuten, nicht verdecken.
+    uBankHeight.value = input.isDm ? BANK_HEIGHT * 0.5 : BANK_HEIGHT
 
     darkMesh.visible = true
     bankMesh.visible = true

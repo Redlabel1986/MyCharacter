@@ -11,6 +11,7 @@ import {
   fogGridToRGBA,
   buildFogGridFromCells,
   fogMaskRGBA,
+  erodeOpenArea,
   light3dFor,
   MIN_PITCH,
   MAX_PITCH,
@@ -180,44 +181,85 @@ describe('FogGrid', () => {
   })
 })
 
-describe('fogMaskRGBA — Trennung von Hoehe und Deckkraft', () => {
-  it('legt die geboeschte Fassung nach R und die harte nach G', () => {
+describe('erodeOpenArea — weiche Kante nach innen', () => {
+  it('laesst vernebelte Zellen unangetastet vernebelt', () => {
+    const g = createFogGrid(9, 9, 1)
+    setFogCell(g, 4, 4, 0)
+    const e = erodeOpenArea(g, 3)
+    expect(getFogCell(e, 0, 0)).toBe(1)
+    expect(getFogCell(e, 8, 8)).toBe(1)
+  })
+
+  it('haelt die Mitte eines grossen offenen Bereichs frei', () => {
+    const g = createFogGrid(21, 21, 1)
+    for (let c = 4; c <= 16; c++) for (let r = 4; r <= 16; r++) setFogCell(g, c, r, 0)
+    const e = erodeOpenArea(g, 2.5)
+    expect(getFogCell(e, 10, 10)).toBeLessThan(0.05)
+  })
+
+  it('laesst den Nebel an der Grenze nach innen kriechen', () => {
+    const g = createFogGrid(21, 21, 1)
+    for (let c = 4; c <= 16; c++) for (let r = 4; r <= 16; r++) setFogCell(g, c, r, 0)
+    const e = erodeOpenArea(g, 3)
+    // Direkt innen an der Grenze noch deutlich gedaempft, weiter innen klarer.
+    expect(getFogCell(e, 4, 10)).toBeGreaterThan(0.3)
+    expect(getFogCell(e, 4, 10)).toBeGreaterThan(getFogCell(e, 6, 10))
+  })
+
+  it('ist NIEMALS durchlaessiger als die Eingabe — die zentrale Zusage', () => {
+    const g = createFogGrid(24, 18, 1)
+    // Gemischte Lage: Sicht, Erinnerung, Blackout, einzelne Luecken.
+    for (let c = 3; c <= 9; c++) for (let r = 3; r <= 9; r++) setFogCell(g, c, r, 0)
+    for (let c = 12; c <= 18; c++) for (let r = 6; r <= 12; r++) setFogCell(g, c, r, 0.55)
+    setFogCell(g, 20, 2, 0)
+    setFogCell(g, 6, 6, 1)
+    for (const radius of [1, 2.5, 5]) {
+      const e = erodeOpenArea(g, radius)
+      for (let i = 0; i < g.data.length; i++) {
+        expect(e.data[i]!).toBeGreaterThanOrEqual(g.data[i]! - 1e-6)
+      }
+    }
+  })
+})
+
+describe('fogMaskRGBA — drei Kanaele, drei Aufgaben', () => {
+  it('legt Boeschung nach R, harte Grenze nach G, Abdunklung nach B', () => {
     const hard = createFogGrid(3, 1, 1)
     setFogCell(hard, 1, 0, 0)
     const sloped = smoothFogGrid(hard, 3)
+    const dark = erodeOpenArea(hard, 3)
 
-    const rgba = fogMaskRGBA(sloped, hard)
-    // Zelle 0 ist HART vernebelt (G = 255), die Boeschung hat sie aber
-    // geoeffnet (R < 255). Genau diese Trennung verhindert das Leck.
-    expect(rgba[1]).toBe(255)
+    const rgba = fogMaskRGBA(sloped, hard, dark)
+    // Zelle 0 ist HART vernebelt. Die nach aussen geboeschte Fassung hat sie
+    // geoeffnet (R < 255) — die Abdunklung darf das nicht mitmachen (B = 255).
     expect(rgba[0]).toBeLessThan(255)
-    // Zelle 1 ist in beiden Fassungen offen.
-    expect(rgba[4]).toBe(0)
+    expect(rgba[1]).toBe(255)
+    expect(rgba[2]).toBe(255)
+    // Zelle 1 ist offen; die Abdunklung kriecht hier von beiden Seiten herein.
     expect(rgba[5]).toBe(0)
+    expect(rgba[6]).toBeGreaterThan(0)
   })
 
-  it('oeffnet in G niemals eine Zelle, die hart vernebelt ist', () => {
-    const hard = createFogGrid(9, 9, 1)
-    setFogCell(hard, 4, 4, 0)
-    const sloped = smoothFogGrid(hard, 4)
-    const rgba = fogMaskRGBA(sloped, hard)
-    for (let row = 0; row < 9; row++) {
-      for (let col = 0; col < 9; col++) {
-        const g = rgba[(row * 9 + col) * 4 + 1]
-        const expected = col === 4 && row === 4 ? 0 : 255
-        expect(g).toBe(expected)
-      }
+  it('haelt B ueberall mindestens so dicht wie G', () => {
+    const hard = createFogGrid(12, 12, 1)
+    for (let c = 3; c <= 8; c++) for (let r = 3; r <= 8; r++) setFogCell(hard, c, r, 0)
+    const rgba = fogMaskRGBA(smoothFogGrid(hard, 3), hard, erodeOpenArea(hard, 3))
+    for (let i = 0; i < 12 * 12; i++) {
+      expect(rgba[i * 4 + 2]!).toBeGreaterThanOrEqual(rgba[i * 4 + 1]!)
     }
   })
 
   it('weist ungleich grosse Gitter zurueck', () => {
-    expect(() => fogMaskRGBA(createFogGrid(2, 2, 1), createFogGrid(3, 3, 1))).toThrow()
+    const a = createFogGrid(2, 2, 1)
+    const b = createFogGrid(3, 3, 1)
+    expect(() => fogMaskRGBA(a, b, a)).toThrow()
+    expect(() => fogMaskRGBA(a, a, b)).toThrow()
   })
 
-  it('kehrt mit flipY beide Kanaele gemeinsam um', () => {
+  it('kehrt mit flipY alle Kanaele gemeinsam um', () => {
     const hard = createFogGrid(1, 2, 1)
     setFogCell(hard, 0, 0, 0)
-    const rgba = fogMaskRGBA(hard, hard, true)
+    const rgba = fogMaskRGBA(hard, hard, hard, true)
     expect(rgba[1]).toBe(255)
     expect(rgba[5]).toBe(0)
   })
