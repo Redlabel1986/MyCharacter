@@ -13,6 +13,8 @@ import {
   fogMaskRGBA,
   erodeOpenArea,
   light3dFor,
+  cameraPosition,
+  TAVERN_ROOM,
   MIN_PITCH,
   MAX_PITCH,
   MIN_DIST,
@@ -79,6 +81,44 @@ describe('clampCamera', () => {
 
   it('laesst den Gierwinkel frei drehen', () => {
     expect(clampCamera({ ...base, yaw: 42 }, dims).yaw).toBeCloseTo(42)
+  })
+})
+
+describe('Kamera bleibt in der Schankstube', () => {
+  /**
+   * Der Raum ist nur so lange glaubhaft, wie die Kamera drin bleibt. Verlaesst
+   * sie ihn, blickt man von aussen durch die Waende — und das faellt erst auf,
+   * wenn jemand ganz herauszoomt und steil von oben schaut.
+   */
+  const corners = (span: number) => ({
+    half: TAVERN_ROOM.half * span,
+    ceiling: (TAVERN_ROOM.floorY + TAVERN_ROOM.wallHeight) * span,
+    floor: TAVERN_ROOM.floorY * span,
+  })
+
+  it('haelt jede erreichbare Kameraposition innerhalb der Waende', () => {
+    for (const [imgW, imgH] of [[1000, 800], [4000, 1200], [600, 3000], [2048, 2048]]) {
+      const d: MapDims = { imgW: imgW!, imgH: imgH!, gridSize: 50 }
+      const { cols, rows } = { cols: Math.ceil(imgW! / 50), rows: Math.ceil(imgH! / 50) }
+      const span = Math.max(cols, rows)
+      const room = corners(span)
+
+      for (const pitch of [MIN_PITCH, 0.4, 0.8, 1.2, MAX_PITCH]) {
+        for (const yaw of [0, 0.7, 1.9, 3.5, 5.6]) {
+          for (const [tx, tz] of [[0, 0], [99999, 99999], [-99999, -99999]]) {
+            const c = clampCamera(
+              { yaw, pitch, dist: 99999, targetX: tx!, targetZ: tz! },
+              d,
+            )
+            const p = cameraPosition(c)
+            expect(Math.abs(p.x)).toBeLessThan(room.half)
+            expect(Math.abs(p.z)).toBeLessThan(room.half)
+            expect(p.y).toBeLessThan(room.ceiling)
+            expect(p.y).toBeGreaterThan(room.floor)
+          }
+        }
+      }
+    }
   })
 })
 

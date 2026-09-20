@@ -95,7 +95,10 @@ export interface CameraState {
  */
 export function clampCamera(c: CameraState, d: MapDims): CameraState {
   const { cols, rows } = mapCells(d)
-  const maxDist = Math.max(cols, rows) * 2.5
+  // 1,6-fache Kartenspanne. Weiter weg bringt nichts — die ganze Karte passt
+  // schon bei etwa 1,2 ins Bild — und die Kamera muss innerhalb der Schankstube
+  // bleiben, sonst blickt man von aussen durch die Waende.
+  const maxDist = Math.max(cols, rows) * 1.6
   const marginX = (cols / 2) * 1.25
   const marginZ = (rows / 2) * 1.25
   return {
@@ -106,6 +109,24 @@ export function clampCamera(c: CameraState, d: MapDims): CameraState {
     targetZ: clamp(c.targetZ, -marginZ, marginZ),
   }
 }
+
+/**
+ * Masse der Schankstube, als Vielfache der Kartenspanne (groessere Kantenlaenge
+ * in Zellen).
+ *
+ * Steht hier und nicht im Tavernen-Modul, damit ein Test nachweisen kann, dass
+ * die geklemmte Kamera den Raum niemals verlaesst. Dieser Fehler ist am
+ * Bildschirm erst zu sehen, wenn jemand ganz herauszoomt und steil von oben
+ * blickt — dann schaut man ploetzlich von aussen durch die Waende.
+ */
+export const TAVERN_ROOM = {
+  /** Halbe Raumbreite. */
+  half: 2.6,
+  /** Wandhoehe ueber dem Boden. */
+  wallHeight: 2.1,
+  /** Bodenhoehe (negativ, unter der Kartenebene). */
+  floorY: -0.3,
+} as const
 
 /** Kameraposition aus dem Zustand — Kugelkoordinaten um den Blickpunkt. */
 export function cameraPosition(c: CameraState): World3 {

@@ -16,6 +16,8 @@
  *    Mittagskarte schiene sinnlos an eine Innenwand. Licht und Schatten der
  *    Stube stecken deshalb fest in den Texturen.
  */
+import { TAVERN_ROOM } from '~~/shared/battle-3d'
+
 type ThreeNs = typeof import('three')
 
 export interface Tavern {
@@ -365,11 +367,17 @@ export function createTavern(
 ): Tavern {
   const { cols, rows, onNeedsRender } = opts
   const span = Math.max(cols, rows)
-  // Weiter als der groesste Kameraabstand (span * 2.5), sonst faehrt man durch
-  // die Wand nach draussen.
-  const roomHalf = span * 3
-  const wallH = span * 1.7
-  const floorY = -span * 0.42
+  // Der Raum muss die Kamera IMMER einschliessen, sonst blickt man von aussen
+  // durch die Waende. `clampCamera` laesst hoechstens span * 1.6 Abstand zu,
+  // und der Blickpunkt darf bis 0,625 * span von der Mitte wandern:
+  //   groesste Kamerahoehe   = 1.6 * span      (Neigung fast senkrecht)
+  //   groesste Seitenstrecke = 2.225 * span    (Neigung fast waagerecht)
+  // Die Maße stehen in TAVERN_ROOM, damit ein Test sie gegen `clampCamera`
+  // pruefen kann — der Fehler faellt am Bildschirm sonst erst auf, wenn
+  // jemand ganz herauszoomt und steil von oben blickt.
+  const roomHalf = span * TAVERN_ROOM.half
+  const wallH = span * TAVERN_ROOM.wallHeight
+  const floorY = span * TAVERN_ROOM.floorY
   const tableTopY = -0.16
 
   const group = new THREE.Group()
@@ -424,8 +432,13 @@ export function createTavern(
   })
 
   // --- Waende: vier nach innen gerichtete Flaechen, eine mit Kamin ---
-  const wallTex = texFrom(paintWall(1024, 512, 5, false), 2, 1)
-  const hearthTex = texFrom(paintWall(1024, 512, 17, true), 1, 1)
+  // Quadratische Texturen, weil eine Wand hier etwa 2,5-mal so breit wie hoch
+  // ist und dreifach gekachelt wird — ein 2:1-Bild wuerde das Fachwerk in die
+  // Laenge ziehen.
+  const wallTex = texFrom(paintWall(1024, 1024, 5, false), 3, 1)
+  // Die Kaminwand wird NICHT gekachelt (der Kamin soll einmal vorkommen), also
+  // im Seitenverhaeltnis der Wand malen — sonst zieht sie sich breit.
+  const hearthTex = texFrom(paintWall(2048, 820, 17, true), 1, 1)
   const wallY = floorY + wallH / 2
 
   // Norden (Kamin) — liegt bei Blickrichtung „von vorn" im Hintergrund.
