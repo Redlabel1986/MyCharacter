@@ -15,6 +15,7 @@ import {
   light3dFor,
   cameraPosition,
   TAVERN_ROOM,
+  TAVERN_CEILING_Y,
   MIN_PITCH,
   MAX_PITCH,
   MIN_DIST,
@@ -92,7 +93,7 @@ describe('Kamera bleibt in der Schankstube', () => {
    */
   const corners = (span: number) => ({
     half: TAVERN_ROOM.half * span,
-    ceiling: (TAVERN_ROOM.floorY + TAVERN_ROOM.wallHeight) * span,
+    ceiling: TAVERN_CEILING_Y * span,
     floor: TAVERN_ROOM.floorY * span,
   })
 

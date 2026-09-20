@@ -908,6 +908,7 @@ export async function createScene(
   const tavern: Tavern = createTavern(THREE, scene, {
     cols,
     rows,
+    maxAnisotropy: maxAniso,
     onNeedsRender: () => {
       dirty = true
     },

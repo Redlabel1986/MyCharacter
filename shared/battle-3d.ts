@@ -122,11 +122,29 @@ export function clampCamera(c: CameraState, d: MapDims): CameraState {
 export const TAVERN_ROOM = {
   /** Halbe Raumbreite. */
   half: 2.6,
-  /** Wandhoehe ueber dem Boden. */
-  wallHeight: 2.1,
+  /**
+   * Wandhoehe ueber dem Boden. Eine Wand ist damit `2 * half` breit und
+   * `wallHeight` hoch, also genau 2:1 — das Seitenverhaeltnis der Wandbilder
+   * in `public/tavern/`. Jede andere Hoehe zerrte sie.
+   */
+  wallHeight: 2.6,
   /** Bodenhoehe (negativ, unter der Kartenebene). */
   floorY: -0.3,
+  /**
+   * Anteil der Wandhoehe, um den die Wand UNTER den Boden gesenkt wird.
+   *
+   * Die Wandbilder zeigen einen ganzen Raum, unten also Dielen und Teppich.
+   * Blieben sie auf Bodenhoehe stehen, ragte dieser gemalte Boden senkrecht
+   * hinter dem echten auf — es saehe nach Tapete aus. Abgesenkt verschwindet
+   * er unter der Bodenflaeche, und Baenke, Faesser und Tische im Bild scheinen
+   * auf ihr zu stehen.
+   */
+  wallSink: 0.15,
 } as const
+
+/** Deckenhoehe = Oberkante der abgesenkten Waende, in Vielfachen der Spanne. */
+export const TAVERN_CEILING_Y =
+  TAVERN_ROOM.floorY + TAVERN_ROOM.wallHeight * (1 - TAVERN_ROOM.wallSink)
 
 /** Kameraposition aus dem Zustand — Kugelkoordinaten um den Blickpunkt. */
 export function cameraPosition(c: CameraState): World3 {

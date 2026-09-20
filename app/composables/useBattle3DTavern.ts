@@ -2,21 +2,20 @@
  * Die Taverne um die Battle-Map herum.
  *
  * Statt eines schwarzen Nichts steht die Karte auf einem schweren Holztisch in
- * einer Schankstube: Fachwerkwaende, Dielenboden, Deckenbalken, ein Kamin mit
- * Feuerschein.
+ * einer Schankstube: vier gemalte Wandbilder, Dielenboden mit Teppich,
+ * Deckenbalken.
  *
- * Zwei Entscheidungen, die den Rest erklaeren:
+ * Waende und Boden sind Bilder aus `public/tavern/`. Decke und Tisch bleiben
+ * prozedural: die Decke sieht man kaum, und die Tischplatte traegt einen
+ * warmen Lichtkegel, der zur Kartengroesse passen muss.
  *
- * 1. ALLES ist prozedural auf Canvas gemalt. Keine Bilddateien, kein
- *    Ladevorgang, der fehlschlagen kann, und kein Byte im Bundle.
- *
- * 2. ALLES ist UNBELEUCHTET (MeshBasicMaterial). Die Beleuchtung der Szene
- *    gehoert der Tageszeit der Karte — waere die Taverne beleuchtet, saesse
- *    man bei „Nacht" in einem stockfinsteren Raum, und die Sonne einer
- *    Mittagskarte schiene sinnlos an eine Innenwand. Licht und Schatten der
- *    Stube stecken deshalb fest in den Texturen.
+ * Alles hier ist UNBELEUCHTET (MeshBasicMaterial). Die Beleuchtung der Szene
+ * gehoert der Tageszeit der Karte — waere die Stube beleuchtet, saesse man bei
+ * „Nacht" in einem stockfinsteren Raum, und die Sonne einer Mittagskarte
+ * schiene sinnlos an eine Innenwand. Licht und Schatten der Stube stecken
+ * deshalb im Bild.
  */
-import { TAVERN_ROOM } from '~~/shared/battle-3d'
+import { TAVERN_ROOM, TAVERN_CEILING_Y } from '~~/shared/battle-3d'
 
 type ThreeNs = typeof import('three')
 
@@ -140,150 +139,6 @@ function paintPlanks(
   return cv
 }
 
-/** Fachwerkwand: Lehmputz zwischen dunklen Balken, Holzvertaefelung unten. */
-function paintWall(w: number, h: number, seed: number, hearth: boolean): HTMLCanvasElement | null {
-  const made = canvas2d(w, h)
-  if (!made) return null
-  const { cv, ctx } = made
-  const rnd = makeRng(seed)
-
-  // --- Putz ---
-  ctx.fillStyle = '#b39a76'
-  ctx.fillRect(0, 0, w, h)
-  for (let i = 0; i < 260; i++) {
-    const x = rnd() * w
-    const y = rnd() * h
-    const r = 18 + rnd() * 90
-    const g2 = ctx.createRadialGradient(x, y, 0, x, y, r)
-    const dark = rnd() > 0.5
-    g2.addColorStop(0, dark ? 'rgba(90,72,50,0.16)' : 'rgba(226,205,172,0.16)')
-    g2.addColorStop(1, 'rgba(0,0,0,0)')
-    ctx.fillStyle = g2
-    ctx.fillRect(x - r, y - r, r * 2, r * 2)
-  }
-
-  // --- Vertaefelung im unteren Drittel ---
-  const wainscotTop = h * 0.62
-  const planks = paintPlanks(w, Math.round(h - wainscotTop), {
-    plankH: 26,
-    base: '#4a3122',
-    dark: '#2a1a10',
-    light: '#6b482f',
-    seed: seed + 31,
-  })
-  if (planks) ctx.drawImage(planks, 0, wainscotTop)
-  ctx.fillStyle = '#39240f'
-  ctx.fillRect(0, wainscotTop - 7, w, 9)
-
-  // --- Fachwerk-Balken ---
-  const beam = (x: number, y: number, bw: number, bh: number) => {
-    ctx.fillStyle = '#3c2716'
-    ctx.fillRect(x, y, bw, bh)
-    ctx.fillStyle = 'rgba(0,0,0,0.3)'
-    ctx.fillRect(x, y + bh - 3, bw, 3)
-    ctx.fillStyle = 'rgba(180,140,95,0.18)'
-    ctx.fillRect(x, y, bw, 2)
-  }
-  beam(0, 0, w, 26) // Rahmen oben
-  beam(0, wainscotTop - 26, w, 26) // unter dem Putzfeld
-  const bays = 5
-  for (let i = 0; i <= bays; i++) {
-    beam((i * w) / bays - 11, 0, 22, wainscotTop)
-  }
-  // Andreaskreuze in jedem zweiten Feld
-  for (let i = 0; i < bays; i += 2) {
-    const x0 = (i * w) / bays
-    const x1 = ((i + 1) * w) / bays
-    ctx.save()
-    ctx.strokeStyle = '#3c2716'
-    ctx.lineWidth = 20
-    ctx.beginPath()
-    ctx.moveTo(x0 + 14, wainscotTop - 20)
-    ctx.lineTo(x1 - 14, 26)
-    ctx.stroke()
-    ctx.restore()
-  }
-
-  // --- Kamin ---
-  if (hearth) {
-    const cx = w * 0.5
-    const fw = w * 0.2
-    const fh = h * 0.44
-    const fy = wainscotTop + (h - wainscotTop) * 0.1
-
-    // Steinmantel
-    ctx.fillStyle = '#5e5850'
-    ctx.fillRect(cx - fw * 0.9, fy - fh * 0.18, fw * 1.8, fh * 1.2)
-    const rows = 7
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < 9; c++) {
-        const sx = cx - fw * 0.9 + ((c + (r % 2 ? 0.5 : 0)) * fw * 1.8) / 9
-        const sy = fy - fh * 0.18 + (r * fh * 1.2) / rows
-        ctx.fillStyle = `rgba(${90 + rnd() * 40},${84 + rnd() * 36},${76 + rnd() * 30},0.9)`
-        ctx.fillRect(sx + 2, sy + 2, (fw * 1.8) / 9 - 4, (fh * 1.2) / rows - 4)
-      }
-    }
-
-    // Feuerraum
-    ctx.fillStyle = '#120a06'
-    ctx.beginPath()
-    ctx.moveTo(cx - fw / 2, fy + fh)
-    ctx.lineTo(cx - fw / 2, fy + fh * 0.35)
-    ctx.quadraticCurveTo(cx, fy - fh * 0.05, cx + fw / 2, fy + fh * 0.35)
-    ctx.lineTo(cx + fw / 2, fy + fh)
-    ctx.closePath()
-    ctx.fill()
-
-    // Glut und Flamme
-    const fg = ctx.createRadialGradient(cx, fy + fh * 0.82, 2, cx, fy + fh * 0.82, fw * 0.75)
-    fg.addColorStop(0, 'rgba(255,238,170,0.98)')
-    fg.addColorStop(0.28, 'rgba(255,164,52,0.85)')
-    fg.addColorStop(0.62, 'rgba(198,68,16,0.42)')
-    fg.addColorStop(1, 'rgba(120,30,0,0)')
-    ctx.fillStyle = fg
-    ctx.fillRect(cx - fw, fy + fh * 0.1, fw * 2, fh)
-
-    // Lichtschein auf Putz und Balken darueber
-    const glow = ctx.createRadialGradient(cx, fy + fh * 0.5, fw * 0.2, cx, fy + fh * 0.5, w * 0.42)
-    glow.addColorStop(0, 'rgba(255,170,80,0.34)')
-    glow.addColorStop(1, 'rgba(255,150,60,0)')
-    ctx.fillStyle = glow
-    ctx.fillRect(0, 0, w, h)
-  }
-
-  // --- Abdunklung nach oben: haelt den Blick unten bei der Karte ---
-  const vig = ctx.createLinearGradient(0, 0, 0, h)
-  vig.addColorStop(0, 'rgba(10,6,3,0.82)')
-  vig.addColorStop(0.35, 'rgba(14,9,5,0.46)')
-  vig.addColorStop(0.75, 'rgba(12,8,4,0.2)')
-  vig.addColorStop(1, 'rgba(8,5,2,0.4)')
-  ctx.fillStyle = vig
-  ctx.fillRect(0, 0, w, h)
-
-  grain(ctx, w, h, 0.06, seed + 3)
-  return cv
-}
-
-/** Dielenboden mit Abdunklung zu den Raendern. */
-function paintFloor(size: number, seed: number): HTMLCanvasElement | null {
-  const planks = paintPlanks(size, size, {
-    plankH: 30,
-    base: '#3a2517',
-    dark: '#1d120a',
-    light: '#54371f',
-    seed,
-  })
-  if (!planks) return null
-  const ctx = planks.getContext('2d')
-  if (!ctx) return planks
-  const vig = ctx.createRadialGradient(size / 2, size / 2, size * 0.12, size / 2, size / 2, size * 0.62)
-  vig.addColorStop(0, 'rgba(0,0,0,0.05)')
-  vig.addColorStop(1, 'rgba(0,0,0,0.72)')
-  ctx.fillStyle = vig
-  ctx.fillRect(0, 0, size, size)
-  return planks
-}
-
 /** Dunkle Decke mit Balken. */
 function paintCeiling(size: number, seed: number): HTMLCanvasElement | null {
   const made = canvas2d(size, size)
@@ -363,7 +218,13 @@ function paintTable(size: number, seed: number): HTMLCanvasElement | null {
 export function createTavern(
   THREE: ThreeNs,
   scene: import('three').Scene,
-  opts: { cols: number; rows: number; onNeedsRender: () => void },
+  opts: {
+    cols: number
+    rows: number
+    /** Hardware-Maximum; der Boden wird aus flachem Winkel gesehen. */
+    maxAnisotropy: number
+    onNeedsRender: () => void
+  },
 ): Tavern {
   const { cols, rows, onNeedsRender } = opts
   const span = Math.max(cols, rows)
@@ -378,6 +239,7 @@ export function createTavern(
   const roomHalf = span * TAVERN_ROOM.half
   const wallH = span * TAVERN_ROOM.wallHeight
   const floorY = span * TAVERN_ROOM.floorY
+  const ceilingY = span * TAVERN_CEILING_Y
   const tableTopY = -0.16
 
   const group = new THREE.Group()
@@ -391,6 +253,22 @@ export function createTavern(
     t.wrapS = THREE.RepeatWrapping
     t.wrapT = THREE.RepeatWrapping
     t.repeat.set(repeatX, repeatY)
+    textures.push(t)
+    return t
+  }
+
+  /**
+   * Bildtextur aus `public/tavern/`. Schlaegt das Laden fehl, bleibt es bei
+   * der Ersatzfarbe des Materials — die Stube sieht dann karg aus, aber die
+   * Buehne laeuft weiter.
+   */
+  const loader = new THREE.TextureLoader()
+  const texFromFile = (file: string) => {
+    const t = loader.load(`/tavern/${file}`, () => onNeedsRender())
+    t.colorSpace = THREE.SRGBColorSpace
+    t.wrapS = THREE.ClampToEdgeWrapping
+    t.wrapT = THREE.ClampToEdgeWrapping
+    t.anisotropy = opts.maxAnisotropy
     textures.push(t)
     return t
   }
@@ -418,8 +296,9 @@ export function createTavern(
   }
 
   // --- Boden ---
-  const floorTex = texFrom(paintFloor(512, 11), 4, 4)
-  addPlane(roomHalf * 2, roomHalf * 2, floorTex, 0x2a1b10, (m) => {
+  // Ohne Kachelung: das Bild traegt EINEN Teppich, und vier davon im Raster
+  // saehen nach Fehler aus.
+  addPlane(roomHalf * 2, roomHalf * 2, texFromFile('floor.jpg'), 0x2a1b10, (m) => {
     m.rotation.x = -Math.PI / 2
     m.position.y = floorY
   })
@@ -428,35 +307,40 @@ export function createTavern(
   const ceilTex = texFrom(paintCeiling(512, 23), 3, 3)
   addPlane(roomHalf * 2, roomHalf * 2, ceilTex, 0x16100a, (m) => {
     m.rotation.x = Math.PI / 2
-    m.position.y = floorY + wallH
+    m.position.y = ceilingY
   })
 
-  // --- Waende: vier nach innen gerichtete Flaechen, eine mit Kamin ---
-  // Quadratische Texturen, weil eine Wand hier etwa 2,5-mal so breit wie hoch
-  // ist und dreifach gekachelt wird — ein 2:1-Bild wuerde das Fachwerk in die
-  // Laenge ziehen.
-  const wallTex = texFrom(paintWall(1024, 1024, 5, false), 3, 1)
-  // Die Kaminwand wird NICHT gekachelt (der Kamin soll einmal vorkommen), also
-  // im Seitenverhaeltnis der Wand malen — sonst zieht sie sich breit.
-  const hearthTex = texFrom(paintWall(2048, 820, 17, true), 1, 1)
-  const wallY = floorY + wallH / 2
-
-  // Norden (Kamin) — liegt bei Blickrichtung „von vorn" im Hintergrund.
-  const hearthMesh = addPlane(roomHalf * 2, wallH, hearthTex, 0x3a2716, (m) => {
-    m.position.set(0, wallY, -roomHalf)
-  })
-  addPlane(roomHalf * 2, wallH, wallTex, 0x3a2716, (m) => {
-    m.position.set(0, wallY, roomHalf)
-    m.rotation.y = Math.PI
-  })
-  addPlane(roomHalf * 2, wallH, wallTex, 0x3a2716, (m) => {
-    m.position.set(-roomHalf, wallY, 0)
-    m.rotation.y = Math.PI / 2
-  })
-  addPlane(roomHalf * 2, wallH, wallTex, 0x3a2716, (m) => {
-    m.position.set(roomHalf, wallY, 0)
-    m.rotation.y = -Math.PI / 2
-  })
+  // --- Waende: vier nach innen gerichtete Flaechen, jede mit eigenem Bild ---
+  // Jede Wand bekommt ein anderes Motiv, sonst faellt beim Drehen sofort auf,
+  // dass man viermal dasselbe sieht. Die Bilder sind 2:1, und genau darauf ist
+  // TAVERN_ROOM.wallHeight abgestimmt — sonst zerrte es sie in die Laenge.
+  // Mitte der abgesenkten Wand: ihre Unterkante liegt um `wallSink` unter dem
+  // Boden, ihre Oberkante bildet die Decke.
+  const wallY = ceilingY - wallH / 2
+  const wallMeshes = [
+    { file: 'wall-1.jpg', place: (m: import('three').Mesh) => m.position.set(0, wallY, -roomHalf) },
+    {
+      file: 'wall-2.jpg',
+      place: (m: import('three').Mesh) => {
+        m.position.set(roomHalf, wallY, 0)
+        m.rotation.y = -Math.PI / 2
+      },
+    },
+    {
+      file: 'wall-3.jpg',
+      place: (m: import('three').Mesh) => {
+        m.position.set(0, wallY, roomHalf)
+        m.rotation.y = Math.PI
+      },
+    },
+    {
+      file: 'wall-4.jpg',
+      place: (m: import('three').Mesh) => {
+        m.position.set(-roomHalf, wallY, 0)
+        m.rotation.y = Math.PI / 2
+      },
+    },
+  ].map((w) => addPlane(roomHalf * 2, wallH, texFromFile(w.file), 0x3a2716, w.place))
 
   // --- Tisch ---
   const tableTex = texFrom(paintTable(1024, 41), 1, 1)
@@ -497,9 +381,10 @@ export function createTavern(
 
   // --- Flackern ---------------------------------------------------------
   // Kein echtes Licht: die Stube ist unbeleuchtet gerendert. Stattdessen
-  // atmet die Farbe der Kaminwand leicht — das reicht voellig, um Feuer zu
-  // suggerieren, und kostet keinen einzigen Schattenwurf.
-  const hearthMat = hearthMesh.material as import('three').MeshBasicMaterial
+  // atmet die Helligkeit der Wandbilder leicht. Auf allen vier Waenden, weil
+  // auf jeder Kerzen und Laternen brennen — nur eine flackern zu lassen fiele
+  // beim Drehen als Ungereimtheit auf.
+  const wallMats = wallMeshes.map((m) => m.material as import('three').MeshBasicMaterial)
   let reducedMotion = false
   let enabled = true
   let lastFlicker = -1
@@ -515,7 +400,11 @@ export function createTavern(
       0.02 * Math.sin(tSec * 13.3 + 2.1)
     if (Math.abs(f - lastFlicker) < 0.006) return false
     lastFlicker = f
-    hearthMat.color.setScalar(f)
+    // Leicht versetzte Phasen je Wand, damit die Stube nicht im Gleichtakt
+    // pulsiert wie ein Herzschlag.
+    for (let i = 0; i < wallMats.length; i++) {
+      wallMats[i]!.color.setScalar(f + 0.02 * Math.sin(tSec * 2.3 + i * 1.7))
+    }
     return true
   }
 
@@ -528,7 +417,7 @@ export function createTavern(
   const setReducedMotion = (on: boolean) => {
     reducedMotion = on
     if (on) {
-      hearthMat.color.setScalar(1)
+      for (const m of wallMats) m.color.setScalar(1)
       onNeedsRender()
     }
   }
