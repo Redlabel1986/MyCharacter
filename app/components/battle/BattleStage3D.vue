@@ -679,17 +679,17 @@ watch(
           style="display: none"
         >
           <div
-            class="flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-serif whitespace-nowrap backdrop-blur-[1px]"
+            class="flex items-center gap-1.5 rounded-full border px-3 py-1 text-base font-serif whitespace-nowrap shadow-lg shadow-black/40 backdrop-blur-[1px]"
             :class="s.isSelf
-              ? 'border-amber-300/70 bg-amber-950/75 text-amber-100'
-              : 'border-amber-200/25 bg-black/55 text-amber-50/85'"
+              ? 'border-amber-300/70 bg-amber-950/80 text-amber-100'
+              : 'border-amber-200/30 bg-black/65 text-amber-50/90'"
           >
             <UIcon
               :name="s.isDm ? 'i-lucide-crown' : 'i-lucide-user'"
-              class="size-3 shrink-0"
+              class="size-4 shrink-0"
               :class="s.isDm ? 'text-amber-300' : 'opacity-70'"
             />
-            <span class="max-w-[9rem] truncate">{{ s.name }}</span>
+            <span class="max-w-[14rem] truncate">{{ s.name }}</span>
           </div>
         </div>
 
