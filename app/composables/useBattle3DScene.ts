@@ -633,6 +633,11 @@ export async function createScene(
         figures.delete(id)
       }
     }
+    // applyFigureState hat gerade jede Deckkraft zurueckgesetzt. Ohne das
+    // Leeren haelte die Verdeckungs-Abblendung ihre Menge fuer unveraendert
+    // und blendete nie wieder ab — eine verdeckte Figur bliebe nach dem
+    // naechsten Datenupdate fuer immer undurchsichtig.
+    occluded.clear()
     dirty = true
   }
 

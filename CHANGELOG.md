@@ -860,3 +860,87 @@ Mögliche Erweiterungen für später:
   (analog zum bestehenden Zauberei-Katalog mit allen 60 Sprüchen).
   → Bewusst offen gelassen: dafür braucht es die Spruchtexte aus dem
   Regelwerk; ohne Quelle wäre der Inhalt erfunden.
+
+---
+
+## 23. Räumliche Battle-Map (3D-Modus)
+
+Stand: 2026-09-20. Die Battle-Map lässt sich jetzt umschalten: statt der
+flachen Draufsicht liegt die Karte als Spielbrett im Raum, die Tokens stehen
+als Pappaufsteller darauf, und der Nebel des Krieges ist eine Nebelbank mit
+Höhe statt einer dunklen Fläche.
+
+**Die 2D-Ansicht bleibt vollständig erhalten.** Sie trägt weiterhin alle
+DM-Malwerkzeuge und ist der verlässliche Boden, auf den die 3D-Ansicht
+zurückfällt.
+
+### 23.1 Der Umschalter
+
+Zwei Knöpfe ganz links in der Werkzeugleiste. Die Wahl gilt **pro Nutzer**
+(`localStorage`), nicht pro Karte — der DM zwingt niemandem 3D auf, und jeder
+am Tisch entscheidet nach seiner Hardware. Ohne WebGL2 bleibt die Ansicht 2D
+und sagt, woran es lag.
+
+Standardmäßig ist 3D **aus**. Wer den Schalter nie anfasst, merkt nichts.
+
+### 23.2 Was in 3D geht — und was nicht
+
+| In 3D | Nur in 2D |
+| --- | --- |
+| Figuren ziehen, Rasterfang, Bewegungsreichweite | Freihand-Zeichnen und Radieren |
+| Info-Karte, Bearbeiten (Doppelklick), Kontextmenü | Nebel-Pinsel und Blackout |
+| Ping (Alt+Klick), AoE-Bereich | Mauern zeichnen |
+| Kamera drehen, neigen, zoomen, verschieben | Startbereich malen |
+| | Objekt-Editor |
+
+Die Ergebnisse der Malwerkzeuge sind in 3D natürlich zu sehen — nur bearbeitet
+wird in 2D. Ein aktiver Pinsel fällt beim Umschalten auf „Auswählen" zurück.
+
+### 23.3 Die Spielfiguren
+
+Jedes Token wird zu einem Aufsteller: runder Sockel in der Farbe des Besitzers
+(NPCs grau, Versteckte bernstein), darauf der HP-Ring als Kreisbogen, dann ein
+Steckfuß und die leicht gewölbte Bildtafel. Die Tafel dreht sich nur um die
+Hochachse zur Kamera — sie kippt nie, sie steht. Von hinten sieht man eine
+abgedunkelte Papprückseite statt eines spiegelverkehrten Gesichts.
+
+Zustände: pulsierender Ring am Sockel für „am Zug", roter Ring für das
+Kampfziel, Umkippen bei 0 HP, Rotstich bei Verwundung, Transparenz bei
+versteckt. Namen, HP-Zahlen und die Treffer-/Emoji-Effekte liegen als Overlay
+über den Köpfen und nutzen dieselben Animationen wie die 2D-Ansicht.
+
+Beim Ziehen hebt die Figur ab, ihr Schatten wird größer und weicher, am Ziel
+liegt der Rasterfang-Ring und das Reichweitenfeld leuchtet auf dem Boden.
+
+### 23.4 Nebel, Dunkelheit, Licht
+
+Unerforschtes versinkt in einer aufragenden Nebelbank, in die man von der Seite
+hineinsieht; darüber ziehen träge Bodenschwaden. Blackout-Zellen sind
+undurchdringlich. Die Tageszeit steuert Farbe, Winkel und Stärke des Sonnen-
+bzw. Mondlichts; nachts trägt jede Sichtquelle ein echtes Punktlicht, und die
+Mauern schneiden harte Kanten in die Helligkeit.
+
+**Die Sichtgrenze ist dieselbe wie in 2D.** Nebel und Dunkelheit speisen sich
+aus denselben Sichtpolygonen und Zellmengen — es gibt keine zweite
+Sichtberechnung, die auseinanderlaufen könnte. Ein Spieler sieht in 3D nie
+mehr als in 2D.
+
+### 23.5 Auf schwacher Hardware
+
+Die Ansicht misst ihre eigene Bildrate. Wird sie zäh, senkt sie Auflösung und
+Schattenqualität und schaltet die Bodenschwaden ab. Bleibt sie zäh, bietet sie
+den Rückweg nach 2D an. Wer im System „Bewegung reduzieren" eingestellt hat,
+bekommt einen stehenden Nebel und keine pulsierenden Ringe.
+
+Auf dem Handy: ein Finger zieht eine Figur oder dreht die Kamera, zwei Finger
+zoomen und verschieben.
+
+### 23.6 Was bewusst offen blieb
+
+- **Höhenrelief aus dem Kartenbild.** Funktioniert nur, wenn die Helligkeit
+  zufällig mit der Höhe korreliert — bei den meisten Karten sähe es nach
+  Beulen aus.
+- **Echte 3D-Modelle statt Bildtafeln.** Bräuchte pro Charakter ein Modell.
+- **Animierte Laufwege zwischen Feldern.** Die Figur springt an ihr Ziel.
+- **Die DM-Malwerkzeuge in 3D.** Jedes Werkzeug einzeln auf Raycast-Eingabe zu
+  portieren wäre ein Vielfaches des Aufwands bei deutlich mehr Risiko.

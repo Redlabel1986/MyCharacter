@@ -474,6 +474,13 @@ const applyResize = () => {
   scene.resize(r.width, r.height, Math.min(window.devicePixelRatio || 1, 2))
 }
 
+/**
+ * Wurde die Komponente abgebaut, waehrend createScene noch lief? Ohne diese
+ * Pruefung entstuende eine Szene, die niemand mehr abraeumt — samt GL-Kontext
+ * und Texturen. Schnelles Hin-und-Her zwischen 2D und 3D reicht dafuer aus.
+ */
+let unmounted = false
+
 onMounted(async () => {
   reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
   reducedMotion.addEventListener('change', onReducedMotionChange)
@@ -484,8 +491,9 @@ onMounted(async () => {
     return
   }
   if (!canvasEl.value) return
+  let built: Scene3DHandle
   try {
-    scene = await createScene(canvasEl.value, {
+    built = await createScene(canvasEl.value, {
       imgW: props.imgW,
       imgH: props.imgH,
       gridSize: props.map.gridSize,
@@ -501,6 +509,11 @@ onMounted(async () => {
     emit('fallback', (e as Error)?.message ?? 'Unbekannter Fehler beim Start der 3D-Ansicht.')
     return
   }
+  if (unmounted) {
+    built.dispose()
+    return
+  }
+  scene = built
   applyResize()
   await redrawOverlay()
   scene.setTokens(props.figures)
@@ -518,6 +531,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  unmounted = true
   reducedMotion?.removeEventListener('change', onReducedMotionChange)
   resizeObs?.disconnect()
   resizeObs = null
