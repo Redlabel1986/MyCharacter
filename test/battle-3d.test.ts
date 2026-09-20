@@ -15,11 +15,14 @@ import {
   light3dFor,
   cameraPosition,
   seatPositions,
+  sheetSlots,
+  SHEET_WIDTH_CELLS,
   TAVERN_ROOM,
   TAVERN_CEILING_Y,
   MIN_PITCH,
   MAX_PITCH,
   MIN_DIST,
+  SEAT_BAND_CELLS,
   type MapDims,
 } from '../shared/battle-3d'
 
@@ -76,9 +79,28 @@ describe('clampCamera', () => {
 
   it('haelt den Blickpunkt in der Naehe der Karte', () => {
     const r = clampCamera({ ...base, targetX: 9999, targetZ: -9999 }, dims)
-    // Karte ist 20x16 Zellen, also -10..10 / -8..8 plus 25% Rand
-    expect(r.targetX).toBeLessThanOrEqual(12.5)
-    expect(r.targetZ).toBeGreaterThanOrEqual(-10)
+    // Karte ist 20x16 Zellen plus das Sitz- und Blattband ringsum.
+    expect(r.targetX).toBeLessThanOrEqual(10 + SEAT_BAND_CELLS)
+    expect(r.targetZ).toBeGreaterThanOrEqual(-(8 + SEAT_BAND_CELLS))
+  })
+
+  it('laesst den Blickpunkt JEDEN Charakterbogen erreichen', () => {
+    // Die Boegen liegen ausserhalb der Karte. Klemmt der Blickpunkt zu eng,
+    // bleibt der Kameraflug an der Kartenkante haengen und man kommt nie an
+    // seinem eigenen Bogen an.
+    for (const d of [dims, { imgW: 4000, imgH: 1200, gridSize: 50 }, { imgW: 600, imgH: 3000, gridSize: 70 }]) {
+      for (const seat of seatPositions(8, d)) {
+        for (const slot of sheetSlots(seat, 3, d)) {
+          const w = mapToWorld(slot.x, slot.y, d)
+          const c = clampCamera(
+            { yaw: 0, pitch: 1.2, dist: 10, targetX: w.x, targetZ: w.z },
+            d,
+          )
+          expect(c.targetX).toBeCloseTo(w.x, 5)
+          expect(c.targetZ).toBeCloseTo(w.z, 5)
+        }
+      }
+    }
   })
 
   it('laesst den Gierwinkel frei drehen', () => {
@@ -193,6 +215,55 @@ describe('seatPositions — Spieler rund um den Tisch', () => {
 
   it('ist bei gleicher Eingabe stets gleich — die Plaetze duerfen nicht springen', () => {
     expect(seatPositions(6, dims)).toEqual(seatPositions(6, dims))
+  })
+})
+
+describe('sheetSlots — Charakterboegen vor dem Sitzplatz', () => {
+  const seatFront = { x: dims.imgW / 2, y: dims.imgH / 2 + 600 }
+  const seatRight = { x: dims.imgW / 2 + 700, y: dims.imgH / 2 }
+
+  it('liefert nichts ohne Boegen', () => {
+    expect(sheetSlots(seatFront, 0, dims)).toEqual([])
+  })
+
+  it('legt die Blaetter WEITER AUSSEN als den Sitzplatz — nie auf der Karte', () => {
+    for (const seat of [seatFront, seatRight]) {
+      for (const s of sheetSlots(seat, 3, dims)) {
+        const dSeat = Math.hypot(seat.x - dims.imgW / 2, seat.y - dims.imgH / 2)
+        const dSheet = Math.hypot(s.x - dims.imgW / 2, s.y - dims.imgH / 2)
+        expect(dSheet).toBeGreaterThan(dSeat)
+      }
+    }
+  })
+
+  it('dreht die Oberkante zur Kartenmitte, damit der Spieler richtig liest', () => {
+    // Vorderkante: Blatt-Oberkante zeigt nach -Z, also Drehung 0.
+    expect(sheetSlots(seatFront, 1, dims)[0]!.rotation).toBeCloseTo(0)
+    // Rechte Kante: Oberkante zeigt nach -X, also Drehung +90 Grad.
+    expect(sheetSlots(seatRight, 1, dims)[0]!.rotation).toBeCloseTo(Math.PI / 2)
+  })
+
+  it('legt mehrere Boegen nebeneinander, nicht uebereinander', () => {
+    const slots = sheetSlots(seatFront, 3, dims)
+    expect(slots).toHaveLength(3)
+    for (let i = 1; i < slots.length; i++) {
+      const gap = Math.hypot(slots[i]!.x - slots[i - 1]!.x, slots[i]!.y - slots[i - 1]!.y)
+      // Mindestens Blattbreite auseinander — sonst ueberlappen sie.
+      expect(gap).toBeGreaterThanOrEqual(SHEET_WIDTH_CELLS * dims.gridSize)
+    }
+  })
+
+  it('zentriert die Reihe auf dem Sitzplatz', () => {
+    const slots = sheetSlots(seatFront, 4, dims)
+    const midX = (slots[0]!.x + slots[3]!.x) / 2
+    expect(midX).toBeCloseTo(seatFront.x)
+  })
+
+  it('gibt allen Blaettern dasselbe Hochformat', () => {
+    for (const s of sheetSlots(seatRight, 2, dims)) {
+      expect(s.heightCells).toBeGreaterThan(s.widthCells)
+      expect(s.widthCells).toBe(SHEET_WIDTH_CELLS)
+    }
   })
 })
 

@@ -18,6 +18,7 @@ import {
   cameraPosition,
   figureDims,
   MIN_DIST,
+  MAX_PITCH,
   type MapDims,
   type CameraState,
 } from '~~/shared/battle-3d'
@@ -106,6 +107,25 @@ export interface TableSeat {
   isDm: boolean
 }
 
+/**
+ * Ein Charakterbogen, der als Blatt auf dem Tisch liegt. Nur die eigenen —
+ * die Seite reicht gar nicht erst fremde herein.
+ */
+export interface Sheet3DInput {
+  tokenId: number
+  /** Mittelpunkt in Kartenpixeln. */
+  x: number
+  y: number
+  /** Drehung um die Hochachse; Oberkante zeigt zur Kartenmitte. */
+  rotation: number
+  widthCells: number
+  heightCells: number
+  /** Fertig gemaltes Blatt. */
+  canvas: HTMLCanvasElement
+  /** Zaehler, der sich bei jeder Neuzeichnung erhoeht. */
+  revision: number
+}
+
 export interface ScreenPos {
   x: number
   y: number
@@ -176,6 +196,11 @@ export interface Scene3DHandle {
   setObjects(list: Object3DInput[]): void
   /** `visible` steuert nur die Sichtbarkeit — die Geometrie bleibt immer da. */
   setWalls(walls: Wall[], visible: boolean): void
+  setSheets(list: Sheet3DInput[]): void
+  /** Token-Id des Bogens unter dem Zeiger, oder null. */
+  pickSheet(clientX: number, clientY: number): number | null
+  /** Kamera weich in die Draufsicht auf einen Bogen fahren. */
+  focusSheet(sheet: Sheet3DInput): void
   setVision(input: FogInput): void
   setVisionLights(lights: VisionLight[]): void
   /** Schankstube um den Tisch ein- oder ausblenden. */
@@ -858,6 +883,120 @@ export async function createScene(
     dirty = true
   }
 
+  // --- Charakterboegen auf dem Tisch -------------------------------------
+  interface SheetRec {
+    mesh: import('three').Mesh
+    texture: import('three').CanvasTexture
+    revision: number
+  }
+  const sheetRecs = new Map<number, SheetRec>()
+  const sheetPickTargets: import('three').Object3D[] = []
+
+  const setSheets = (list: Sheet3DInput[]) => {
+    const seen = new Set<number>()
+    for (const s of list) {
+      seen.add(s.tokenId)
+      let rec = sheetRecs.get(s.tokenId)
+      if (!rec) {
+        const tex = new THREE.CanvasTexture(s.canvas)
+        tex.colorSpace = THREE.SRGBColorSpace
+        tex.anisotropy = maxAniso
+        const mesh = new THREE.Mesh(
+          new THREE.PlaneGeometry(s.widthCells, s.heightCells),
+          new THREE.MeshStandardMaterial({
+            map: tex,
+            roughness: 0.92,
+            metalness: 0,
+            // Etwas Eigenleuchten, damit der Bogen auch auf einer Nachtkarte
+            // lesbar bleibt — Papier im Kerzenschein, nicht im Dunkeln.
+            emissive: new THREE.Color(0x6a5c42),
+            emissiveMap: tex,
+            emissiveIntensity: 0.35,
+          }),
+        )
+        mesh.rotation.x = -Math.PI / 2
+        mesh.receiveShadow = true
+        mesh.castShadow = false
+        mesh.userData.sheetTokenId = s.tokenId
+        mesh.renderOrder = 1
+        scene.add(mesh)
+        sheetPickTargets.push(mesh)
+        rec = { mesh, texture: tex, revision: -1 }
+        sheetRecs.set(s.tokenId, rec)
+      }
+      const w = mapToWorld(s.x, s.y, dims)
+      // Knapp ueber der Karte, damit es nicht mit dem Boden-Overlay flimmert.
+      rec.mesh.position.set(w.x, 0.02, w.z)
+      // Die Geometrie liegt bereits flach; die Blattdrehung kommt on top.
+      rec.mesh.rotation.set(-Math.PI / 2, 0, -s.rotation)
+      if (rec.revision !== s.revision) {
+        rec.revision = s.revision
+        rec.texture.needsUpdate = true
+      }
+    }
+    for (const [id, rec] of sheetRecs) {
+      if (seen.has(id)) continue
+      scene.remove(rec.mesh)
+      rec.mesh.geometry.dispose()
+      ;(rec.mesh.material as import('three').Material).dispose()
+      rec.texture.dispose()
+      const idx = sheetPickTargets.indexOf(rec.mesh)
+      if (idx >= 0) sheetPickTargets.splice(idx, 1)
+      sheetRecs.delete(id)
+    }
+    dirty = true
+  }
+
+  // --- Kameraflug --------------------------------------------------------
+  /**
+   * Weiche Fahrt zu einem Zielzustand. Ohne sie springt die Ansicht beim
+   * Hineinzoomen, und man verliert die Orientierung — man sieht nicht mehr,
+   * WOHER der Bogen kam.
+   */
+  let camTween: { from: CameraState; to: CameraState; start: number; ms: number } | null = null
+
+  const flyTo = (to: CameraState, ms = 650) => {
+    camTween = { from: { ...camState }, to: clampCamera(to, dims), start: performance.now(), ms }
+    dirty = true
+  }
+
+  const updateCameraTween = (now: number) => {
+    if (!camTween) return
+    const raw = (now - camTween.start) / camTween.ms
+    const t = raw >= 1 ? 1 : raw
+    // Weich rein, weich raus.
+    const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
+    const { from, to } = camTween
+    // Ueber den kuerzeren Weg drehen, nicht einmal rundherum.
+    let dYaw = to.yaw - from.yaw
+    while (dYaw > Math.PI) dYaw -= Math.PI * 2
+    while (dYaw < -Math.PI) dYaw += Math.PI * 2
+    camState = {
+      yaw: from.yaw + dYaw * e,
+      pitch: from.pitch + (to.pitch - from.pitch) * e,
+      dist: from.dist + (to.dist - from.dist) * e,
+      targetX: from.targetX + (to.targetX - from.targetX) * e,
+      targetZ: from.targetZ + (to.targetZ - from.targetZ) * e,
+    }
+    applyCamera()
+    if (t >= 1) camTween = null
+  }
+
+  const focusSheet = (s: Sheet3DInput) => {
+    const w = mapToWorld(s.x, s.y, dims)
+    // Von oben, und so nah, dass das Blatt das Bild fuellt. Der Gierwinkel
+    // richtet sich nach der Blattdrehung, damit es aufrecht im Bild steht.
+    const fovRad = (camera.fov * Math.PI) / 180
+    const needed = (s.heightCells / 2) / Math.tan(fovRad / 2)
+    flyTo({
+      yaw: s.rotation,
+      pitch: MAX_PITCH,
+      dist: needed * 1.18,
+      targetX: w.x,
+      targetZ: w.z,
+    })
+  }
+
   // --- Zieh-Rueckmeldung -------------------------------------------------
   const snapRing = flatRing(0.34, 0.46, 0xf5c451)
   snapRing.position.y = 0.006
@@ -1187,6 +1326,9 @@ export async function createScene(
     // Helligkeit merklich geaendert hat. Dadurch loest es nur einige Bilder je
     // Sekunde aus, statt die Buehne dauerhaft rendern zu lassen.
     const flickered = tavern.update(t / 1000)
+    // Der Kameraflug VOR der Dirty-Pruefung: er setzt sie selbst, solange er
+    // laeuft, und haelt so die Fahrt fluessig.
+    updateCameraTween(t)
     const animated = hasAnimation()
     if (!dirty && !animated && !flickered) return
     dirty = false
@@ -1288,6 +1430,17 @@ export async function createScene(
     return null
   }
 
+  const pickSheet = (clientX: number, clientY: number): number | null => {
+    if (!sheetPickTargets.length) return null
+    toNdc(clientX, clientY)
+    raycaster.setFromCamera(ndc, camera)
+    for (const h of raycaster.intersectObjects(sheetPickTargets, false)) {
+      const id = h.object.userData.sheetTokenId
+      if (typeof id === 'number') return id
+    }
+    return null
+  }
+
   const projectVec = new THREE.Vector3()
   /**
    * Weltpunkt ueber einem Kartenpunkt auf Canvas-Koordinaten abbilden. Das
@@ -1338,6 +1491,9 @@ export async function createScene(
     textureCache.clear()
     figures.clear()
     objectRecs.clear()
+    sheetRecs.clear()
+    sheetPickTargets.length = 0
+    camTween = null
     wallMesh = null
     pickTargets.length = 0
     renderer.dispose()
@@ -1353,6 +1509,9 @@ export async function createScene(
     setTokens,
     setObjects,
     setWalls,
+    setSheets,
+    pickSheet,
+    focusSheet,
     setVision,
     setVisionLights,
     setTavern,

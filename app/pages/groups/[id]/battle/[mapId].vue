@@ -20,8 +20,10 @@ import type {
   VisionLight,
   FogInput,
   TableSeat,
+  Sheet3DInput,
 } from '~/composables/useBattle3DScene'
-import { seatPositions } from '~~/shared/battle-3d'
+import { seatPositions, sheetSlots } from '~~/shared/battle-3d'
+import { paintSheet } from '~/composables/useBattle3DSheet'
 import {
   TOKEN_CONDITIONS,
   CONDITION_BY_ID,
@@ -2078,6 +2080,97 @@ const tableSeats3d = computed<TableSeat[]>(() => {
   }))
 })
 
+// --- Eigene Charakterboegen auf dem Tisch ---------------------------------
+/**
+ * Nur die EIGENEN Boegen. Sie werden gar nicht erst fuer fremde Tokens
+ * gebaut — so kann kein Zufall sie sichtbar machen. Hat jemand mehrere
+ * Charaktere auf der Karte, liegen die Blaetter nebeneinander vor ihm.
+ */
+const myCharTokens = computed<Token[]>(() =>
+  myTokensOnMap.value.filter((t) => t.characterId !== null),
+)
+
+/** Canvas + Zaehler je Token; der Zaehler stoesst das Neuladen der Textur an. */
+const sheetCanvases = new Map<number, { canvas: HTMLCanvasElement; revision: number }>()
+const sheetRevisionTick = ref(0)
+const sheetPortraits = new Map<string, HTMLImageElement>()
+
+const drawSheet = (t: Token) => {
+  let entry = sheetCanvases.get(t.id)
+  if (!entry) {
+    entry = { canvas: document.createElement('canvas'), revision: 0 }
+    sheetCanvases.set(t.id, entry)
+  }
+  const src = tokenImageSrc(t)
+  let portrait: HTMLImageElement | null = null
+  if (src) {
+    const cached = sheetPortraits.get(src)
+    if (cached?.complete && cached.naturalWidth) {
+      portrait = cached
+    } else if (!cached) {
+      const img = new Image()
+      sheetPortraits.set(src, img)
+      // Nachzeichnen, sobald das Portraet da ist — sonst bliebe der Rahmen leer.
+      img.onload = () => { sheetRevisionTick.value++ }
+      img.src = src
+    }
+  }
+  paintSheet(entry.canvas, {
+    tokenId: t.id,
+    characterId: t.characterId ?? 0,
+    name: t.name,
+    system: t.system,
+    imageUrl: src,
+    hp: t.hp,
+    hpMax: t.hpMax,
+    mana: t.mana ?? null,
+    manaMax: t.manaMax ?? null,
+    statusText: t.statusText,
+    conditions: tokenConditions(t).map((c) => c.label),
+  }, portrait)
+  entry.revision++
+  return entry
+}
+
+const sheets3d = computed<Sheet3DInput[]>(() => {
+  if (!import.meta.client) return []
+  const mine = myCharTokens.value
+  if (!mine.length) return []
+  const mySeat = tableSeats3d.value.find((s) => s.isSelf)
+  if (!mySeat) return []
+  // Vom Zaehler abhaengig machen, damit ein nachgeladenes Portraet die
+  // Boegen neu zeichnet.
+  void sheetRevisionTick.value
+  const slots = sheetSlots(
+    { x: mySeat.mapX, y: mySeat.mapY },
+    mine.length,
+    { imgW: imgW.value, imgH: imgH.value, gridSize: map.value?.gridSize ?? 50 },
+  )
+  return mine.map((t, i) => {
+    const entry = drawSheet(t)
+    const slot = slots[i]
+    return {
+      tokenId: t.id,
+      x: slot?.x ?? 0,
+      y: slot?.y ?? 0,
+      rotation: slot?.rotation ?? 0,
+      widthCells: slot?.widthCells ?? 2.3,
+      heightCells: slot?.heightCells ?? 3.25,
+      canvas: entry.canvas,
+      revision: entry.revision,
+    }
+  })
+})
+
+/** Token, dessen vollstaendiger Bogen gerade als Fenster offen ist. */
+const openSheetTokenId = ref<number | null>(null)
+const openSheetTokens = computed<Token[]>(() => {
+  const id = openSheetTokenId.value
+  if (id === null) return []
+  const t = tokens.value.find((x) => x.id === id)
+  return t ? [t] : []
+})
+
 /** Sichtquellen als echte Punktlichter (Tokens mit Sicht + leuchtende Objekte). */
 const visionLights3d = computed<VisionLight[]>(() =>
   visionSources.value.map((s) => ({
@@ -3180,6 +3273,8 @@ const endResizeSheet = () => {
             :vision="vision3d"
             :vision-lights="visionLights3d"
             :seats="tableSeats3d"
+            :sheets="sheets3d"
+            @sheet-open="openSheetTokenId = $event"
             :drag-state="dragState3d"
             :ground-click-mode="toolMode === 'aoe'"
             @fallback="onStage3dFallback"
@@ -5252,6 +5347,44 @@ const endResizeSheet = () => {
       >
         Schließen
       </UButton>
+    </div>
+
+    <!-- Vollstaendiger Charakterbogen aus der 3D-Ansicht. Derselbe Bogen wie
+         in der Seitenspalte — bedienbar, systemrichtig und an einer Stelle
+         gepflegt. Auf dem Tisch liegt nur sein gemaltes Abbild. -->
+    <div
+      v-if="openSheetTokenId !== null && openSheetTokens.length"
+      class="fixed inset-0 z-[95] flex items-start justify-center bg-black/60 p-3 sm:p-6"
+      @click.self="openSheetTokenId = null"
+    >
+      <div class="parchment-card relative flex max-h-full w-full max-w-3xl flex-col overflow-hidden">
+        <div class="flex items-center gap-2 border-b border-parchment-700/30 px-3 py-2">
+          <UIcon name="i-lucide-scroll-text" class="size-4 text-[var(--color-accent)]" />
+          <span class="font-serif font-semibold">{{ openSheetTokens[0]?.name }}</span>
+          <UButton
+            class="ml-auto"
+            size="xs"
+            variant="ghost"
+            icon="i-lucide-x"
+            title="Schließen"
+            @click="openSheetTokenId = null"
+          />
+        </div>
+        <div class="min-h-0 flex-1 overflow-y-auto p-2">
+          <MiniCharSheet
+            :group-id="groupId"
+            :map-id="mapId"
+            :tokens="openSheetTokens"
+            :all-tokens="tokens"
+            :time-of-day="currentTimeOfDay"
+            :awaiting-initiative-for="initiativeState?.awaitingFromCharacters ?? []"
+            :grid-size="map?.gridSize"
+            :is-dm="isDm"
+            :target-token-id="combatTargetId"
+            @token-updated="fetchMap"
+          />
+        </div>
+      </div>
     </div>
 
     <!-- Reaktionsmenue (Strg+Rechtsklick auf ein Token): Emoji + Effekte.

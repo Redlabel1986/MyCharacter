@@ -29,6 +29,12 @@ export const MIN_PITCH = 0.02
 export const MAX_PITCH = 1.5533
 /** Naehester Kameraabstand in Zellen. */
 export const MIN_DIST = 2
+/**
+ * Breite des Bandes ausserhalb der Karte, in dem Mitspieler sitzen und ihre
+ * Charakterboegen liegen. Der Blickpunkt der Kamera darf so weit hinaus,
+ * sonst laesst sich kein Bogen anfahren.
+ */
+export const SEAT_BAND_CELLS = 7
 
 /** Rastergroesse absichern — eine 0 wuerde jede Division vergiften. */
 function safeGrid(gridSize: number): number {
@@ -99,8 +105,14 @@ export function clampCamera(c: CameraState, d: MapDims): CameraState {
   // schon bei etwa 1,2 ins Bild — und die Kamera muss innerhalb der Schankstube
   // bleiben, sonst blickt man von aussen durch die Waende.
   const maxDist = Math.max(cols, rows) * 1.6
-  const marginX = (cols / 2) * 1.25
-  const marginZ = (rows / 2) * 1.25
+  // Der Blickpunkt muss ueber die Karte hinausreichen: rundherum sitzen die
+  // Mitspieler, und VOR ihnen liegen ihre Charakterboegen. Ohne diesen
+  // Zuschlag koennte die Kamera nie auf einen Bogen fahren — sie bliebe an
+  // der Kartenkante haengen. Bei kleinen Karten zaehlt der feste Zuschlag,
+  // bei grossen der anteilige.
+  const band = SEAT_BAND_CELLS
+  const marginX = cols / 2 + Math.max((cols / 2) * 0.25, band)
+  const marginZ = rows / 2 + Math.max((rows / 2) * 0.25, band)
   return {
     yaw: c.yaw,
     pitch: clamp(c.pitch, MIN_PITCH, MAX_PITCH),
@@ -231,6 +243,80 @@ export function seatPositions(count: number, d: MapDims, marginCells = 1.6): Poi
       z = halfH
     }
     out.push({ x: d.imgW / 2 + x * g, y: d.imgH / 2 + z * g })
+  }
+  return out
+}
+
+/** Ein Charakterbogen, der als Blatt Papier auf dem Tisch liegt. */
+export interface SheetSlot {
+  /** Mittelpunkt in Kartenpixeln. */
+  x: number
+  y: number
+  /**
+   * Drehung um die Hochachse in Radiant, sodass die Oberkante des Blattes
+   * zur Kartenmitte zeigt — also vom sitzenden Spieler weg. So liest er es
+   * richtigherum, wie ein Blatt vor sich auf dem Tisch.
+   */
+  rotation: number
+  widthCells: number
+  heightCells: number
+}
+
+/** Papierformat des Bogens in Rasterzellen (Seitenverhaeltnis wie DIN A4). */
+export const SHEET_WIDTH_CELLS = 2.3
+export const SHEET_HEIGHT_CELLS = SHEET_WIDTH_CELLS * 1.414
+
+/**
+ * Legt `count` Charakterboegen vor einen Sitzplatz — nebeneinander, wie
+ * jemand, der mehrere Boegen vor sich ausgebreitet hat.
+ *
+ * Die Blaetter liegen WEITER AUSSEN als der Sitzplatz, damit sie nicht auf der
+ * Karte liegen und Figuren verdecken. Ausgerichtet werden sie nach der
+ * Tischkante, an der der Platz liegt: welche Seite das ist, ergibt sich aus
+ * der Lage des Platzes zur Kartenmitte.
+ */
+export function sheetSlots(seat: Point, count: number, d: MapDims): SheetSlot[] {
+  if (!Number.isFinite(count) || count <= 0) return []
+  const g = safeGrid(d.gridSize)
+  const { cols, rows } = mapCells(d)
+
+  // Lage des Platzes relativ zur Kartenmitte, in Zellen.
+  const sx = (seat.x - d.imgW / 2) / g
+  const sz = (seat.y - d.imgH / 2) / g
+
+  // An welcher Kante sitzt er? Die Achse mit dem groesseren relativen Ausschlag
+  // gewinnt — sonst bekaeme eine lange schmale Karte an den Laengsseiten die
+  // falsche Ausrichtung.
+  const relX = Math.abs(sx) / Math.max(0.001, cols / 2)
+  const relZ = Math.abs(sz) / Math.max(0.001, rows / 2)
+  // Einheitsvektor nach aussen (vom Mittelpunkt weg, senkrecht zur Kante).
+  const outX = relX >= relZ ? Math.sign(sx) || 1 : 0
+  const outZ = relX >= relZ ? 0 : Math.sign(sz) || 1
+  // Richtung ENTLANG der Kante, im rechten Winkel dazu.
+  const alongX = -outZ
+  const alongZ = outX
+
+  // Oberkante des Blattes zeigt nach innen: Rotation um Y, die (0,0,-1) auf
+  // den Einwaerts-Vektor abbildet.
+  const rotation = Math.atan2(outX, outZ)
+
+  // So weit nach aussen, dass das Blatt komplett neben dem Sitzplatz liegt.
+  const outset = SHEET_HEIGHT_CELLS / 2 + 0.5
+  const step = SHEET_WIDTH_CELLS + 0.25
+  const firstOffset = -((count - 1) * step) / 2
+
+  const out: SheetSlot[] = []
+  for (let i = 0; i < count; i++) {
+    const along = firstOffset + i * step
+    const cx = sx + outX * outset + alongX * along
+    const cz = sz + outZ * outset + alongZ * along
+    out.push({
+      x: d.imgW / 2 + cx * g,
+      y: d.imgH / 2 + cz * g,
+      rotation,
+      widthCells: SHEET_WIDTH_CELLS,
+      heightCells: SHEET_HEIGHT_CELLS,
+    })
   }
   return out
 }

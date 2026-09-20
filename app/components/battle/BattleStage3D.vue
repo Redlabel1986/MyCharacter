@@ -22,6 +22,7 @@ import {
   type FogInput,
   type QualityLevel,
   type TableSeat,
+  type Sheet3DInput,
 } from '~/composables/useBattle3DScene'
 import { figureDims } from '~~/shared/battle-3d'
 import type { BattleMap, Wall } from '~~/shared/battle-types'
@@ -57,6 +58,8 @@ const props = defineProps<{
   visionLights: VisionLight[]
   /** Mitspieler, die gerade am Tisch sitzen — Namen rund um den Kartenrand. */
   seats: TableSeat[]
+  /** Eigene Charakterboegen, die als Blatt vor dem eigenen Platz liegen. */
+  sheets: Sheet3DInput[]
   /** Ab wie vielen Pixeln ein gedrueckter Zeiger als Zug gilt. */
   dragThresholdPx: number
   /**
@@ -87,7 +90,18 @@ const emit = defineEmits<{
   'token-context': [
     payload: { id: number; clientX: number; clientY: number; ctrlKey: boolean; metaKey: boolean },
   ]
+  /** Der vollstaendige, bedienbare Charakterbogen soll sich oeffnen. */
+  'sheet-open': [tokenId: number]
 }>()
+
+/**
+ * Auf welchen Bogen die Kamera gerade herangefahren ist.
+ *
+ * Der erste Klick auf ein Blatt holt es heran — man liest es auf dem Tisch.
+ * Der zweite Klick auf DASSELBE Blatt oeffnet den echten Charakterbogen mit
+ * allem, was man damit tun kann. Ein Klick daneben oder Escape faehrt zurueck.
+ */
+const focusedSheetId = ref<number | null>(null)
 
 const wrapEl = ref<HTMLDivElement | null>(null)
 const canvasEl = ref<HTMLCanvasElement | null>(null)
@@ -218,8 +232,9 @@ const loadImage = (src: string): Promise<HTMLImageElement | null> =>
  *   rechts auf Figur -> 'menu'   (Kontextmenue, sofern kaum bewegt)
  *   rechts auf Boden -> 'pan'    (verschieben)
  */
-type PointerMode = 'none' | 'orbit' | 'pan' | 'token' | 'menu'
+type PointerMode = 'none' | 'orbit' | 'pan' | 'token' | 'menu' | 'sheet'
 let mode: PointerMode = 'none'
+let pressedSheetId: number | null = null
 let lastX = 0
 let lastY = 0
 let downX = 0
@@ -305,6 +320,18 @@ const onPointerDown = (e: PointerEvent) => {
     return
   }
 
+  // Ein eigener Charakterbogen auf dem Tisch geht allem voran: er liegt
+  // ausserhalb der Karte, dort steht ohnehin keine Figur.
+  if (e.button === 0) {
+    const sheetId = scene.pickSheet(e.clientX, e.clientY)
+    if (sheetId !== null) {
+      mode = 'sheet'
+      pressedSheetId = sheetId
+      ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+      return
+    }
+  }
+
   if (e.button === 2) {
     mode = grabbedId !== null ? 'menu' : 'pan'
   } else if (grabbedId !== null && !props.groundClickMode) {
@@ -343,8 +370,11 @@ const onPointerMove = (e: PointerEvent) => {
     const p = scene.pickGround(e.clientX, e.clientY)
     if (p) emit('token-move', { mapX: p.x, mapY: p.y })
   } else if (mode === 'orbit') {
+    // Wer die Kamera bewegt, schaut nicht mehr auf den Bogen.
+    focusedSheetId.value = null
     scene.camera.orbit(dx, dy)
   } else if (mode === 'pan' || mode === 'menu') {
+    focusedSheetId.value = null
     // Ein Rechts-Zug, der auf einer Figur begann, verschiebt trotzdem die
     // Karte — sonst klebte der Blick fest, sobald man ungluecklich ansetzt.
     scene.camera.pan(dx, dy)
@@ -372,6 +402,23 @@ const onPointerUp = (e: PointerEvent) => {
   grabbedId = null
   mode = 'none'
   if (!scene) return
+
+  if (wasMode === 'sheet') {
+    const sheetId = pressedSheetId
+    pressedSheetId = null
+    if (movedFar || sheetId === null) return
+    if (focusedSheetId.value === sheetId) {
+      // Schon herangefahren — jetzt den echten Bogen.
+      emit('sheet-open', sheetId)
+    } else {
+      const s = props.sheets.find((x) => x.tokenId === sheetId)
+      if (s) {
+        focusedSheetId.value = sheetId
+        scene.focusSheet(s)
+      }
+    }
+    return
+  }
 
   if (wasMode === 'token') {
     emit('token-drop', { shiftKey: e.shiftKey })
@@ -427,7 +474,19 @@ const onContextMenu = (e: MouseEvent) => {
 const onWheel = (e: WheelEvent) => {
   if (!scene) return
   e.preventDefault()
+  focusedSheetId.value = null
   scene.camera.zoom(e.deltaY)
+}
+
+/** Zurueck zum Tisch: Kamera auf die Ausgangsansicht. */
+const leaveSheet = () => {
+  focusedSheetId.value = null
+  scene?.camera.reset()
+  pitchDeg.value = 45
+  yawDeg.value = 0
+}
+const onKeyDown = (e: KeyboardEvent) => {
+  if (e.key === 'Escape' && focusedSheetId.value !== null) leaveSheet()
 }
 
 // --- DOM-Overlay ueber den Koepfen ---------------------------------------
@@ -567,6 +626,7 @@ let unmounted = false
 onMounted(async () => {
   reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
   reducedMotion.addEventListener('change', onReducedMotionChange)
+  window.addEventListener('keydown', onKeyDown)
   const probe = detectWebgl2()
   if (!probe.ok) {
     loading.value = false
@@ -602,6 +662,7 @@ onMounted(async () => {
   scene.setTokens(props.figures)
   scene.setObjects(props.objects)
   scene.setWalls(props.walls, props.wallsVisible)
+  scene.setSheets(props.sheets)
   scene.setTimeOfDay(props.vision.timeOfDay)
   scene.setVision(props.vision)
   scene.setVisionLights(props.visionLights)
@@ -615,6 +676,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   unmounted = true
+  window.removeEventListener('keydown', onKeyDown)
   reducedMotion?.removeEventListener('change', onReducedMotionChange)
   resizeObs?.disconnect()
   resizeObs = null
@@ -639,6 +701,7 @@ watch(
 // sonst nichts bewegt, wird kein Bild gezeichnet — sein Schild bliebe
 // unsichtbar. Deshalb hier ausdruecklich ein Bild anfordern.
 watch(() => props.seats, () => scene?.requestRender(), { deep: true })
+watch(() => props.sheets, (list: Sheet3DInput[]) => scene?.setSheets(list), { deep: true })
 watch(() => props.vision, (v: FogInput) => scene?.setVision(v), { deep: true })
 watch(() => props.vision.timeOfDay, (t: string) => scene?.setTimeOfDay(t))
 watch(() => props.visionLights, (l: VisionLight[]) => scene?.setVisionLights(l), { deep: true })
@@ -793,6 +856,19 @@ watch(
         @click="resetCamera"
       >
         Kamera zurücksetzen
+      </UButton>
+    </div>
+
+    <!-- Nahblick auf einen Charakterbogen. Der Hinweis sagt beides: wie man
+         weiterkommt und wie man zurueckkommt — ohne ihn raet man. -->
+    <div
+      v-if="focusedSheetId !== null"
+      class="absolute top-2 left-2 right-2 flex flex-wrap items-center gap-2 rounded bg-black/70 px-3 py-2 text-xs text-amber-50 backdrop-blur"
+    >
+      <UIcon name="i-lucide-scroll-text" class="size-4 shrink-0 text-amber-300" />
+      <span class="flex-1">Noch einmal auf das Blatt klicken für den vollständigen Bogen.</span>
+      <UButton size="xs" color="neutral" variant="soft" icon="i-lucide-undo-2" @click="leaveSheet">
+        Zurück zum Tisch
       </UButton>
     </div>
 
