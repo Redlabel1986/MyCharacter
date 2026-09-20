@@ -20,6 +20,7 @@ import {
   type DragVisualState,
   type VisionLight,
   type FogInput,
+  type QualityLevel,
 } from '~/composables/useBattle3DScene'
 import { figureDims } from '~~/shared/battle-3d'
 import type { BattleMap, Wall } from '~~/shared/battle-types'
@@ -89,6 +90,8 @@ const wrapEl = ref<HTMLDivElement | null>(null)
 const canvasEl = ref<HTMLCanvasElement | null>(null)
 const loading = ref(true)
 const loadError = ref('')
+/** 0 = volle Qualitaet, 1 = gedrosselt, 2 = auch gedrosselt zu langsam. */
+const quality = ref<QualityLevel>(0)
 
 let scene: Scene3DHandle | null = null
 let resizeObs: ResizeObserver | null = null
@@ -222,8 +225,65 @@ let movedFar = false
 let activePointer: number | null = null
 let grabbedId: number | null = null
 
+/**
+ * Zwei-Finger-Gesten. Ein Finger zieht oder dreht (oben behandelt), zwei
+ * Finger zoomen ueber die Abstandsaenderung und verschieben ueber die
+ * Bewegung ihres Mittelpunkts.
+ */
+const touches = new Map<number, { x: number; y: number }>()
+let pinchDist = 0
+let pinchCx = 0
+let pinchCy = 0
+
+const pinchGeometry = () => {
+  const [a, b] = [...touches.values()]
+  if (!a || !b) return null
+  return {
+    dist: Math.hypot(a.x - b.x, a.y - b.y),
+    cx: (a.x + b.x) / 2,
+    cy: (a.y + b.y) / 2,
+  }
+}
+
+const beginPinch = () => {
+  const g = pinchGeometry()
+  if (!g) return
+  pinchDist = g.dist
+  pinchCx = g.cx
+  pinchCy = g.cy
+  // Laufende Ein-Finger-Aktion abbrechen: aus einem Zug soll beim Aufsetzen
+  // des zweiten Fingers keine halbe Bewegung werden.
+  if (mode === 'token') emit('token-drop', { shiftKey: false })
+  mode = 'none'
+  activePointer = null
+  grabbedId = null
+}
+
+const updatePinch = () => {
+  const g = pinchGeometry()
+  if (!g || !scene) return
+  if (pinchDist > 0) {
+    // Groesserer Abstand = heranzoomen. camera.zoom erwartet ein deltaY im
+    // Rad-Massstab, deshalb die Umrechnung ueber den Logarithmus.
+    const ratio = g.dist / pinchDist
+    if (ratio > 0) scene.camera.zoom(-Math.log(ratio) / 0.0012)
+  }
+  scene.camera.pan(g.cx - pinchCx, g.cy - pinchCy)
+  pinchDist = g.dist
+  pinchCx = g.cx
+  pinchCy = g.cy
+}
+
 const onPointerDown = (e: PointerEvent) => {
-  if (!scene || activePointer !== null) return
+  if (!scene) return
+  if (e.pointerType === 'touch') {
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (touches.size >= 2) {
+      beginPinch()
+      return
+    }
+  }
+  if (activePointer !== null) return
   activePointer = e.pointerId
   lastX = downX = e.clientX
   lastY = downY = e.clientY
@@ -258,7 +318,15 @@ const onPointerDown = (e: PointerEvent) => {
 }
 
 const onPointerMove = (e: PointerEvent) => {
-  if (!scene || e.pointerId !== activePointer || mode === 'none') return
+  if (!scene) return
+  if (e.pointerType === 'touch' && touches.has(e.pointerId)) {
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (touches.size >= 2) {
+      updatePinch()
+      return
+    }
+  }
+  if (e.pointerId !== activePointer || mode === 'none') return
   const dx = e.clientX - lastX
   const dy = e.clientY - lastY
   lastX = e.clientX
@@ -281,6 +349,19 @@ const onPointerMove = (e: PointerEvent) => {
 }
 
 const onPointerUp = (e: PointerEvent) => {
+  if (e.pointerType === 'touch') {
+    touches.delete(e.pointerId)
+    if (touches.size >= 2) {
+      beginPinch()
+      return
+    }
+    // Vom zweiten auf den ersten Finger: die Pinch-Geste endet, aber der
+    // verbliebene Finger soll nicht ploetzlich die Kamera reissen.
+    if (touches.size === 1) {
+      pinchDist = 0
+      return
+    }
+  }
   if (e.pointerId !== activePointer) return
   const wasMode = mode
   const id = grabbedId
@@ -410,6 +491,9 @@ onMounted(async () => {
       gridSize: props.map.gridSize,
       textureUrl: `/api/groups/${props.groupId}/maps/${props.mapId}/image`,
       onFrame: positionLabels,
+      onQuality: (level) => {
+        quality.value = level
+      },
     })
   } catch (e) {
     loading.value = false
@@ -491,6 +575,43 @@ watch(
           class="absolute top-0 left-0 flex flex-col items-center gap-0.5 will-change-transform"
           style="display: none"
         >
+          <!-- Treffer-, Heilungs-, Zauber- und Emoji-Effekte. Dieselben
+               CSS-Klassen wie die 2D-Buehne; sie liegen global in main.css,
+               weil beide Ansichten sie brauchen. :key auf dem Nonce startet
+               die Animation bei jedem neuen Treffer sauber neu. -->
+          <div
+            v-if="f.fx"
+            :key="`fx-${f.fx.nonce}`"
+            class="relative h-0 w-0 flex items-center justify-center overflow-visible"
+          >
+            <div v-if="f.fx.kind === 'damage'" class="fx-slice" />
+            <template v-else-if="f.fx.kind === 'heal'">
+              <UIcon name="i-lucide-plus" class="fx-heal-cross" />
+              <span class="fx-spark fx-spark-1">✦</span>
+              <span class="fx-spark fx-spark-2">✦</span>
+              <span class="fx-spark fx-spark-3">✦</span>
+              <span class="fx-spark fx-spark-4">✦</span>
+            </template>
+            <template v-else-if="f.fx.kind === 'spell'">
+              <span class="fx-spell-rune">✷</span>
+              <span class="fx-spell-spark fx-spell-spark-1">✨</span>
+              <span class="fx-spell-spark fx-spell-spark-2">✨</span>
+              <span class="fx-spell-spark fx-spell-spark-3">✨</span>
+            </template>
+            <template v-else>
+              <span class="fx-love-heart fx-love-heart-1">❤️</span>
+              <span class="fx-love-heart fx-love-heart-2">💖</span>
+              <span class="fx-love-heart fx-love-heart-3">💕</span>
+            </template>
+          </div>
+          <div
+            v-if="f.emoji"
+            :key="`emoji-${f.emoji.nonce}`"
+            class="relative text-[26px] leading-none"
+            style="filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5))"
+          >
+            {{ f.emoji.emoji }}
+          </div>
           <div
             v-if="f.showName"
             class="px-1.5 py-0.5 rounded text-[10px] leading-tight font-semibold text-white bg-black/65 whitespace-nowrap max-w-[10rem] truncate"
@@ -532,6 +653,19 @@ watch(
         @click="resetCamera"
       >
         Kamera zurücksetzen
+      </UButton>
+    </div>
+
+    <!-- Auch gedrosselt zu langsam: den Rueckweg anbieten statt den Nutzer
+         mit einer ruckelnden Ansicht sitzen zu lassen. -->
+    <div
+      v-if="quality === 2"
+      class="absolute top-2 left-2 right-2 flex items-center gap-2 rounded bg-amber-900/85 px-3 py-2 text-xs text-amber-50 backdrop-blur"
+    >
+      <UIcon name="i-lucide-gauge" class="size-4 shrink-0" />
+      <span class="flex-1">Die 3D-Ansicht läuft auf diesem Gerät zäh.</span>
+      <UButton size="xs" color="neutral" variant="solid" @click="emit('fallback', 'Die 3D-Ansicht lief auf diesem Gerät zu langsam.')">
+        Zurück zu 2D
       </UButton>
     </div>
 

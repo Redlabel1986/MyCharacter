@@ -70,6 +70,10 @@ export interface Figure3DInput {
   showName: boolean
   /** HP-Zahl anzeigen (haengt an hpVisibleToPlayers). */
   showHp: boolean
+  /** Laufender Treffer-/Heilungs-/Zauber-Effekt, oder null. */
+  fx: { kind: 'damage' | 'heal' | 'spell' | 'love'; nonce: number } | null
+  /** Emoji-Reaktion ueber dem Kopf, oder null. */
+  emoji: { emoji: string; nonce: number } | null
 }
 
 export interface Object3DInput {
@@ -123,10 +127,20 @@ export function detectWebgl2(): { ok: boolean; reason: string } {
   }
 }
 
+/**
+ * Qualitaetsstufe der Leistungsregelung.
+ *  0 = volle Qualitaet
+ *  1 = gedrosselt (Aufloesung 0,75, kleinere Schattenkarte, keine Schwaden)
+ *  2 = auch gedrosselt zu langsam — die Buehne bietet den Rueckweg nach 2D an
+ */
+export type QualityLevel = 0 | 1 | 2
+
 export interface Scene3DOptions extends MapDims {
   textureUrl: string
   /** Wird nach jedem gerenderten Frame mit der Frame-Zeit in ms gerufen. */
   onFrame?: (dtMs: number) => void
+  /** Meldet eine Absenkung der Qualitaetsstufe. Steigt nie wieder an. */
+  onQuality?: (level: QualityLevel) => void
 }
 
 export interface Scene3DCamera {
@@ -947,6 +961,115 @@ export async function createScene(
     }
   }
 
+  // --- Verdeckungs-Abblendung -------------------------------------------
+  /**
+   * Weil die Kamera bis auf einen flachen Winkel herunterdarf, koennen Figuren
+   * einander verdecken. EIN Raycast pro Frame — von der Kamera zur gerade
+   * gezogenen bzw. am Zug befindlichen Figur — blendet alles ab, was davor
+   * steht. Unabhaengig von der Anzahl der Figuren.
+   */
+  const OCCLUDED_OPACITY = 0.35
+  const occluded = new Set<number>()
+  const occlusionRay = new THREE.Raycaster()
+  const occFrom = new THREE.Vector3()
+  const occTo = new THREE.Vector3()
+
+  const setFigureFade = (rec: FigureRec, faded: boolean) => {
+    for (const m of [rec.front, rec.back, rec.base]) {
+      const mat = m.material as import('three').MeshStandardMaterial
+      if (faded) {
+        mat.transparent = true
+        mat.opacity = OCCLUDED_OPACITY
+      } else {
+        const hidden = rec.input.hidden
+        mat.opacity = hidden ? 0.45 : 1
+        mat.transparent = hidden
+      }
+    }
+  }
+
+  const updateOcclusion = () => {
+    const focusId = draggingId ?? [...figures.values()].find((r) => r.input.isTurn)?.input.id ?? null
+    const next = new Set<number>()
+    if (focusId !== null) {
+      const focus = figures.get(focusId)
+      if (focus) {
+        occFrom.copy(camera.position)
+        occTo.copy(focus.group.position)
+        occTo.y += 0.6
+        const dir = occTo.clone().sub(occFrom)
+        const dist = dir.length()
+        occlusionRay.set(occFrom, dir.normalize())
+        occlusionRay.far = dist
+        for (const hit of occlusionRay.intersectObjects(pickTargets, false)) {
+          const id = hit.object.userData.tokenId
+          if (typeof id === 'number' && id !== focusId) next.add(id)
+        }
+      }
+    }
+    if (next.size === occluded.size && [...next].every((id) => occluded.has(id))) return
+    for (const id of occluded) {
+      if (!next.has(id)) {
+        const rec = figures.get(id)
+        if (rec) setFigureFade(rec, false)
+      }
+    }
+    for (const id of next) {
+      if (!occluded.has(id)) {
+        const rec = figures.get(id)
+        if (rec) setFigureFade(rec, true)
+      }
+    }
+    occluded.clear()
+    for (const id of next) occluded.add(id)
+  }
+
+  // --- Leistungsregelung -------------------------------------------------
+  /**
+   * Gleitender Mittelwert der Frame-Zeit ueber drei Sekunden. Die Stufe faellt
+   * nur und steigt nie wieder — sonst pendelte die Aufloesung sichtbar hin und
+   * her, was stoerender ist als die niedrigere Stufe selbst.
+   */
+  let quality: QualityLevel = 0
+  let frameAvg = 16
+  let sinceChange = 0
+  let overBudget = 0
+  let currentDpr = 1
+
+  const governQuality = (dtMs: number) => {
+    // Ausreisser kappen: ein Alt-Tab oder ein Texturladen darf die Regelung
+    // nicht auf Stufe 2 treiben.
+    const dt = Math.min(dtMs, 120)
+    frameAvg += (dt - frameAvg) * 0.05
+    sinceChange += dt
+    if (sinceChange < 3000) return
+
+    if (quality === 0 && frameAvg > 28) {
+      quality = 1
+      renderer.setPixelRatio(currentDpr * 0.75)
+      sun.shadow.mapSize.set(1024, 1024)
+      sun.shadow.map?.dispose()
+      sun.shadow.map = null
+      fog.setMistEnabled(false)
+      sinceChange = 0
+      overBudget = 0
+      opts.onQuality?.(1)
+      dirty = true
+      return
+    }
+    if (quality === 1 && frameAvg > 40) {
+      overBudget += sinceChange
+      sinceChange = 0
+      if (overBudget >= 5000) {
+        quality = 2
+        opts.onQuality?.(2)
+      }
+      return
+    }
+    sinceChange = 0
+    overBudget = 0
+  }
+
   /** Laeuft gerade etwas, das jeden Frame neu gezeichnet werden muss? */
   const hasAnimation = () => {
     if (reducedMotion) return false
@@ -971,6 +1094,8 @@ export async function createScene(
 
     fog.update(t / 1000)
     updateBillboards()
+    updateOcclusion()
+    governQuality(dt)
     if (animated) {
       // „Am Zug"-Ring pulsiert; die Ziel-Markierung etwas langsamer.
       const pulse = 1 + 0.09 * Math.sin(t * 0.005)
@@ -1082,7 +1207,9 @@ export async function createScene(
   const resize = (w: number, h: number, dpr: number) => {
     if (w <= 0 || h <= 0) return
     viewH = h
-    renderer.setPixelRatio(dpr)
+    currentDpr = dpr
+    // Eine bereits abgesenkte Qualitaetsstufe ueberlebt ein Fenster-Resize.
+    renderer.setPixelRatio(quality === 0 ? dpr : dpr * 0.75)
     renderer.setSize(w, h, false)
     camera.aspect = w / h
     camera.updateProjectionMatrix()
