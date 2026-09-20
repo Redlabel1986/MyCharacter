@@ -424,6 +424,12 @@ export async function createScene(
     turnRing: import('three').Mesh
     targetRing: import('three').Mesh
     input: Figure3DInput
+    /** Ruheposition. Das Treffer-Wackeln rechnet als Versatz darauf. */
+    baseX: number
+    baseZ: number
+    /** Laufendes Treffer-Wackeln: Nonce des ausloesenden Effekts, sonst -1. */
+    shakeNonce: number
+    shakeStart: number
   }
   const figures = new Map<number, FigureRec>()
   const pickTargets: import('three').Object3D[] = []
@@ -524,7 +530,23 @@ export async function createScene(
     // der erste Aufruf die Werte faelschlich fuer unveraendert und eine Figur
     // mit 30 % HP zeigte einen vollen Ring.
     const initial: Figure3DInput = { ...f, hpRatio: null, imageUrl: null }
-    return { group, tilt, base, hpRing, tab, front, back, shadow, turnRing, targetRing, input: initial }
+    return {
+      group,
+      tilt,
+      base,
+      hpRing,
+      tab,
+      front,
+      back,
+      shadow,
+      turnRing,
+      targetRing,
+      input: initial,
+      baseX: 0,
+      baseZ: 0,
+      shakeNonce: -1,
+      shakeStart: 0,
+    }
   }
 
   const disposeFigure = (rec: FigureRec) => {
@@ -551,7 +573,20 @@ export async function createScene(
   const applyFigureState = (rec: FigureRec, f: Figure3DInput) => {
     const d = figureDims(f.sizeMultiplier)
     const w = mapToWorld(f.x, f.y, dims)
-    rec.group.position.set(w.x, 0, w.z)
+    rec.baseX = w.x
+    rec.baseZ = w.z
+    // Die Hoehe NICHT zuruecksetzen: eine gerade gezogene Figur schwebt, und
+    // ein Realtime-Update mitten im Zug wuerde sie sonst zu Boden fallen
+    // lassen, bis der naechste Zieh-Zustand eintrifft.
+    rec.group.position.set(w.x, rec.group.position.y, w.z)
+
+    // Treffer-Wackeln anstossen, sobald ein NEUER Schaden-Effekt kommt. Der
+    // Nonce unterscheidet Folgetreffer voneinander; ohne ihn liefe bei zwei
+    // Treffern hintereinander nur eine Animation.
+    if (f.fx && f.fx.kind === 'damage' && f.fx.nonce !== rec.shakeNonce) {
+      rec.shakeNonce = f.fx.nonce
+      rec.shakeStart = performance.now()
+    }
 
     ;(rec.base.material as import('three').MeshStandardMaterial).color.set(f.baseColor)
 
@@ -1089,6 +1124,32 @@ export async function createScene(
     overBudget = 0
   }
 
+  /** Dauer des Treffer-Wackelns in Millisekunden. */
+  const SHAKE_MS = 600
+
+  /**
+   * Treffer-Wackeln: die getroffene Figur zittert kurz und kommt zur Ruhe.
+   * In der 2D-Ansicht macht das die CSS-Klasse `fx-shake` am Token; im Raum
+   * muss die Figur selbst versetzt werden.
+   */
+  const updateShakes = (now: number) => {
+    for (const rec of figures.values()) {
+      if (rec.shakeNonce < 0) continue
+      const e = (now - rec.shakeStart) / SHAKE_MS
+      if (e >= 1 || reducedMotion) {
+        rec.shakeNonce = -1
+        rec.group.position.x = rec.baseX
+        rec.group.position.z = rec.baseZ
+        continue
+      }
+      // Amplitude klingt linear aus — das liest sich als Aufprall, der
+      // verebbt, statt als gleichmaessiges Zittern.
+      const amp = 0.13 * (1 - e)
+      rec.group.position.x = rec.baseX + Math.sin(now * 0.055) * amp
+      rec.group.position.z = rec.baseZ + Math.cos(now * 0.079) * amp * 0.6
+    }
+  }
+
   /** Laeuft gerade etwas, das jeden Frame neu gezeichnet werden muss? */
   const hasAnimation = () => {
     if (reducedMotion) return false
@@ -1097,6 +1158,7 @@ export async function createScene(
     if (draggingId !== null) return true
     for (const rec of figures.values()) {
       if (rec.input.isTurn || rec.input.isTarget) return true
+      if (rec.shakeNonce >= 0) return true
     }
     return false
   }
@@ -1116,6 +1178,7 @@ export async function createScene(
     lastTime = t
 
     fog.update(t / 1000)
+    updateShakes(t)
     updateBillboards()
     updateOcclusion()
     governQuality(dt)

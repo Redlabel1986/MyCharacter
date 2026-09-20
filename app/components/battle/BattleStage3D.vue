@@ -426,21 +426,57 @@ const setLabelRef = (id: number) => (el: Element | ComponentPublicInstance | nul
   else labelEls.delete(id)
 }
 
+/**
+ * Die Effekt-Container brauchen eine echte Groesse in Pixeln.
+ *
+ * Die Effekt-Klassen sind prozentual bemessen (`.fx-slice` ist
+ * `width: 140%; height: 14%`) und beziehen sich in der 2D-Ansicht auf das
+ * Token-Quadrat. Ohne Elterngroesse loesen sich diese Prozente zu null auf
+ * und der Effekt ist unsichtbar — man sieht nichts und merkt nicht einmal,
+ * dass etwas fehlt.
+ */
+const fxEls = new Map<number, HTMLElement>()
+const setFxRef = (id: number) => (el: Element | ComponentPublicInstance | null) => {
+  if (el instanceof HTMLElement) fxEls.set(id, el)
+  else fxEls.delete(id)
+}
+
 const positionLabels = () => {
   if (!scene) return
   for (const f of props.figures) {
-    const el = labelEls.get(f.id)
-    if (!el) continue
     const d = figureDims(f.sizeMultiplier)
     // Ankerpunkt: knapp ueber der Tafeloberkante.
     const h = f.dead ? d.baseHeight + 0.25 : d.baseHeight + d.tabHeight + d.panelHeight + 0.18
     const p = scene.projectToScreen(f.x, f.y, h)
+
+    const el = labelEls.get(f.id)
+    if (el) {
+      if (p.visible) {
+        el.style.display = ''
+        el.style.transform = `translate3d(${p.x}px, ${p.y}px, 0) translate(-50%, -100%)`
+      } else {
+        el.style.display = 'none'
+      }
+    }
+
+    const fxEl = fxEls.get(f.id)
+    if (!fxEl) continue
     if (!p.visible) {
-      el.style.display = 'none'
+      fxEl.style.display = 'none'
       continue
     }
-    el.style.display = ''
-    el.style.transform = `translate3d(${p.x}px, ${p.y}px, 0) translate(-50%, -100%)`
+    // Der Effekt sitzt auf Brusthoehe der Figur, nicht ueber ihrem Kopf.
+    const mid = scene.projectToScreen(f.x, f.y, d.baseHeight + d.panelHeight * 0.5)
+    // Bildschirmgroesse EINER Rasterzelle an dieser Stelle: der Abstand
+    // zwischen Figurenmitte und Kopf in Pixeln, geteilt durch die Hoehe in
+    // Zellen. Perspektivisch korrekt, ohne die Kameramatrix nachzubauen.
+    const heightCells = Math.max(0.001, h - (d.baseHeight + d.panelHeight * 0.5))
+    const cellPx = Math.hypot(p.x - mid.x, p.y - mid.y) / heightCells
+    const size = Math.max(12, Math.min(400, cellPx * f.sizeMultiplier))
+    fxEl.style.display = ''
+    fxEl.style.width = `${size}px`
+    fxEl.style.height = `${size}px`
+    fxEl.style.transform = `translate3d(${mid.x}px, ${mid.y}px, 0) translate(-50%, -50%)`
   }
 }
 
@@ -589,14 +625,49 @@ watch(
           class="absolute top-0 left-0 flex flex-col items-center gap-0.5 will-change-transform"
           style="display: none"
         >
-          <!-- Treffer-, Heilungs-, Zauber- und Emoji-Effekte. Dieselben
-               CSS-Klassen wie die 2D-Buehne; sie liegen global in main.css,
-               weil beide Ansichten sie brauchen. :key auf dem Nonce startet
-               die Animation bei jedem neuen Treffer sauber neu. -->
+          <!-- Emoji-Reaktion ueber dem Kopf. Eigene Animation ohne die
+               -50%-Zentrierung der 2D-Fassung: hier zentriert schon der
+               Stapel, eine zweite Verschiebung ruecke sie nach links. -->
+          <div
+            v-if="f.emoji"
+            :key="`emoji-${f.emoji.nonce}`"
+            class="token-emoji-bubble-3d"
+          >
+            {{ f.emoji.emoji }}
+          </div>
+          <div
+            v-if="f.showName"
+            class="px-1.5 py-0.5 rounded text-[10px] leading-tight font-semibold text-white bg-black/65 whitespace-nowrap max-w-[10rem] truncate"
+          >
+            {{ f.name }}
+          </div>
+          <div
+            v-if="f.showHp && f.hpMax"
+            class="px-1 rounded text-[10px] leading-tight text-white bg-black/70 whitespace-nowrap tabular-nums"
+          >
+            {{ f.hp ?? 0 }}/{{ f.hpMax }}
+          </div>
+        </div>
+
+        <!-- Treffer-, Heilungs- und Zaubereffekte. Eigener Container auf
+             Brusthoehe der Figur, dessen Groesse positionLabels() pro Frame
+             in Pixeln setzt — die Effekt-Klassen rechnen in Prozent der
+             Elterngroesse. :key auf dem Nonce startet die Animation bei
+             jedem neuen Treffer sauber neu. -->
+        <!-- Kein v-show: die Sichtbarkeit schreibt positionLabels() direkt in
+             style.display, und v-show wuerde bei jedem Update dagegenhalten.
+             Der Container bleibt leer, solange kein Effekt laeuft. -->
+        <div
+          v-for="f in figures"
+          :key="`fxbox-${f.id}`"
+          :ref="setFxRef(f.id)"
+          class="absolute top-0 left-0 overflow-visible will-change-transform"
+          style="display: none"
+        >
           <div
             v-if="f.fx"
             :key="`fx-${f.fx.nonce}`"
-            class="relative h-0 w-0 flex items-center justify-center overflow-visible"
+            class="absolute inset-0 flex items-center justify-center overflow-visible"
           >
             <div v-if="f.fx.kind === 'damage'" class="fx-slice" />
             <template v-else-if="f.fx.kind === 'heal'">
@@ -617,26 +688,6 @@ watch(
               <span class="fx-love-heart fx-love-heart-2">💖</span>
               <span class="fx-love-heart fx-love-heart-3">💕</span>
             </template>
-          </div>
-          <div
-            v-if="f.emoji"
-            :key="`emoji-${f.emoji.nonce}`"
-            class="relative text-[26px] leading-none"
-            style="filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5))"
-          >
-            {{ f.emoji.emoji }}
-          </div>
-          <div
-            v-if="f.showName"
-            class="px-1.5 py-0.5 rounded text-[10px] leading-tight font-semibold text-white bg-black/65 whitespace-nowrap max-w-[10rem] truncate"
-          >
-            {{ f.name }}
-          </div>
-          <div
-            v-if="f.showHp && f.hpMax"
-            class="px-1 rounded text-[10px] leading-tight text-white bg-black/70 whitespace-nowrap tabular-nums"
-          >
-            {{ f.hp ?? 0 }}/{{ f.hpMax }}
           </div>
         </div>
       </div>

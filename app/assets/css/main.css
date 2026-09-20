@@ -947,3 +947,26 @@ html.app-mode-active .battle-stage-wrap {
     transform: translate(-50%, -4px);
   }
 }
+
+/* Emoji-Reaktion in der 3D-Buehne. Dieselbe Choreografie wie in 2D, aber
+   ohne die -50%-Zentrierung: dort zentriert bereits der Eltern-Stapel ueber
+   dem Kopf, eine zweite Verschiebung ruecke das Emoji nach links weg. */
+.token-emoji-bubble-3d {
+  font-size: 26px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.5));
+  animation: token-emoji-bubble-3d 10s ease-out forwards;
+}
+@keyframes token-emoji-bubble-3d {
+  0%   { opacity: 0; transform: translateY(6px) scale(0.3); }
+  6%   { opacity: 1; transform: translateY(-4px) scale(1.15); }
+  12%  { transform: translateY(-4px) scale(1); }
+  90%  { opacity: 1; transform: translateY(-4px) scale(1); }
+  100% { opacity: 0; transform: translateY(-10px) scale(0.95); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .token-emoji-bubble-3d {
+    animation: none;
+    opacity: 1;
+  }
+}
