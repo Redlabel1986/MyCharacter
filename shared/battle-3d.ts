@@ -388,14 +388,18 @@ export function fogMaskRGBA(
  * Linear-Gradient laesst sich nicht in eine Lichtquelle uebersetzen. Die vier
  * Phasen sind dieselben, nur als Winkel, Farbe und Staerke ausgedrueckt.
  *
- * `azimuth`/`elevation` in Radiant; `groundDark` ist der Faktor, auf den
- * vernebelter Boden multipliziert wird (0 = schwarz, 1 = unveraendert).
+ * `azimuth`/`elevation` in Radiant.
  *
- * Zu den Nebelfarben: Fog of War ist in diesem Projekt eine VERDUNKLUNG, kein
- * heller Dunst — die 2D-Ansicht legt `rgba(8,10,22,0.78)` ueber die Karte, und
- * durch diese 22 % sieht man das Gelaende noch. Helle Nebelfarben uebermalen
- * die Karte stattdessen; `fogNear`/`fogFar` sind deshalb durchweg dunkel und
- * hellen nur nach oben hin leicht auf, damit die Bank Volumen bekommt.
+ * `fogVeil` ist die DECKKRAFT des flachen Schleiers ueber voll vernebeltem
+ * Boden (0 = nichts, 1 = deckend). Sie wird mit dem Maskenwert multipliziert —
+ * ueber aufgedecktem Boden ist der 0, und damit ist der Schleier dort
+ * restlos weg. Genau daran haengt, dass die 3D-Ansicht die Karte zeigt:
+ * nicht an der Farbe, sondern am Alpha.
+ *
+ * `fogNear`/`fogFar` sind die Farben der Nebelbank unten und oben. Sie duerfen
+ * hell sein — weisser Nebel verdeckt Unerforschtes, und das ist der Sinn der
+ * Sache. Gefaehrlich waere nur eine Konstruktion, die Helligkeit auch ueber
+ * aufgedeckten Feldern ausgibt.
  */
 export interface Light3D {
   sunColor: number
@@ -405,7 +409,8 @@ export interface Light3D {
   skyColor: number
   groundColor: number
   hemiIntensity: number
-  groundDark: number
+  /** Deckkraft des flachen Schleiers ueber voll vernebeltem Boden. */
+  fogVeil: number
   /** Farbe der Nebelbank an ihrer Basis bzw. an ihrer Spitze. */
   fogNear: number
   fogFar: number
@@ -420,9 +425,10 @@ export const LIGHT_3D: Record<string, Light3D> = {
     skyColor: 0xffe3c4,
     groundColor: 0x2a2018,
     hemiIntensity: 0.62,
-    groundDark: 0.26,
-    fogNear: 0x2b2219,
-    fogFar: 0x5a4a38,
+    fogVeil: 0.8,
+    // Morgennebel: warm angehaucht, nach oben ins Sonnenlicht ausbleichend.
+    fogNear: 0xe7dbc6,
+    fogFar: 0xfff6e8,
   },
   noon: {
     sunColor: 0xfff6e2,
@@ -432,9 +438,10 @@ export const LIGHT_3D: Record<string, Light3D> = {
     skyColor: 0xdfe7ff,
     groundColor: 0x1e232b,
     hemiIntensity: 0.8,
-    groundDark: 0.28,
-    fogNear: 0x252c36,
-    fogFar: 0x4e5a6a,
+    fogVeil: 0.82,
+    // Heller Tag: fast reines Weiss, ganz leicht kuehl.
+    fogNear: 0xdfe5ea,
+    fogFar: 0xfbfdff,
   },
   evening: {
     sunColor: 0xff9d6b,
@@ -444,9 +451,10 @@ export const LIGHT_3D: Record<string, Light3D> = {
     skyColor: 0x8f7fb0,
     groundColor: 0x241a26,
     hemiIntensity: 0.5,
-    groundDark: 0.2,
-    fogNear: 0x241a26,
-    fogFar: 0x4a3446,
+    fogVeil: 0.84,
+    // Daemmerung: der Dunst faengt das Abendrot.
+    fogNear: 0xc9aeb2,
+    fogFar: 0xf2d9c8,
   },
   night: {
     sunColor: 0x8fa6d8,
@@ -456,9 +464,11 @@ export const LIGHT_3D: Record<string, Light3D> = {
     skyColor: 0x2a3550,
     groundColor: 0x080b14,
     hemiIntensity: 0.28,
-    groundDark: 0.1,
-    fogNear: 0x080b14,
-    fogFar: 0x1a2236,
+    fogVeil: 0.9,
+    // Nacht: Mondnebel. Heller als die Karte, damit er als Nebel lesbar
+    // bleibt, aber deutlich kuehler und matter als am Tag.
+    fogNear: 0x8794ae,
+    fogFar: 0xc2cde2,
   },
 }
 

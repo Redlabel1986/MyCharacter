@@ -92,9 +92,12 @@ float vnoise(vec2 p) {
 }
 float fbm(vec2 p, float t) {
   float v = 0.0;
-  v += 0.55 * vnoise(p * 1.0 + vec2(t * 0.06, t * 0.03));
-  v += 0.30 * vnoise(p * 2.3 - vec2(t * 0.09, t * 0.05));
-  v += 0.15 * vnoise(p * 4.7 + vec2(t * 0.04, -t * 0.08));
+  // Drei Oktaven, die unterschiedlich schnell und in verschiedene Richtungen
+  // ziehen. Wuerden sie gleich driften, schoebe sich eine Tapete ueber die
+  // Karte statt zu wabern.
+  v += 0.55 * vnoise(p * 1.0 + vec2(t * 0.16, t * 0.09));
+  v += 0.30 * vnoise(p * 2.3 - vec2(t * 0.24, t * 0.13));
+  v += 0.15 * vnoise(p * 4.7 + vec2(t * 0.11, -t * 0.21));
   return v;
 }
 `
@@ -129,11 +132,12 @@ export function createFogLayer(
   // --- Gemeinsame Uniforms ----------------------------------------------
   const uMask = { value: null as import('three').Texture | null }
   const uTime = { value: 0 }
-  // Anfangswerte bewusst dunkel: kein Codepfad — auch kein fehlgeschlagener —
-  // darf jemals hellen Nebel erzeugen, der die Karte uebermalt.
-  const uFogNear = { value: new THREE.Color(0x252c36) }
-  const uFogFar = { value: new THREE.Color(0x4e5a6a) }
-  const uDark = { value: new THREE.Color(0x1e232b) }
+  const uFogNear = { value: new THREE.Color(0xdfe5ea) }
+  const uFogFar = { value: new THREE.Color(0xfbfdff) }
+  const uDark = { value: new THREE.Color(0xdfe5ea) }
+  // Anfangs 0: solange `setInput` nicht gelaufen ist, ist der Schleier
+  // vollstaendig durchsichtig. Die Deckkraft ist das einzige, was ueber
+  // Sichtbarkeit entscheidet — nie die Farbe.
   const uDarkAmount = { value: 0 }
   const uBankHeight = { value: BANK_HEIGHT }
   const uNoiseScale = { value: 0.35 }
@@ -141,31 +145,32 @@ export function createFogLayer(
 
   // --- 1. Bodenabdunklung ------------------------------------------------
   /*
-   * Ein dunkler Schleier mit normaler Transparenz — genau wie die 2D-Ansicht,
-   * die `rgba(8,10,22,0.78)` ueber die Karte legt.
+   * Der flache Schleier unter der Bank. Er schliesst die Flaeche, die man von
+   * oben sieht; die Bank allein waere von steil oben nur eine duenne Haut.
+   *
+   * Entscheidend ist die Konstruktion, nicht die Farbe: die Sichtbarkeit
+   * haengt AUSSCHLIESSLICH an der Deckkraft aus der Maske. Ueber aufgedecktem
+   * Boden ist die 0, das Fragment faellt weg, die Karte liegt frei — egal wie
+   * hell der Nebel eingefaerbt ist.
    *
    * Vorher stand hier eine Ebene mit Multiply-Blending, die WEISS ausgab, wo
-   * nichts verdunkelt werden sollte, und sich auf das Blending verliess, um
-   * unsichtbar zu bleiben. Griff das Blending nicht, lag opakes Weiss ueber
-   * dem gesamten Brett — auch ueber den aufgedeckten Feldern. Genau das ist
-   * passiert.
-   *
-   * Diese Fassung kann das nicht: die Ausgabefarbe ist IMMER die dunkle
-   * Nebelfarbe, sichtbar wird sie allein ueber die Deckkraft aus der Maske.
-   * Wo nichts vernebelt ist, ist die Deckkraft 0 und das Fragment faellt weg.
-   * Selbst wenn die Maske kaputt waere, kaeme dabei hoechstens eine zu dunkle
-   * Karte heraus — nie eine uebermalte.
+   * nichts verdeckt werden sollte, und sich darauf verliess, dass das Blending
+   * sie unsichtbar macht. Griff das nicht, lag opakes Weiss ueber dem gesamten
+   * Brett — auch ueber den aufgedeckten Feldern. Deshalb entscheidet jetzt das
+   * Alpha und nicht die Farbe.
    */
   const darkGeo = new THREE.PlaneGeometry(cols, rows)
   darkGeo.rotateX(-Math.PI / 2)
   const darkMat = new THREE.ShaderMaterial({
-    uniforms: { uMask, uDark, uDarkAmount },
+    uniforms: { uMask, uDark, uDarkAmount, uTime, uNoiseScale },
     transparent: true,
     depthWrite: false,
     vertexShader: /* glsl */ `
       varying vec2 vUv;
+      varying vec3 vLocal;
       void main() {
         vUv = uv;
+        vLocal = position;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }
     `,
@@ -173,7 +178,11 @@ export function createFogLayer(
       uniform sampler2D uMask;
       uniform vec3 uDark;
       uniform float uDarkAmount;
+      uniform float uTime;
+      uniform float uNoiseScale;
       varying vec2 vUv;
+      varying vec3 vLocal;
+      ${NOISE_GLSL}
       void main() {
         // Kanal B: die nach INNEN erodierte Maske. Sie hat eine weiche Kante
         // (keine Rasterzellen-Treppe) und ist dabei nachweislich nie
@@ -181,7 +190,11 @@ export function createFogLayer(
         float m = texture2D(uMask, vUv).b;
         float a = m * uDarkAmount;
         if (a < 0.004) discard;
-        gl_FragColor = vec4(uDark, a);
+        // Dasselbe Rauschen wie in der Bank, damit der Schleier mit ihr
+        // gemeinsam atmet statt als glatte Flaeche darunter zu liegen.
+        float n = fbm(vLocal.xz * uNoiseScale * 0.85 + vec2(uTime * 0.05, -uTime * 0.07), uTime);
+        a *= mix(0.78, 1.0, n);
+        gl_FragColor = vec4(uDark, clamp(a, 0.0, 1.0));
       }
     `,
   })
@@ -203,12 +216,15 @@ export function createFogLayer(
 
   const bankMat = new THREE.ShaderMaterial({
     uniforms: { uMask, uTime, uFogNear, uFogFar, uBankHeight, uNoiseScale, uMaxAlpha },
+    // Beidseitig, damit man auch von innen in die Bank hineinsieht, wenn die
+    // Kamera flach steht.
     transparent: true,
     depthWrite: false,
     side: THREE.DoubleSide,
     vertexShader: /* glsl */ `
       uniform sampler2D uMask;
       uniform float uBankHeight;
+      uniform float uTime;
       varying vec2 vUv;
       varying float vFog;
       varying float vHeight;
@@ -217,12 +233,22 @@ export function createFogLayer(
         vUv = uv;
         // R = geboescht. Die Bank nimmt sie fuer HOEHE UND DECKKRAFT: sie ist
         // blickdichter Dunst, der nichts vom Boden preisgibt — wie weich ihre
-        // Kante ausfranst, verraet also nichts. Was man vom Gelaende sieht,
-        // regelt allein die Bodenabdunklung, und die liest den harten Kanal G.
+        // Kante ausfranst, verraet also nichts. Ueber aufgedecktem Boden ist
+        // R gleich 0, dort faellt die Bank also restlos weg.
         float m = texture2D(uMask, uv).r;
         vFog = m;
         vec3 p = position;
-        p.y += m * uBankHeight;
+
+        // Das eigentliche Wabern: die Oberflaeche der Bank hebt und senkt
+        // sich in langsamen, gegenlaeufigen Wellen. Ohne das bliebe der Nebel
+        // eine Decke mit driftender Zeichnung — Bewegung entsteht erst, wenn
+        // sich die Silhouette veraendert.
+        float wobble =
+          0.16 * sin(p.x * 0.31 + uTime * 0.55) * cos(p.z * 0.27 - uTime * 0.41) +
+          0.09 * sin(p.z * 0.63 + uTime * 0.83) +
+          0.06 * cos(p.x * 0.91 - uTime * 1.07);
+        p.y += m * uBankHeight * (1.0 + wobble);
+
         vHeight = p.y;
         vLocal = p;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
@@ -241,6 +267,9 @@ export function createFogLayer(
       varying vec3 vLocal;
       ${NOISE_GLSL}
       void main() {
+        // Ueber aufgedecktem Boden ist die Maske 0 — hier faellt die Bank weg,
+        // und die Karte liegt frei. Das ist die einzige Stelle, an der das
+        // entschieden wird.
         if (vFog < 0.04) discard;
         float n = fbm(vLocal.xz * uNoiseScale, uTime);
         // Hoehennebel: unten dichter, oben ausfransend.
@@ -248,10 +277,12 @@ export function createFogLayer(
         vec3 col = mix(uFogNear, uFogFar, hk);
         // Weiche Flanke ueber die ganze Boeschungsbreite — genau das, was die
         // Treppenkante verhindert.
-        float a = smoothstep(0.02, 0.85, vFog);
-        a *= mix(0.55, 1.0, n);
+        float a = smoothstep(0.02, 0.8, vFog);
+        // Kraeftiges Rauschen: die Schwaden sollen sichtbar dichter und
+        // duenner werden, nicht nur leicht marmoriert sein.
+        a *= mix(0.42, 1.12, n);
         // Oben duenner werden lassen, sonst steht dort eine harte Deckflaeche.
-        a *= mix(1.0, 0.35, hk * hk);
+        a *= mix(1.0, 0.3, hk * hk);
         gl_FragColor = vec4(col, clamp(a * uMaxAlpha, 0.0, 1.0));
       }
     `,
@@ -294,9 +325,10 @@ export function createFogLayer(
         // sich Dunst auch ueber die sichtbaren Bereiche und truebte genau
         // die Karte, die man sehen will.
         if (m < 0.04) discard;
-        // Andere Driftrichtung als die Bank, sonst wirkt es wie eine Tapete.
-        float n = fbm(vLocal.xz * uNoiseScale * 0.7 - vec2(uTime * 0.05, uTime * 0.02), uTime * 0.6);
-        float a = m * 0.16 * smoothstep(0.25, 0.85, n);
+        // Andere Driftrichtung und -geschwindigkeit als die Bank, sonst wirkt
+        // es wie eine Tapete, die sich mitschiebt.
+        float n = fbm(vLocal.xz * uNoiseScale * 0.7 - vec2(uTime * 0.13, uTime * 0.06), uTime * 0.6);
+        float a = m * 0.3 * smoothstep(0.2, 0.8, n);
         if (a < 0.005) discard;
         gl_FragColor = vec4(uFogNear, a);
       }
@@ -356,11 +388,8 @@ export function createFogLayer(
     // Nebel bei 22 % Deckkraft, der des Spielers bei 78 % — dieselbe
     // Groessenordnung gilt hier, sonst sieht der DM in 3D weniger als in 2D.
     uDark.value.setHex(light.fogNear)
-    uDarkAmount.value = input.isDm ? 0.22 : 1 - light.groundDark
-    // Die Bank gibt dem Nebel Volumen, sie ersetzt die Verdunklung nicht.
-    // Bei voller Deckkraft waere die Karte darunter uebermalt statt verhuellt
-    // — und der Sinn der Ansicht ist, die Karte zu zeigen.
-    uMaxAlpha.value = input.isDm ? 0.18 : 0.5
+    uDarkAmount.value = input.isDm ? 0.24 : light.fogVeil
+    uMaxAlpha.value = input.isDm ? 0.3 : 0.85
     // Fuer den DM eine flachere Bank: sie soll andeuten, nicht verdecken.
     uBankHeight.value = input.isDm ? BANK_HEIGHT * 0.5 : BANK_HEIGHT
 

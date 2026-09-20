@@ -310,14 +310,30 @@ describe('light3dFor', () => {
     for (const t of ['morning', 'noon', 'evening', 'night']) {
       const l = light3dFor(t)
       expect(l.sunIntensity).toBeGreaterThan(0)
-      expect(l.groundDark).toBeGreaterThanOrEqual(0)
-      expect(l.groundDark).toBeLessThanOrEqual(1)
+      expect(l.fogVeil).toBeGreaterThanOrEqual(0)
+      expect(l.fogVeil).toBeLessThanOrEqual(1)
     }
   })
 
-  it('macht die Nacht dunkler als den Mittag', () => {
-    expect(light3dFor('night').groundDark).toBeLessThan(light3dFor('noon').groundDark)
+  it('macht die Nacht dunkler und verhuellender als den Mittag', () => {
     expect(light3dFor('night').sunIntensity).toBeLessThan(light3dFor('noon').sunIntensity)
+    expect(light3dFor('night').fogVeil).toBeGreaterThan(light3dFor('noon').fogVeil)
+  })
+
+  it('haelt den Schleier unter voller Deckkraft — auch das Unerforschte soll Nebel sein, keine Wand', () => {
+    for (const t of ['morning', 'noon', 'evening', 'night']) {
+      expect(light3dFor(t).fogVeil).toBeLessThan(1)
+    }
+  })
+
+  it('macht den Nebel heller als den Boden, sonst liest er sich nicht als Nebel', () => {
+    for (const t of ['morning', 'noon', 'evening', 'night']) {
+      const l = light3dFor(t)
+      // Grob ueber die Summe der Kanaele — es geht nur um hell gegen dunkel.
+      const bright = (hex: number) => (hex >> 16 & 255) + (hex >> 8 & 255) + (hex & 255)
+      expect(bright(l.fogNear)).toBeGreaterThan(bright(l.groundColor))
+      expect(bright(l.fogFar)).toBeGreaterThan(bright(l.fogNear))
+    }
   })
 
   it('faellt bei unbekannter Tageszeit auf Mittag zurueck', () => {
