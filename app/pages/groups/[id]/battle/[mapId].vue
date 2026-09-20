@@ -436,6 +436,29 @@ const onImgLoad = (e: Event) => {
   imgH.value = t.naturalHeight
 }
 
+/**
+ * Bildmasse unabhaengig von der 2D-Buehne ermitteln.
+ *
+ * Bisher kamen sie ausschliesslich aus dem `<img>` der 2D-Ansicht. In der
+ * 3D-Ansicht ist dieses Bild nicht im DOM — wer die Seite direkt in 3D
+ * oeffnet, bekaeme also niemals Masse und damit auch keine Buehne. Es
+ * funktionierte nur, weil man aus 2D herueberschaltet.
+ *
+ * Der Browser hat das Bild danach im Cache; das `<img>` der 2D-Ansicht laedt
+ * es nicht noch einmal.
+ */
+const preloadMapSize = () => {
+  const img = new Image()
+  img.onload = () => {
+    if (img.naturalWidth && img.naturalHeight) {
+      imgW.value = img.naturalWidth
+      imgH.value = img.naturalHeight
+    }
+  }
+  img.src = `/api/groups/${groupId}/maps/${mapId}/image`
+}
+onMounted(preloadMapSize)
+
 // --- 3D-Buehne ---
 // Die Wahl gilt pro Nutzer (localStorage), nicht pro Karte: der DM zwingt
 // niemandem 3D auf, und jeder am Tisch entscheidet nach seiner Hardware. Ohne

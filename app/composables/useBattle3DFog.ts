@@ -129,26 +129,39 @@ export function createFogLayer(
   // --- Gemeinsame Uniforms ----------------------------------------------
   const uMask = { value: null as import('three').Texture | null }
   const uTime = { value: 0 }
-  const uFogNear = { value: new THREE.Color(0xdcdfe2) }
-  const uFogFar = { value: new THREE.Color(0xf4f6f8) }
-  const uDark = { value: new THREE.Color(0x222833) }
+  // Anfangswerte bewusst dunkel: kein Codepfad — auch kein fehlgeschlagener —
+  // darf jemals hellen Nebel erzeugen, der die Karte uebermalt.
+  const uFogNear = { value: new THREE.Color(0x252c36) }
+  const uFogFar = { value: new THREE.Color(0x4e5a6a) }
+  const uDark = { value: new THREE.Color(0x1e232b) }
   const uDarkAmount = { value: 0 }
   const uBankHeight = { value: BANK_HEIGHT }
   const uNoiseScale = { value: 0.35 }
   const uMaxAlpha = { value: 0.88 }
 
   // --- 1. Bodenabdunklung ------------------------------------------------
-  // Eine eigene Ebene mit Multiply-Blending statt eines Eingriffs in das
-  // Standardmaterial der Karte: ein misslungener Shader-Patch am eingebauten
-  // Material wuerde die Karte schwarz rendern, und das faellt erst am
-  // Bildschirm auf. Diese Ebene kann hoechstens unsichtbar bleiben.
+  /*
+   * Ein dunkler Schleier mit normaler Transparenz — genau wie die 2D-Ansicht,
+   * die `rgba(8,10,22,0.78)` ueber die Karte legt.
+   *
+   * Vorher stand hier eine Ebene mit Multiply-Blending, die WEISS ausgab, wo
+   * nichts verdunkelt werden sollte, und sich auf das Blending verliess, um
+   * unsichtbar zu bleiben. Griff das Blending nicht, lag opakes Weiss ueber
+   * dem gesamten Brett — auch ueber den aufgedeckten Feldern. Genau das ist
+   * passiert.
+   *
+   * Diese Fassung kann das nicht: die Ausgabefarbe ist IMMER die dunkle
+   * Nebelfarbe, sichtbar wird sie allein ueber die Deckkraft aus der Maske.
+   * Wo nichts vernebelt ist, ist die Deckkraft 0 und das Fragment faellt weg.
+   * Selbst wenn die Maske kaputt waere, kaeme dabei hoechstens eine zu dunkle
+   * Karte heraus — nie eine uebermalte.
+   */
   const darkGeo = new THREE.PlaneGeometry(cols, rows)
   darkGeo.rotateX(-Math.PI / 2)
   const darkMat = new THREE.ShaderMaterial({
     uniforms: { uMask, uDark, uDarkAmount },
     transparent: true,
     depthWrite: false,
-    blending: THREE.MultiplyBlending,
     vertexShader: /* glsl */ `
       varying vec2 vUv;
       void main() {
@@ -166,8 +179,9 @@ export function createFogLayer(
         // (keine Rasterzellen-Treppe) und ist dabei nachweislich nie
         // durchlaessiger als die harte Sichtgrenze in G.
         float m = texture2D(uMask, vUv).b;
-        vec3 c = mix(vec3(1.0), uDark, m * uDarkAmount);
-        gl_FragColor = vec4(c, 1.0);
+        float a = m * uDarkAmount;
+        if (a < 0.004) discard;
+        gl_FragColor = vec4(uDark, a);
       }
     `,
   })
