@@ -10,6 +10,8 @@ interface RollPayload {
   characterName?: string
   target: number
   modifier?: number
+  /** Seitenzahl der Wuerfel; fehlt bei aelteren Nachrichten. */
+  diceSides?: number
   dice: number[]
   success: boolean
   critical?: boolean

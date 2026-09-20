@@ -21,6 +21,7 @@ import type {
   FogInput,
   TableSeat,
   Sheet3DInput,
+  DiceRollRequest,
 } from '~/composables/useBattle3DScene'
 import {
   seatPositions,
@@ -395,6 +396,10 @@ onMounted(() => {
     }
     // Audio/Initiative kommt auch ueber denselben Map-Refetch mit rein (der
     // GET /maps/:id liefert audioState + initiativeState gleich mit).
+    // Ein Wurf: in der 3D-Ansicht rollen die Wuerfel ueber das Feld.
+    if (payload.kind === 'roll' && stage3d.value) {
+      void fetchFreshRolls()
+    }
     if (payload.kind === 'audio' || payload.kind === 'initiative') {
       fetchMap()
     }
@@ -2187,6 +2192,59 @@ const sheets3d = computed<Sheet3DInput[]>(() => {
   return out
 })
 
+// --- Wuerfel ueber dem Feld -----------------------------------------------
+/**
+ * Bei jedem Wurf in der Gruppe holt die Seite die neuen Chat-Nachrichten seit
+ * der letzten bekannten Id und uebersetzt die Wurf-Payloads in Wuerfel. Das
+ * deckt ALLE Wurfquellen ab — Proben, Initiative, Zauber —, ohne dass jeder
+ * Endpunkt ein eigenes Ereignis schicken muesste.
+ *
+ * Nur Nachrichten der letzten Sekunden rollen: beim ersten Abruf kaeme sonst
+ * die ganze Chat-Geschichte auf den Tisch.
+ */
+interface RollMessage {
+  id: number
+  type: string
+  createdAt: string
+  payload?: { system?: string; dice?: number[]; diceSides?: number } | null
+}
+const diceRolls3d = ref<DiceRollRequest[]>([])
+let lastRollMessageId = 0
+const FRESH_ROLL_MS = 15_000
+
+/** Seitenzahl aus dem Payload — alte Nachrichten haben sie nicht. */
+const diceSidesOf = (p: { system?: string; diceSides?: number }): number => {
+  if (p.diceSides && p.diceSides >= 2) return p.diceSides
+  if (p.system === 'htbah') return 100
+  return 20
+}
+
+const fetchFreshRolls = async () => {
+  try {
+    const res = await $fetch<{ messages: RollMessage[] }>(`/api/groups/${groupId}/messages`, {
+      query: lastRollMessageId ? { since: lastRollMessageId } : {},
+    })
+    const now = Date.now()
+    const fresh: DiceRollRequest[] = []
+    for (const m of res.messages) {
+      lastRollMessageId = Math.max(lastRollMessageId, m.id)
+      if (m.type !== 'roll' || !m.payload?.dice?.length) continue
+      if (now - new Date(m.createdAt).getTime() > FRESH_ROLL_MS) continue
+      const sides = diceSidesOf(m.payload)
+      fresh.push({
+        id: `msg-${m.id}`,
+        dice: m.payload.dice.map((value) => ({ sides, value })),
+      })
+    }
+    if (fresh.length) {
+      // Liste klein halten — die Buehne merkt sich geworfene Ids selbst.
+      diceRolls3d.value = [...diceRolls3d.value.slice(-20), ...fresh]
+    }
+  } catch {
+    // Kein Wurf auf dem Tisch ist kein Drama; der Chat zeigt ihn trotzdem.
+  }
+}
+
 /** Token, dessen vollstaendiger Bogen gerade als Fenster offen ist. */
 const openSheetTokenId = ref<number | null>(null)
 /**
@@ -3311,6 +3369,7 @@ const endResizeSheet = () => {
             :vision-lights="visionLights3d"
             :seats="tableSeats3d"
             :sheets="sheets3d"
+            :dice-rolls="diceRolls3d"
             @sheet-open="openOwnSheet"
             :drag-state="dragState3d"
             :ground-click-mode="toolMode === 'aoe'"

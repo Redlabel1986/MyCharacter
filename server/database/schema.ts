@@ -188,6 +188,13 @@ export interface RollPayload {
   target: number
   /** Modifikator, der vor dem Wurf angewendet wurde (negativ = Erschwernis). */
   modifier?: number
+  /**
+   * Seitenzahl der geworfenen Wuerfel (alle Eintraege in `dice` haben dieselbe).
+   * Braucht die 3D-Buehne, um den richtigen Koerper rollen zu lassen — aus
+   * dem Wert allein laesst sich eine 6 nicht von einem W6 oder W20 unterscheiden.
+   * Fehlt bei alten Nachrichten; der Client faellt dann nach Regelwerk zurueck.
+   */
+  diceSides?: number
   /** Die einzelnen Wuerfel (z.B. [73] fuer 1W100, [12,5,18] fuer 3W20). */
   dice: number[]
   /** True bei Erfolg, false bei Misserfolg. */

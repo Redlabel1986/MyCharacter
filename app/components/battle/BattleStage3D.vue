@@ -23,6 +23,7 @@ import {
   type QualityLevel,
   type TableSeat,
   type Sheet3DInput,
+  type DiceRollRequest,
 } from '~/composables/useBattle3DScene'
 import { figureDims } from '~~/shared/battle-3d'
 import type { BattleMap, Wall } from '~~/shared/battle-types'
@@ -60,6 +61,11 @@ const props = defineProps<{
   seats: TableSeat[]
   /** Eigene Charakterboegen, die als Blatt vor dem eigenen Platz liegen. */
   sheets: Sheet3DInput[]
+  /**
+   * Wuerfe, die ueber das Feld rollen sollen. Jede Id wird genau einmal
+   * geworfen; die Seite darf die Liste beliebig oft neu setzen.
+   */
+  diceRolls: DiceRollRequest[]
   /** Ab wie vielen Pixeln ein gedrueckter Zeiger als Zug gilt. */
   dragThresholdPx: number
   /**
@@ -666,6 +672,7 @@ onMounted(async () => {
   scene.setObjects(props.objects)
   scene.setWalls(props.walls, props.wallsVisible)
   scene.setSheets(props.sheets)
+  armDice()
   scene.setTimeOfDay(props.vision.timeOfDay)
   scene.setVision(props.vision)
   scene.setVisionLights(props.visionLights)
@@ -705,6 +712,31 @@ watch(
 // unsichtbar. Deshalb hier ausdruecklich ein Bild anfordern.
 watch(() => props.seats, () => scene?.requestRender(), { deep: true })
 watch(() => props.sheets, (list: Sheet3DInput[]) => scene?.setSheets(list), { deep: true })
+
+/**
+ * Geworfene Ids merken, damit ein Wurf nicht erneut rollt, wenn die Seite die
+ * Liste neu setzt (etwa nach einem Nachladen). Wuerfe, die vor dem Start der
+ * Buehne schon in der Liste standen, werden NICHT nachgeholt — sonst rollte
+ * beim Umschalten auf 3D die halbe Chat-Geschichte ueber den Tisch.
+ */
+const rolledIds = new Set<string>()
+let diceArmed = false
+const armDice = () => {
+  for (const r of props.diceRolls) rolledIds.add(r.id)
+  diceArmed = true
+}
+watch(
+  () => props.diceRolls,
+  (list: DiceRollRequest[]) => {
+    if (!scene || !diceArmed) return
+    for (const r of list) {
+      if (rolledIds.has(r.id)) continue
+      rolledIds.add(r.id)
+      scene.rollDice(r)
+    }
+  },
+  { deep: true },
+)
 watch(() => props.vision, (v: FogInput) => scene?.setVision(v), { deep: true })
 watch(() => props.vision.timeOfDay, (t: string) => scene?.setTimeOfDay(t))
 watch(() => props.visionLights, (l: VisionLight[]) => scene?.setVisionLights(l), { deep: true })

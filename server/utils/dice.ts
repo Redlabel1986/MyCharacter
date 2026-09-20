@@ -98,6 +98,7 @@ export function rollHtbahSkill(input: HtbahSkillRollInput): RollPayload {
 
   return {
     system: 'htbah',
+    diceSides: 100,
     label: skill.name?.trim() || '(unbenannter Skill)',
     characterId: input.character.id,
     characterName: input.character.name,
@@ -130,6 +131,7 @@ export function rollHtbahTalent(input: HtbahTalentRollInput): RollPayload {
 
   return {
     system: 'htbah',
+    diceSides: 100,
     label: `Begabungsprobe ${HTBAH_TALENT_LABELS[input.talent]}`,
     characterId: input.character.id,
     characterName: input.character.name,
@@ -193,6 +195,7 @@ export function rollFree(input: FreeRollInput): RollPayload {
   const total = input.critical ? sum * 2 : sum
   return {
     system: input.system,
+    diceSides: input.diceSides,
     label: input.label,
     characterId: input.characterId,
     characterName: input.characterName,
@@ -267,6 +270,7 @@ export function rollDndSkill(input: DndSkillRollInput): RollPayload {
   const labelMode = mode === 'advantage' ? ' (Vorteil)' : mode === 'disadvantage' ? ' (Nachteil)' : ''
   return {
     system: input.character.system,
+    diceSides: 20,
     label: `${skill.label}${labelMode}`,
     characterId: input.character.id,
     characterName: input.character.name,
@@ -299,6 +303,7 @@ export function rollDndSave(input: DndSaveRollInput): RollPayload {
   const labelMode = mode === 'advantage' ? ' (Vorteil)' : mode === 'disadvantage' ? ' (Nachteil)' : ''
   return {
     system: input.character.system,
+    diceSides: 20,
     label: `${input.ability}-Rettungswurf${labelMode}`,
     characterId: input.character.id,
     characterName: input.character.name,
@@ -337,6 +342,7 @@ export function rollDndAbility(input: DndAbilityCheckInput): RollPayload {
   const labelMode = mode === 'advantage' ? ' (Vorteil)' : mode === 'disadvantage' ? ' (Nachteil)' : ''
   return {
     system: input.character.system,
+    diceSides: 20,
     label: `${input.ability}-Probe${labelMode}`,
     characterId: input.character.id,
     characterName: input.character.name,
@@ -404,6 +410,7 @@ export function rollDsa5Skill(input: Dsa5SkillRollInput): RollPayload {
   const sourcePrefix = src === 'spell' ? 'Zauber: ' : src === 'liturgy' ? 'Liturgie: ' : ''
   return {
     system: 'dsa5',
+    diceSides: 20,
     label: `${sourcePrefix}${t.name} — ${probeLabel} (FW ${fw})`,
     characterId: input.character.id,
     characterName: input.character.name,
@@ -437,6 +444,7 @@ export function rollDsa5Ability(input: Dsa5AbilityCheckInput): RollPayload {
   const fumble = roll === 20
   return {
     system: 'dsa5',
+    diceSides: 20,
     label: `${DSA_ABILITY_LABELS[input.ability]}-Probe (Eigenschaft)`,
     characterId: input.character.id,
     characterName: input.character.name,
@@ -468,6 +476,7 @@ export function rollNpcHtbah(input: NpcHtbahRollInput): RollPayload {
   const probe = htbahRollProbe({ roll, target, isTalentOnly: false })
   return {
     system: 'htbah',
+    diceSides: 100,
     label: `${input.tokenName} — ${input.ability.label}`,
     characterName: input.tokenName,
     target,
@@ -501,6 +510,7 @@ export function rollNpcDnd(input: NpcDndRollInput): RollPayload {
   const labelMode = mode === 'advantage' ? ' (Vorteil)' : mode === 'disadvantage' ? ' (Nachteil)' : ''
   return {
     system: 'dnd5e',
+    diceSides: 20,
     label: `${input.tokenName} — ${input.ability.label}${labelMode}`,
     characterName: input.tokenName,
     target: input.dc ?? total,
@@ -532,6 +542,7 @@ export function rollNpcDsa5(input: NpcDsa5RollInput): RollPayload {
   const probeLabel = `${a.probe[0]}/${a.probe[1]}/${a.probe[2]}`
   return {
     system: 'dsa5',
+    diceSides: 20,
     label: `${input.tokenName} — ${a.label} — ${probeLabel} (FW ${a.fw})`,
     characterName: input.tokenName,
     target: a.fw,

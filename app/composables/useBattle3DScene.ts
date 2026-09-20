@@ -25,6 +25,9 @@ import {
 import { light3dFor } from '~~/shared/battle-3d'
 import { createFogLayer, type FogLayer, type FogInput } from '~/composables/useBattle3DFog'
 import { createTavern, type Tavern } from '~/composables/useBattle3DTavern'
+import { createDiceLayer, type DiceLayer, type DiceRollRequest } from '~/composables/useBattle3DDice'
+
+export type { DiceRollRequest }
 import type { Point } from '~~/shared/battle-geometry'
 import type { Wall } from '~~/shared/fog'
 
@@ -201,6 +204,8 @@ export interface Scene3DHandle {
   setObjects(list: Object3DInput[]): void
   /** `visible` steuert nur die Sichtbarkeit — die Geometrie bleibt immer da. */
   setWalls(walls: Wall[], visible: boolean): void
+  /** Wuerfel ueber das Feld rollen lassen; sie bleiben auf dem Ergebnis liegen. */
+  rollDice(req: DiceRollRequest): void
   setSheets(list: Sheet3DInput[]): void
   /** Token-Id des Bogens unter dem Zeiger, oder null. */
   pickSheet(clientX: number, clientY: number): number | null
@@ -1074,6 +1079,15 @@ export async function createScene(
   })
   const setTavern = (on: boolean) => tavern.setEnabled(on)
 
+  // --- Wuerfel -----------------------------------------------------------
+  const dice: DiceLayer = createDiceLayer(THREE, scene, {
+    dims,
+    onNeedsRender: () => {
+      dirty = true
+    },
+  })
+  const rollDice = (req: DiceRollRequest) => dice.roll(req, camState.yaw)
+
   // --- Nebel, Dunkelheit und Tageszeit -----------------------------------
   const fog: FogLayer = createFogLayer(THREE, scene, {
     cols,
@@ -1093,6 +1107,7 @@ export async function createScene(
     reducedMotion = on
     fog.setReducedMotion(on)
     tavern.setReducedMotion(on)
+    dice.setReducedMotion(on)
     dirty = true
   }
 
@@ -1312,6 +1327,8 @@ export async function createScene(
 
   /** Laeuft gerade etwas, das jeden Frame neu gezeichnet werden muss? */
   const hasAnimation = () => {
+    // Wuerfel muessen auch bei reduzierter Bewegung ausblenden koennen.
+    if (dice.isActive()) return true
     if (reducedMotion) return false
     // Der Nebel driftet — solange er liegt, laeuft der Loop.
     if (fogActive) return true
@@ -1341,6 +1358,7 @@ export async function createScene(
     lastTime = t
 
     fog.update(t / 1000)
+    dice.update(t)
     updateShakes(t)
     updateBillboards()
     updateOcclusion()
@@ -1481,6 +1499,7 @@ export async function createScene(
     cancelAnimationFrame(rafId)
     fog.dispose()
     tavern.dispose()
+    dice.dispose()
     // Ohne explizites Freigeben leckt jeder Moduswechsel eine komplette Szene.
     scene.traverse((obj) => {
       const mesh = obj as import('three').Mesh
@@ -1514,6 +1533,7 @@ export async function createScene(
     setTokens,
     setObjects,
     setWalls,
+    rollDice,
     setSheets,
     pickSheet,
     focusSheet,
