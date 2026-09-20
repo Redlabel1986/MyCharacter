@@ -2772,9 +2772,12 @@ const endResizeSheet = () => {
         </div>
         <div
           v-else-if="stage3d"
-          class="w-full text-xs text-parchment-800/70"
+          class="w-full flex flex-wrap gap-x-4 gap-y-1 text-xs text-parchment-800/70"
         >
-          Zeichnen, Nebel-Pinsel, Mauern und der Objekt-Editor arbeiten in der 2D-Ansicht.
+          <span><kbd class="font-semibold">Strg</kbd> + Rechtsklick auf eine Figur — Emojis &amp; Reaktionen</span>
+          <span><kbd class="font-semibold">Alt</kbd> + Klick — Ping</span>
+          <span>Rechtsklick auf eine Figur — Kampfziel</span>
+          <span>Zeichnen, Nebel-Pinsel, Mauern und Objekte: in der 2D-Ansicht.</span>
         </div>
         <div class="flex items-center gap-1">
           <UButton

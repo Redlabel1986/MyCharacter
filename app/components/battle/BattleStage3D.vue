@@ -375,18 +375,9 @@ const onPointerUp = (e: PointerEvent) => {
     if (!movedFar && id !== null) emit('token-click', id)
     return
   }
-  if (wasMode === 'menu' && !movedFar && id !== null) {
-    // Ctrl/Cmd mitgeben: die Seite unterscheidet damit zwischen
-    // Ziel-Markierung und Reaktions-Menue, genau wie in 2D.
-    emit('token-context', {
-      id,
-      clientX: e.clientX,
-      clientY: e.clientY,
-      ctrlKey: e.ctrlKey,
-      metaKey: e.metaKey,
-    })
-    return
-  }
+  // Der Rechtsklick auf eine Figur wird NICHT hier behandelt, sondern im
+  // contextmenu-Ereignis weiter unten — siehe die Begruendung dort.
+  if (wasMode === 'menu') return
   // Linksklick ohne nennenswerte Bewegung auf dem Boden: als Klick melden.
   // Ping und AoE haengen daran; die Seite entscheidet, was gemeint ist.
   if (wasMode === 'orbit' && !movedFar && e.button === 0) {
@@ -400,9 +391,35 @@ const onDblClick = (e: MouseEvent) => {
   if (id !== null && id !== undefined) emit('token-dblclick', id)
 }
 
-// Rechtsklick-Menue des Browsers unterdruecken: rechts ist unsere Pan- bzw.
-// Kontextmenue-Geste.
-const onContextMenu = (e: MouseEvent) => e.preventDefault()
+/**
+ * Rechtsklick auf eine Figur.
+ *
+ * Bewusst hier und nicht in `pointerup`: dort war es unzuverlaessig. Je nach
+ * Browser und Plattform kann ein Rechtsklick ein `pointercancel` ausloesen
+ * oder die Zeiger-Erfassung anders abwickeln — dann kommt nie ein passendes
+ * `pointerup` an und das Reaktionsmenue oeffnet nicht. `contextmenu` feuert
+ * fuer einen Rechtsklick zuverlaessig und traegt sowohl die Position als auch
+ * die Modifikatortasten. Die 2D-Buehne haengt aus demselben Grund daran.
+ *
+ * Der Browser-Eintrag wird immer unterdrueckt, denn rechts ist hier die
+ * Verschiebe-Geste.
+ */
+const onContextMenu = (e: MouseEvent) => {
+  e.preventDefault()
+  // Wurde gezogen, war es ein Kameraschwenk und kein Klick.
+  if (!scene || movedFar) return
+  const id = scene.pickToken(e.clientX, e.clientY)
+  if (id === null) return
+  // Ctrl/Cmd mitgeben: die Seite unterscheidet damit zwischen
+  // Ziel-Markierung und Reaktions-Menue, genau wie in 2D.
+  emit('token-context', {
+    id,
+    clientX: e.clientX,
+    clientY: e.clientY,
+    ctrlKey: e.ctrlKey,
+    metaKey: e.metaKey,
+  })
+}
 
 const onWheel = (e: WheelEvent) => {
   if (!scene) return
