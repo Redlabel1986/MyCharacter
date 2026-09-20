@@ -102,6 +102,9 @@ const emit = defineEmits<{
  * allem, was man damit tun kann. Ein Klick daneben oder Escape faehrt zurueck.
  */
 const focusedSheetId = ref<number | null>(null)
+const focusedSheetIsOwn = computed(
+  () => props.sheets.find((s: Sheet3DInput) => s.tokenId === focusedSheetId.value)?.own === true,
+)
 
 const wrapEl = ref<HTMLDivElement | null>(null)
 const canvasEl = ref<HTMLCanvasElement | null>(null)
@@ -407,16 +410,16 @@ const onPointerUp = (e: PointerEvent) => {
     const sheetId = pressedSheetId
     pressedSheetId = null
     if (movedFar || sheetId === null) return
+    const s = props.sheets.find((x: Sheet3DInput) => x.tokenId === sheetId)
+    if (!s) return
     if (focusedSheetId.value === sheetId) {
-      // Schon herangefahren — jetzt den echten Bogen.
-      emit('sheet-open', sheetId)
-    } else {
-      const s = props.sheets.find((x) => x.tokenId === sheetId)
-      if (s) {
-        focusedSheetId.value = sheetId
-        scene.focusSheet(s)
-      }
+      // Schon herangefahren. Den vollstaendigen Bogen gibt es nur fuer den
+      // eigenen Charakter — fremde liegen zum Ansehen da, nicht zum Oeffnen.
+      if (s.own) emit('sheet-open', sheetId)
+      return
     }
+    focusedSheetId.value = sheetId
+    scene.focusSheet(s)
     return
   }
 
@@ -865,8 +868,15 @@ watch(
       v-if="focusedSheetId !== null"
       class="absolute top-2 left-2 right-2 flex flex-wrap items-center gap-2 rounded bg-black/70 px-3 py-2 text-xs text-amber-50 backdrop-blur"
     >
-      <UIcon name="i-lucide-scroll-text" class="size-4 shrink-0 text-amber-300" />
-      <span class="flex-1">Noch einmal auf das Blatt klicken für den vollständigen Bogen.</span>
+      <UIcon
+        :name="focusedSheetIsOwn ? 'i-lucide-scroll-text' : 'i-lucide-eye'"
+        class="size-4 shrink-0 text-amber-300"
+      />
+      <span class="flex-1">
+        {{ focusedSheetIsOwn
+          ? 'Noch einmal auf das Blatt klicken für den vollständigen Bogen.'
+          : 'Fremder Bogen — du kannst ihn ansehen, aber nicht öffnen.' }}
+      </span>
       <UButton size="xs" color="neutral" variant="soft" icon="i-lucide-undo-2" @click="leaveSheet">
         Zurück zum Tisch
       </UButton>

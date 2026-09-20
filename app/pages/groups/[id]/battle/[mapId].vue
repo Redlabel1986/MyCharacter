@@ -22,7 +22,12 @@ import type {
   TableSeat,
   Sheet3DInput,
 } from '~/composables/useBattle3DScene'
-import { seatPositions, sheetSlots } from '~~/shared/battle-3d'
+import {
+  seatPositions,
+  sheetSlots,
+  SHEET_WIDTH_CELLS,
+  SHEET_HEIGHT_CELLS,
+} from '~~/shared/battle-3d'
 import { paintSheet } from '~/composables/useBattle3DSheet'
 import {
   TOKEN_CONDITIONS,
@@ -2080,22 +2085,37 @@ const tableSeats3d = computed<TableSeat[]>(() => {
   }))
 })
 
-// --- Eigene Charakterboegen auf dem Tisch ---------------------------------
+// --- Charakterboegen auf dem Tisch ----------------------------------------
 /**
- * Nur die EIGENEN Boegen. Sie werden gar nicht erst fuer fremde Tokens
- * gebaut — so kann kein Zufall sie sichtbar machen. Hat jemand mehrere
- * Charaktere auf der Karte, liegen die Blaetter nebeneinander vor ihm.
+ * Vor jedem Platz liegen die Boegen seiner Charaktere — man sieht, dass die
+ * anderen ihre Unterlagen vor sich haben. Oeffnen laesst sich nur der eigene.
+ *
+ * Dass auf fremden Blaettern nichts Verbotenes steht, muss diese Stelle NICHT
+ * sicherstellen: der Server liefert hp und mana bereits als null aus, wenn der
+ * DM sie fuer Spieler verborgen hat. Gemalt werden kann also nur, was man
+ * ohnehin sehen darf.
  */
-const myCharTokens = computed<Token[]>(() =>
-  myTokensOnMap.value.filter((t) => t.characterId !== null),
-)
+const charTokensByOwner = computed<Map<number, Token[]>>(() => {
+  const byOwner = new Map<number, Token[]>()
+  for (const t of tokens.value) {
+    if (t.characterId === null) continue
+    if (!isTokenVisibleToViewer(t)) continue
+    const list = byOwner.get(t.ownerUserId)
+    if (list) list.push(t)
+    else byOwner.set(t.ownerUserId, [t])
+  }
+  // Stabil sortieren, damit die Blaetter nicht bei jedem Abruf die Plaetze
+  // tauschen.
+  for (const list of byOwner.values()) list.sort((a, b) => a.id - b.id)
+  return byOwner
+})
 
 /** Canvas + Zaehler je Token; der Zaehler stoesst das Neuladen der Textur an. */
 const sheetCanvases = new Map<number, { canvas: HTMLCanvasElement; revision: number }>()
 const sheetRevisionTick = ref(0)
 const sheetPortraits = new Map<string, HTMLImageElement>()
 
-const drawSheet = (t: Token) => {
+const drawSheet = (t: Token, own: boolean) => {
   let entry = sheetCanvases.get(t.id)
   if (!entry) {
     entry = { canvas: document.createElement('canvas'), revision: 0 }
@@ -2127,6 +2147,7 @@ const drawSheet = (t: Token) => {
     manaMax: t.manaMax ?? null,
     statusText: t.statusText,
     conditions: tokenConditions(t).map((c) => c.label),
+    own,
   }, portrait)
   entry.revision++
   return entry
@@ -2134,36 +2155,52 @@ const drawSheet = (t: Token) => {
 
 const sheets3d = computed<Sheet3DInput[]>(() => {
   if (!import.meta.client) return []
-  const mine = myCharTokens.value
-  if (!mine.length) return []
-  const mySeat = tableSeats3d.value.find((s) => s.isSelf)
-  if (!mySeat) return []
   // Vom Zaehler abhaengig machen, damit ein nachgeladenes Portraet die
   // Boegen neu zeichnet.
   void sheetRevisionTick.value
-  const slots = sheetSlots(
-    { x: mySeat.mapX, y: mySeat.mapY },
-    mine.length,
-    { imgW: imgW.value, imgH: imgH.value, gridSize: map.value?.gridSize ?? 50 },
-  )
-  return mine.map((t, i) => {
-    const entry = drawSheet(t)
-    const slot = slots[i]
-    return {
-      tokenId: t.id,
-      x: slot?.x ?? 0,
-      y: slot?.y ?? 0,
-      rotation: slot?.rotation ?? 0,
-      widthCells: slot?.widthCells ?? 2.3,
-      heightCells: slot?.heightCells ?? 3.25,
-      canvas: entry.canvas,
-      revision: entry.revision,
-    }
-  })
+  const dims = { imgW: imgW.value, imgH: imgH.value, gridSize: map.value?.gridSize ?? 50 }
+  const byOwner = charTokensByOwner.value
+  const meId = user.value?.id
+  const out: Sheet3DInput[] = []
+
+  for (const seat of tableSeats3d.value) {
+    const mine = byOwner.get(seat.id)
+    if (!mine?.length) continue
+    const own = seat.id === meId
+    const slots = sheetSlots({ x: seat.mapX, y: seat.mapY }, mine.length, dims)
+    mine.forEach((t, i) => {
+      const entry = drawSheet(t, own)
+      const slot = slots[i]
+      out.push({
+        tokenId: t.id,
+        x: slot?.x ?? 0,
+        y: slot?.y ?? 0,
+        rotation: slot?.rotation ?? 0,
+        widthCells: slot?.widthCells ?? SHEET_WIDTH_CELLS,
+        heightCells: slot?.heightCells ?? SHEET_HEIGHT_CELLS,
+        canvas: entry.canvas,
+        revision: entry.revision,
+        own,
+      })
+    })
+  }
+  return out
 })
 
 /** Token, dessen vollstaendiger Bogen gerade als Fenster offen ist. */
 const openSheetTokenId = ref<number | null>(null)
+/**
+ * Bogen oeffnen — aber nur den eigenen.
+ *
+ * Die 3D-Buehne prueft das bereits, doch das ist Oberflaeche. Hier steht die
+ * Regel noch einmal, weil ein Fehler dort sonst genuegte, um einen fremden
+ * Charakterbogen zu oeffnen — und der ist bedienbar, nicht nur lesbar.
+ */
+const openOwnSheet = (tokenId: number) => {
+  const t = tokens.value.find((x) => x.id === tokenId)
+  if (!t || t.ownerUserId !== user.value?.id) return
+  openSheetTokenId.value = tokenId
+}
 const openSheetTokens = computed<Token[]>(() => {
   const id = openSheetTokenId.value
   if (id === null) return []
@@ -3274,7 +3311,7 @@ const endResizeSheet = () => {
             :vision-lights="visionLights3d"
             :seats="tableSeats3d"
             :sheets="sheets3d"
-            @sheet-open="openSheetTokenId = $event"
+            @sheet-open="openOwnSheet"
             :drag-state="dragState3d"
             :ground-click-mode="toolMode === 'aoe'"
             @fallback="onStage3dFallback"

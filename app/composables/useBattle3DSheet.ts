@@ -27,6 +27,8 @@ export interface SheetData {
   manaMax: number | null
   statusText: string
   conditions: string[]
+  /** Gehoert der Bogen dem Betrachter? Fremde lassen sich nicht oeffnen. */
+  own: boolean
 }
 
 /** Aufloesung des Blattes. Hoch genug, um beim Hineinzoomen lesbar zu sein. */
@@ -317,7 +319,11 @@ export function paintSheet(
   ctx.font = 'italic 16px Georgia, serif'
   ctx.fillStyle = 'rgba(62,49,21,0.6)'
   ctx.textAlign = 'center'
-  ctx.fillText('Anklicken für den vollständigen Bogen', SHEET_W / 2, SHEET_H - pad - 12)
+  ctx.fillText(
+    data.own ? 'Anklicken für den vollständigen Bogen' : 'Fremder Bogen — nur zum Ansehen',
+    SHEET_W / 2,
+    SHEET_H - pad - 12,
+  )
   ctx.textAlign = 'left'
 }
 

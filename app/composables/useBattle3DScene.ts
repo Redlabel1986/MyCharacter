@@ -124,6 +124,11 @@ export interface Sheet3DInput {
   canvas: HTMLCanvasElement
   /** Zaehler, der sich bei jeder Neuzeichnung erhoeht. */
   revision: number
+  /**
+   * Gehoert der Bogen dem Betrachter? Fremde liegen sichtbar auf dem Tisch
+   * und lassen sich auch heranholen, aber nicht oeffnen.
+   */
+  own: boolean
 }
 
 export interface ScreenPos {
