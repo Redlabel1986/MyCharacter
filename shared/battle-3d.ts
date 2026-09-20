@@ -184,6 +184,57 @@ export function figureDims(sizeMultiplier: number): FigureDims {
   }
 }
 
+/**
+ * Sitzplaetze rund um den Tisch, gleichmaessig am Rand der Karte verteilt.
+ *
+ * Bewusst der RECHTECK-Umfang und keine Ellipse: an einem Tisch sitzt man an
+ * den Kanten, nicht auf einer Kreisbahn. Bei einer langen, schmalen Karte
+ * saessen auf einer Ellipse alle gedraengt an den kurzen Enden.
+ *
+ * Gezaehlt wird von der Vorderkante (Mitte, zur Standardkamera hin) im
+ * Uhrzeigersinn. Ein einzelner Spieler sitzt damit im Blickfeld, zwei sitzen
+ * sich gegenueber, vier an den vier Seiten.
+ *
+ * Liefert Kartenpixel — dieselbe Einheit wie Token-Positionen.
+ */
+export function seatPositions(count: number, d: MapDims, marginCells = 1.6): Point[] {
+  if (!Number.isFinite(count) || count <= 0) return []
+  const g = safeGrid(d.gridSize)
+  const { cols, rows } = mapCells(d)
+  const w = cols + 2 * marginCells
+  const h = rows + 2 * marginCells
+  const halfW = w / 2
+  const halfH = h / 2
+  const perim = 2 * (w + h)
+
+  const out: Point[] = []
+  for (let i = 0; i < count; i++) {
+    let t = (i / count) * perim
+    let x: number
+    let z: number
+    if (t < halfW) {
+      // Vorderkante, rechte Haelfte
+      x = t
+      z = halfH
+    } else if ((t -= halfW) < h) {
+      x = halfW
+      z = halfH - t
+    } else if ((t -= h) < w) {
+      x = halfW - t
+      z = -halfH
+    } else if ((t -= w) < h) {
+      x = -halfW
+      z = -halfH + t
+    } else {
+      // Vorderkante, linke Haelfte
+      x = -halfW + (t - h)
+      z = halfH
+    }
+    out.push({ x: d.imgW / 2 + x * g, y: d.imgH / 2 + z * g })
+  }
+  return out
+}
+
 // --- Nebelgitter ------------------------------------------------------------
 
 /**

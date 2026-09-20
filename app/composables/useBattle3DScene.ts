@@ -91,6 +91,21 @@ export interface Object3DInput {
   hidden: boolean
 }
 
+/**
+ * Ein Mitspieler, der gerade mit am Tisch sitzt. Rein zur Anzeige — die Szene
+ * baut dafuer keine Geometrie, die Namen liegen als DOM ueber dem Canvas.
+ */
+export interface TableSeat {
+  /** Benutzer-Id. */
+  id: number
+  name: string
+  /** Sitzplatz in Kartenpixeln, rund um den Kartenrand. */
+  mapX: number
+  mapY: number
+  isSelf: boolean
+  isDm: boolean
+}
+
 export interface ScreenPos {
   x: number
   y: number

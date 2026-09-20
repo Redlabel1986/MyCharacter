@@ -19,7 +19,9 @@ import type {
   DragVisualState,
   VisionLight,
   FogInput,
+  TableSeat,
 } from '~/composables/useBattle3DScene'
+import { seatPositions } from '~~/shared/battle-3d'
 import {
   TOKEN_CONDITIONS,
   CONDITION_BY_ID,
@@ -55,6 +57,7 @@ import {
   subscribePresenceGroup,
   type RealtimeSubscription,
   type PresenceSubscription,
+  type PresenceMember,
   type TokenFxPayload,
 } from '~/composables/usePusher'
 import {
@@ -364,6 +367,8 @@ let mapSub: RealtimeSubscription | null = null
 let groupSub: RealtimeSubscription | null = null
 // Praesenz: meldet diesen Tab gruppenweit als „im Spiel" (playing:true).
 let presenceSub: PresenceSubscription | null = null
+/** Aktuell verbundene Gruppenmitglieder — gespiegelt fuer das Template. */
+const presenceMembers = ref<PresenceMember[]>([])
 let pollHandle: ReturnType<typeof setInterval> | null = null
 // Fallback-Poll NUR ohne Realtime-Verbindung.
 const FALLBACK_POLL_MS = 5_000
@@ -416,6 +421,11 @@ onMounted(() => {
   }
   // Gruppenweit als „im Spiel" anzeigen (Online-Status auf der Gruppenseite).
   presenceSub = subscribePresenceGroup(groupId, { playing: true })
+  // Die Mitgliederliste in einen eigenen Ref spiegeln: `presenceSub` ist ein
+  // einfaches `let` und damit fuer das Template unsichtbar.
+  if (presenceSub) {
+    watch(presenceSub.members, (m) => { presenceMembers.value = m }, { immediate: true })
+  }
 })
 onUnmounted(() => {
   if (typeof document !== 'undefined') {
@@ -2041,6 +2051,33 @@ const vision3d = computed<FogInput>(() => ({
   isDm: isDm.value,
 }))
 
+/**
+ * Wer gerade mit am Tisch sitzt.
+ *
+ * Nur Mitglieder, deren Tab auf einer Spiel-Seite steht (`playing`) — wer die
+ * Gruppenuebersicht offen hat, sitzt nicht mit am Tisch. Nach Benutzer-Id
+ * sortiert, damit die Plaetze stabil bleiben: ohne das ruecken bei jedem
+ * Beitritt alle anderen einen Stuhl weiter.
+ */
+const tableSeats3d = computed<TableSeat[]>(() => {
+  const playing = presenceMembers.value
+    .filter((m) => m.playing)
+    .sort((a, b) => a.userId - b.userId)
+  const spots = seatPositions(playing.length, {
+    imgW: imgW.value,
+    imgH: imgH.value,
+    gridSize: map.value?.gridSize ?? 50,
+  })
+  return playing.map((m, i) => ({
+    id: m.userId,
+    name: m.username ?? `Spieler ${m.userId}`,
+    mapX: spots[i]?.x ?? 0,
+    mapY: spots[i]?.y ?? 0,
+    isSelf: m.userId === user.value?.id,
+    isDm: m.role === 'dm' || m.role === 'admin',
+  }))
+})
+
 /** Sichtquellen als echte Punktlichter (Tokens mit Sicht + leuchtende Objekte). */
 const visionLights3d = computed<VisionLight[]>(() =>
   visionSources.value.map((s) => ({
@@ -3142,6 +3179,7 @@ const endResizeSheet = () => {
             :pings="visiblePings"
             :vision="vision3d"
             :vision-lights="visionLights3d"
+            :seats="tableSeats3d"
             :drag-state="dragState3d"
             :ground-click-mode="toolMode === 'aoe'"
             @fallback="onStage3dFallback"

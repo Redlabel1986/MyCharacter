@@ -14,6 +14,7 @@ import {
   erodeOpenArea,
   light3dFor,
   cameraPosition,
+  seatPositions,
   TAVERN_ROOM,
   TAVERN_CEILING_Y,
   MIN_PITCH,
@@ -143,6 +144,55 @@ describe('figureDims', () => {
   it('faengt unsinnige Multiplikatoren ab', () => {
     expect(figureDims(0).baseRadius).toBeGreaterThan(0)
     expect(figureDims(-2).baseRadius).toBeGreaterThan(0)
+  })
+})
+
+describe('seatPositions — Spieler rund um den Tisch', () => {
+  it('liefert bei niemandem am Tisch nichts', () => {
+    expect(seatPositions(0, dims)).toEqual([])
+    expect(seatPositions(-3, dims)).toEqual([])
+  })
+
+  it('liefert genau so viele Plaetze wie Spieler', () => {
+    for (const n of [1, 2, 3, 5, 8, 13]) {
+      expect(seatPositions(n, dims)).toHaveLength(n)
+    }
+  })
+
+  it('setzt den ersten Platz an die Vorderkante, im Blickfeld der Kamera', () => {
+    const [p] = seatPositions(1, dims)
+    expect(p!.x).toBeCloseTo(dims.imgW / 2)
+    expect(p!.y).toBeGreaterThan(dims.imgH / 2)
+  })
+
+  it('setzt zwei Spieler einander gegenueber', () => {
+    const [a, b] = seatPositions(2, dims)
+    expect(a!.x).toBeCloseTo(b!.x)
+    // Gleich weit von der Mitte weg, aber auf entgegengesetzten Seiten.
+    expect(a!.y - dims.imgH / 2).toBeCloseTo(-(b!.y - dims.imgH / 2))
+  })
+
+  it('setzt niemanden auf die Karte — alle sitzen ausserhalb', () => {
+    for (const d of [dims, { imgW: 4000, imgH: 800, gridSize: 50 }, { imgW: 500, imgH: 3000, gridSize: 70 }]) {
+      for (const p of seatPositions(11, d)) {
+        const outside =
+          p.x < 0 || p.x > d.imgW || p.y < 0 || p.y > d.imgH
+        expect(outside).toBe(true)
+      }
+    }
+  })
+
+  it('verteilt gleichmaessig: keine zwei Plaetze fallen zusammen', () => {
+    const pts = seatPositions(9, dims)
+    for (let i = 0; i < pts.length; i++) {
+      for (let j = i + 1; j < pts.length; j++) {
+        expect(Math.hypot(pts[i]!.x - pts[j]!.x, pts[i]!.y - pts[j]!.y)).toBeGreaterThan(1)
+      }
+    }
+  })
+
+  it('ist bei gleicher Eingabe stets gleich — die Plaetze duerfen nicht springen', () => {
+    expect(seatPositions(6, dims)).toEqual(seatPositions(6, dims))
   })
 })
 

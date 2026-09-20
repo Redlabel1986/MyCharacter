@@ -21,6 +21,7 @@ import {
   type VisionLight,
   type FogInput,
   type QualityLevel,
+  type TableSeat,
 } from '~/composables/useBattle3DScene'
 import { figureDims } from '~~/shared/battle-3d'
 import type { BattleMap, Wall } from '~~/shared/battle-types'
@@ -54,6 +55,8 @@ const props = defineProps<{
   vision: FogInput
   /** Sichtquellen als echte Punktlichter (hoechstens acht werden gesetzt). */
   visionLights: VisionLight[]
+  /** Mitspieler, die gerade am Tisch sitzen — Namen rund um den Kartenrand. */
+  seats: TableSeat[]
   /** Ab wie vielen Pixeln ein gedrueckter Zeiger als Zug gilt. */
   dragThresholdPx: number
   /**
@@ -458,8 +461,35 @@ const setFxRef = (id: number) => (el: Element | ComponentPublicInstance | null) 
   else fxEls.delete(id)
 }
 
+/**
+ * Namensschilder der Mitspieler. Liegen flach am Kartenrand, also dort, wo am
+ * echten Tisch die Leute saessen.
+ */
+const seatEls = new Map<number, HTMLElement>()
+const setSeatRef = (id: number) => (el: Element | ComponentPublicInstance | null) => {
+  if (el instanceof HTMLElement) seatEls.set(id, el)
+  else seatEls.delete(id)
+}
+
+const positionSeats = () => {
+  if (!scene) return
+  for (const s of props.seats) {
+    const el = seatEls.get(s.id)
+    if (!el) continue
+    // Knapp ueber der Tischplatte — wie ein aufgestelltes Namensschildchen.
+    const p = scene.projectToScreen(s.mapX, s.mapY, 0.3)
+    if (!p.visible) {
+      el.style.display = 'none'
+      continue
+    }
+    el.style.display = ''
+    el.style.transform = `translate3d(${p.x}px, ${p.y}px, 0) translate(-50%, -50%)`
+  }
+}
+
 const positionLabels = () => {
   if (!scene) return
+  positionSeats()
   for (const f of props.figures) {
     const d = figureDims(f.sizeMultiplier)
     // Ankerpunkt: knapp ueber der Tafeloberkante.
@@ -605,6 +635,10 @@ watch(
   scheduleOverlayRedraw,
   { deep: true },
 )
+// Die Sitzschilder positioniert onFrame. Tritt jemand bei, waehrend sich
+// sonst nichts bewegt, wird kein Bild gezeichnet — sein Schild bliebe
+// unsichtbar. Deshalb hier ausdruecklich ein Bild anfordern.
+watch(() => props.seats, () => scene?.requestRender(), { deep: true })
 watch(() => props.vision, (v: FogInput) => scene?.setVision(v), { deep: true })
 watch(() => props.vision.timeOfDay, (t: string) => scene?.setTimeOfDay(t))
 watch(() => props.visionLights, (l: VisionLight[]) => scene?.setVisionLights(l), { deep: true })
@@ -635,6 +669,30 @@ watch(
       <!-- Namen und HP ueber den Koepfen. Deckungsgleich ueber dem Canvas;
            die Positionen setzt positionLabels() pro Frame direkt. -->
       <div class="absolute inset-0 pointer-events-none overflow-hidden">
+        <!-- Mitspieler am Tisch. Zuerst im Markup, damit sie hinter den
+             Token-Beschriftungen liegen — die Karte ist wichtiger. -->
+        <div
+          v-for="s in seats"
+          :key="`seat-${s.id}`"
+          :ref="setSeatRef(s.id)"
+          class="absolute top-0 left-0 will-change-transform"
+          style="display: none"
+        >
+          <div
+            class="flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-serif whitespace-nowrap backdrop-blur-[1px]"
+            :class="s.isSelf
+              ? 'border-amber-300/70 bg-amber-950/75 text-amber-100'
+              : 'border-amber-200/25 bg-black/55 text-amber-50/85'"
+          >
+            <UIcon
+              :name="s.isDm ? 'i-lucide-crown' : 'i-lucide-user'"
+              class="size-3 shrink-0"
+              :class="s.isDm ? 'text-amber-300' : 'opacity-70'"
+            />
+            <span class="max-w-[9rem] truncate">{{ s.name }}</span>
+          </div>
+        </div>
+
         <div
           v-for="f in figures"
           :key="f.id"
