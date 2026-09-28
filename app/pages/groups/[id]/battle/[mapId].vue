@@ -469,10 +469,14 @@ const onImgLoad = (e: Event) => {
  * oeffnet, bekaeme also niemals Masse und damit auch keine Buehne. Es
  * funktionierte nur, weil man aus 2D herueberschaltet.
  *
- * Der Browser hat das Bild danach im Cache; das `<img>` der 2D-Ansicht laedt
- * es nicht noch einmal.
+ * NUR in der 3D-Ansicht und nur, solange die Masse fehlen. In 2D holt das
+ * `<img>` das Bild ohnehin; ein zweiter Abruf daneben kostet einen weiteren
+ * Durchlauf durch /maps/:id/image — und der macht drei Datenbank-Abfragen und
+ * streamt mehrere Megabyte aus dem Blob-Store. Beides umsonst, weil das Bild
+ * schon unterwegs ist.
  */
 const preloadMapSize = () => {
+  if (imgW.value && imgH.value) return
   const img = new Image()
   img.onload = () => {
     if (img.naturalWidth && img.naturalHeight) {
@@ -482,7 +486,6 @@ const preloadMapSize = () => {
   }
   img.src = `/api/groups/${groupId}/maps/${mapId}/image`
 }
-onMounted(preloadMapSize)
 
 // --- 3D-Buehne ---
 // Die Wahl gilt pro Nutzer (localStorage), nicht pro Karte: der DM zwingt
@@ -519,6 +522,10 @@ const onStage3dFallback = (reason: string) => {
   stage3d.value = false
   stage3dReason.value = reason
 }
+// Bildmasse nur holen, wenn die 3D-Ansicht sie braucht (siehe preloadMapSize).
+watch(stage3d, (on) => {
+  if (on) preloadMapSize()
+}, { immediate: true })
 // --- Zoom ---
 const ZOOM_MIN = 0.25
 const ZOOM_MAX = 3
